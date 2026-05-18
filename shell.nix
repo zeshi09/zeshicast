@@ -1,0 +1,22 @@
+{ pkgs ? import <nixpkgs> {} }:
+
+pkgs.mkShell {
+  packages = with pkgs; [
+    cargo
+    rustc
+    rustfmt
+    clippy
+    pkg-config
+    gtk4
+    gtk4-layer-shell
+    glib
+    graphene
+    gdk-pixbuf
+    pango
+    cairo
+    wayland
+    wayland-protocols
+    wl-clipboard
+    xclip
+  ];
+}

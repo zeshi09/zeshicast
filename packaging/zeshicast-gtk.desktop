@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Zeshicast
+Comment=Raycast-like launcher for Linux
+Exec=@BIN@/zeshicast-gtk
+Icon=system-search-symbolic
+Terminal=false
+Categories=Utility;
+StartupNotify=false

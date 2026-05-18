@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Zeshicast Daemon
+Comment=Keep Zeshicast launcher index warm
+Exec=@BIN@/zeshicast-gtk --daemon
+Icon=system-search-symbolic
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
