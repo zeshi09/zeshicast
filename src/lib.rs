@@ -126,6 +126,8 @@ impl Zeshicast {
         actions.extend(search_audio_actions(trimmed));
         actions.extend(search_network_actions(trimmed));
         actions.extend(search_niri_actions(trimmed));
+        actions.extend(search_hyprland_actions(trimmed));
+        actions.extend(search_sway_actions(trimmed));
         actions.extend(search_ai(trimmed, &self.preferences));
         actions.extend(search_translate(trimmed, &self.preferences));
 
@@ -401,6 +403,7 @@ impl Zeshicast {
                 keyword: e.keyword.clone(),
                 icon_name: e.icon_name.clone(),
                 tags: e.tags.clone(),
+                permissions: e.permissions.clone(),
             })
             .collect()
     }
@@ -455,6 +458,36 @@ impl Zeshicast {
     }
 }
 
+pub fn export_config(config_dir: &Path, dest: &Path) -> io::Result<()> {
+    let status = Command::new("tar")
+        .args(["-czf"])
+        .arg(dest)
+        .arg("-C")
+        .arg(config_dir.parent().unwrap_or(config_dir))
+        .arg(config_dir.file_name().unwrap_or_default())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, "tar export failed"))
+    }
+}
+
+pub fn import_config(src: &Path, config_dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(config_dir)?;
+    let status = Command::new("tar")
+        .args(["-xzf"])
+        .arg(src)
+        .arg("-C")
+        .arg(config_dir.parent().unwrap_or(config_dir))
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, "tar import failed"))
+    }
+}
+
 #[derive(Debug, Clone)]
 struct AppEntry {
     name: String,
@@ -493,6 +526,7 @@ struct CommandEntry {
     tags: Vec<String>,
     icon_name: String,
     description: String,
+    permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -577,6 +611,7 @@ pub struct CommandSummary {
     pub keyword: Option<String>,
     pub icon_name: String,
     pub tags: Vec<String>,
+    pub permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -967,6 +1002,7 @@ fn parse_command_entry(input: &str) -> Option<CommandEntry> {
     let preferences = parse_preferences_table(table.get("preferences"));
     let description = toml_optional_string(&table, "description").unwrap_or_default();
     let tags = toml_string_array(&table, "tags");
+    let permissions = toml_string_array(&table, "permissions");
 
     Some(CommandEntry {
         name,
@@ -981,6 +1017,7 @@ fn parse_command_entry(input: &str) -> Option<CommandEntry> {
         tags,
         icon_name,
         description,
+        permissions,
     })
 }
 
@@ -2210,6 +2247,225 @@ fn niri_action_entries() -> Vec<SystemActionEntry> {
     ]
 }
 
+fn search_hyprland_actions(query: &str) -> Vec<Action> {
+    let lower = query.trim().to_lowercase();
+    let matches_prefix = lower == "hypr"
+        || lower == "hyprland"
+        || lower.starts_with("hypr ")
+        || lower.starts_with("hyprland ");
+    if !matches_prefix {
+        return Vec::new();
+    }
+
+    let needle = if lower.starts_with("hyprland") {
+        lower
+            .strip_prefix("hyprland")
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    } else {
+        lower
+            .strip_prefix("hypr")
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+
+    hyprland_action_entries()
+        .into_iter()
+        .filter_map(|entry| {
+            let haystack = format!("{} {}", entry.title, entry.subtitle);
+            let score = if needle.is_empty() {
+                Some(0)
+            } else {
+                fuzzy_score(&haystack, &needle)
+            }?;
+            Some(
+                Action::new(
+                    "Hyprland",
+                    entry.title,
+                    ActionKind::Shell(ShellCommand::new(entry.command)),
+                    score + 260,
+                )
+                .with_subtitle(entry.subtitle)
+                .with_icon(entry.icon_name),
+            )
+        })
+        .collect()
+}
+
+fn hyprland_action_entries() -> Vec<SystemActionEntry> {
+    vec![
+        SystemActionEntry {
+            title: "Screenshot",
+            subtitle: "Interactive screenshot with region selection",
+            command: "grim -g \"$(slurp)\" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png",
+            icon_name: "camera-photo-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Fullscreen",
+            subtitle: "Toggle fullscreen for the focused window",
+            command: "hyprctl dispatch fullscreen 0",
+            icon_name: "view-fullscreen-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Float Toggle",
+            subtitle: "Toggle floating mode for the focused window",
+            command: "hyprctl dispatch togglefloating",
+            icon_name: "window-pop-out-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Close Window",
+            subtitle: "Close the active window",
+            command: "hyprctl dispatch killactive",
+            icon_name: "window-close-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Reload Config",
+            subtitle: "Reload Hyprland configuration",
+            command: "hyprctl reload",
+            icon_name: "view-refresh-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Next Workspace",
+            subtitle: "Focus the next workspace",
+            command: "hyprctl dispatch workspace e+1",
+            icon_name: "go-next-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Previous Workspace",
+            subtitle: "Focus the previous workspace",
+            command: "hyprctl dispatch workspace e-1",
+            icon_name: "go-previous-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Move to Next Workspace",
+            subtitle: "Move focused window to next workspace",
+            command: "hyprctl dispatch movetoworkspace e+1",
+            icon_name: "go-next-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Move to Previous Workspace",
+            subtitle: "Move focused window to previous workspace",
+            command: "hyprctl dispatch movetoworkspace e-1",
+            icon_name: "go-previous-symbolic",
+            hazardous: false,
+        },
+    ]
+}
+
+fn search_sway_actions(query: &str) -> Vec<Action> {
+    let lower = query.trim().to_lowercase();
+    let matches_prefix = lower == "sway" || lower.starts_with("sway ");
+    if !matches_prefix {
+        return Vec::new();
+    }
+
+    let needle = lower
+        .strip_prefix("sway")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    sway_action_entries()
+        .into_iter()
+        .filter_map(|entry| {
+            let haystack = format!("{} {}", entry.title, entry.subtitle);
+            let score = if needle.is_empty() {
+                Some(0)
+            } else {
+                fuzzy_score(&haystack, &needle)
+            }?;
+            Some(
+                Action::new(
+                    "Sway",
+                    entry.title,
+                    ActionKind::Shell(ShellCommand::new(entry.command)),
+                    score + 260,
+                )
+                .with_subtitle(entry.subtitle)
+                .with_icon(entry.icon_name),
+            )
+        })
+        .collect()
+}
+
+fn sway_action_entries() -> Vec<SystemActionEntry> {
+    vec![
+        SystemActionEntry {
+            title: "Screenshot",
+            subtitle: "Capture the entire screen",
+            command: "grim ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png",
+            icon_name: "camera-photo-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Fullscreen",
+            subtitle: "Toggle fullscreen for the focused window",
+            command: "swaymsg fullscreen toggle",
+            icon_name: "view-fullscreen-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Float Toggle",
+            subtitle: "Toggle floating mode for the focused window",
+            command: "swaymsg floating toggle",
+            icon_name: "window-pop-out-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Close Window",
+            subtitle: "Close the focused window",
+            command: "swaymsg kill",
+            icon_name: "window-close-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Reload Config",
+            subtitle: "Reload sway configuration",
+            command: "swaymsg reload",
+            icon_name: "view-refresh-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Next Workspace",
+            subtitle: "Focus the next workspace",
+            command: "swaymsg workspace next",
+            icon_name: "go-next-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Previous Workspace",
+            subtitle: "Focus the previous workspace",
+            command: "swaymsg workspace prev",
+            icon_name: "go-previous-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Move to Next Workspace",
+            subtitle: "Move focused window to next workspace",
+            command: "swaymsg move container to workspace next",
+            icon_name: "go-next-symbolic",
+            hazardous: false,
+        },
+        SystemActionEntry {
+            title: "Move to Previous Workspace",
+            subtitle: "Move focused window to previous workspace",
+            command: "swaymsg move container to workspace prev",
+            icon_name: "go-previous-symbolic",
+            hazardous: false,
+        },
+    ]
+}
+
 fn search_processes(query: &str) -> Vec<Action> {
     if query.trim().is_empty() {
         return Vec::new();
@@ -3334,6 +3590,41 @@ DEPLOY_TOKEN = "{{pref:token}}"
     #[test]
     fn niri_actions_show_all_on_bare_niri() {
         let results = search_niri_actions("niri");
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn hyprland_actions_only_on_explicit_prefix() {
+        assert!(search_hyprland_actions("screenshot").is_empty());
+        assert!(search_hyprland_actions("workspace").is_empty());
+        let with_hypr = search_hyprland_actions("hypr screenshot");
+        assert!(!with_hypr.is_empty());
+        assert!(with_hypr.iter().all(|a| a.category == "Hyprland"));
+        let with_hyprland = search_hyprland_actions("hyprland fullscreen");
+        assert!(!with_hyprland.is_empty());
+        assert!(with_hyprland.iter().all(|a| a.category == "Hyprland"));
+    }
+
+    #[test]
+    fn hyprland_actions_show_all_on_bare_prefix() {
+        let results_hypr = search_hyprland_actions("hypr");
+        assert!(!results_hypr.is_empty());
+        let results_hyprland = search_hyprland_actions("hyprland");
+        assert!(!results_hyprland.is_empty());
+    }
+
+    #[test]
+    fn sway_actions_only_on_explicit_prefix() {
+        assert!(search_sway_actions("screenshot").is_empty());
+        assert!(search_sway_actions("workspace").is_empty());
+        let with_prefix = search_sway_actions("sway screenshot");
+        assert!(!with_prefix.is_empty());
+        assert!(with_prefix.iter().all(|a| a.category == "Sway"));
+    }
+
+    #[test]
+    fn sway_actions_show_all_on_bare_sway() {
+        let results = search_sway_actions("sway");
         assert!(!results.is_empty());
     }
 

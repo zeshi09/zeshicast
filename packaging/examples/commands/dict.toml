@@ -1,0 +1,9 @@
+name = "Dictionary"
+mode = "shell"
+keyword = "dict"
+argument_hint = "<word>"
+command = "xdg-open 'https://www.merriam-webster.com/dictionary/{{query}}'"
+description = "Look up a word in Merriam-Webster"
+tags = ["web", "words"]
+icon = "accessories-dictionary-symbolic"
+permissions = ["shell"]

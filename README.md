@@ -173,6 +173,7 @@ workspace = "~/Code"
 [env]
 DEPLOY_ENV = "{{arg:env}}"
 DEPLOY_TOKEN = "{{pref:deploy_token}}"
+  permissions = ["shell"]   # optional: "shell", "network", "filesystem"
 ```
 
 Only `name` and `command` are required. Optional fields are `category`,

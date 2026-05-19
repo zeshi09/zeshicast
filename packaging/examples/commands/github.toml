@@ -1,0 +1,9 @@
+name = "Search GitHub"
+mode = "shell"
+keyword = "gh"
+argument_hint = "<query>"
+command = "xdg-open 'https://github.com/search?q={{query}}'"
+description = "Open GitHub search in browser"
+tags = ["dev", "search", "github"]
+icon = "emblem-web-symbolic"
+permissions = ["shell"]

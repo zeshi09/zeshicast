@@ -1,16 +1,47 @@
 use std::env;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use zeshicast::{Action, SecondaryActionKind, Zeshicast};
 
 fn main() {
-    let mut app = Zeshicast::load();
     let args: Vec<String> = env::args().skip(1).collect();
 
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
         print_help();
         return;
     }
+
+    if let Some(pos) = args.iter().position(|a| a == "--export") {
+        let dest = args
+            .get(pos + 1)
+            .filter(|a| !a.starts_with('-'))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("zeshicast-config.tar.gz"));
+        let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
+        let config_dir = home.join(".config/zeshicast");
+        match zeshicast::export_config(&config_dir, &dest) {
+            Ok(()) => println!("exported to {}", dest.display()),
+            Err(err) => eprintln!("export failed: {err}"),
+        }
+        return;
+    }
+
+    if let Some(pos) = args.iter().position(|a| a == "--import") {
+        let Some(src) = args.get(pos + 1).map(PathBuf::from) else {
+            eprintln!("usage: zeshicast --import <file.tar.gz>");
+            return;
+        };
+        let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
+        let config_dir = home.join(".config/zeshicast");
+        match zeshicast::import_config(&src, &config_dir) {
+            Ok(()) => println!("imported from {}", src.display()),
+            Err(err) => eprintln!("import failed: {err}"),
+        }
+        return;
+    }
+
+    let mut app = Zeshicast::load();
 
     if args.is_empty() {
         run_repl(&mut app);
@@ -149,6 +180,8 @@ fn print_help() {
 Usage:
   zeshicast                 Start interactive command palette
   zeshicast <query>         Print matching actions
+  zeshicast --export [file] Export config to tar.gz (default: zeshicast-config.tar.gz)
+  zeshicast --import <file> Import config from tar.gz
 
 Queries:
   firefox                   Search installed .desktop applications (reads XDG_DATA_DIRS)
@@ -160,6 +193,8 @@ Queries:
   audio vol                 Audio actions: volume up/down, mute, mic mute, brightness
   net wifi                  Network actions: toggle wifi, network settings
   niri screenshot           Niri compositor actions: screenshot, workspaces, windows
+  hypr fullscreen           Hyprland compositor actions: screenshot, workspaces, windows
+  sway reload               Sway compositor actions: screenshot, workspaces, windows
   ai explain monads         Ask an AI (LiteLLM/OpenAI-compatible); response copied to clipboard
   trans hello in ru         Translate text via LibreTranslate; result copied to clipboard
   translate hello in de     Same as trans, with explicit language suffix
@@ -201,6 +236,7 @@ Command TOML:
   workspace = \"~/Code\"
   [env]
   DEPLOY_TOKEN = \"{{{{pref:deploy_token}}}}\"
+  permissions = [\"shell\"]   # optional: \"shell\", \"network\", \"filesystem\"
 "
     );
 }

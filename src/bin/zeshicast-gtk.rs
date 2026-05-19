@@ -568,7 +568,7 @@ fn show_action_panel(
         .title("Actions")
         .transient_for(parent)
         .default_width(420)
-        .default_height(280)
+        .default_height(340)
         .resizable(false)
         .decorated(false)
         .build();
@@ -673,7 +673,24 @@ fn show_action_panel(
     }
 
     root.append(&header);
+    if !action.subtitle.is_empty() {
+        let sub = Label::new(Some(&action.subtitle));
+        sub.add_css_class("result-subtitle");
+        sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        sub.set_xalign(0.0);
+        root.append(&sub);
+    }
+    let meta_row = GtkBox::new(Orientation::Horizontal, 6);
+    let cat_label = Label::new(Some(&action.category));
+    cat_label.add_css_class("result-category");
+    meta_row.append(&cat_label);
+    root.append(&meta_row);
     root.append(&action_list);
+    let hints = Label::new(Some("\u{21b5} Run   Esc Close"));
+    hints.add_css_class("result-subtitle");
+    hints.set_xalign(1.0);
+    hints.set_margin_top(4);
+    root.append(&hints);
     panel.set_child(Some(&root));
     panel.present();
 }

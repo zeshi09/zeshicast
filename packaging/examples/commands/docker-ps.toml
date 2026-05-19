@@ -1,0 +1,9 @@
+name = "Docker Containers"
+mode = "json"
+keyword = "docker"
+argument_hint = "<filter>"
+command = "docker ps --format '{{json .}}' | jq -s '[.[] | {title: .Names, subtitle: (.Image + \" \" + .Status), action: {type: \"shell\", value: (\"docker stop \" + .Names)}}]'"
+description = "List running containers; Enter stops selected"
+tags = ["dev", "docker", "containers"]
+icon = "application-x-executable-symbolic"
+permissions = ["shell"]
