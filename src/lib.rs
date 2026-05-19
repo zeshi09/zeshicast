@@ -24,6 +24,7 @@ pub struct Zeshicast {
     aliases: HashMap<String, String>,
     pins: HashSet<String>,
     recent: Vec<String>,
+    frequencies: HashMap<String, u32>,
     files: Vec<FileEntry>,
     config_dir: PathBuf,
 }
@@ -48,6 +49,7 @@ impl Zeshicast {
                 .into_iter()
                 .map(|line| line.to_lowercase())
                 .collect(),
+            frequencies: load_frequencies(&config_dir.join("frequencies.txt")),
             files: load_file_index(&home),
             config_dir,
         }
@@ -128,6 +130,7 @@ impl Zeshicast {
         actions.extend(search_niri_actions(trimmed));
         actions.extend(search_hyprland_actions(trimmed));
         actions.extend(search_sway_actions(trimmed));
+        actions.extend(search_windows(trimmed));
         actions.extend(search_ai(trimmed, &self.preferences));
         actions.extend(search_translate(trimmed, &self.preferences));
 
@@ -411,9 +414,11 @@ impl Zeshicast {
     fn record_recent(&mut self, action: &Action) -> io::Result<()> {
         let identity = action.identity().to_lowercase();
         self.recent.retain(|entry| entry != &identity);
-        self.recent.insert(0, identity);
+        self.recent.insert(0, identity.clone());
         self.recent.truncate(50);
-        write_lines(&self.config_dir.join("recent.txt"), &self.recent)
+        write_lines(&self.config_dir.join("recent.txt"), &self.recent)?;
+        *self.frequencies.entry(identity).or_insert(0) += 1;
+        write_frequencies(&self.config_dir.join("frequencies.txt"), &self.frequencies)
     }
 
     fn write_pins(&self) -> io::Result<()> {
@@ -441,6 +446,12 @@ impl Zeshicast {
             } else {
                 60
             };
+        }
+
+        if let Some(&count) = self.frequencies.get(&identity_lower) {
+            // logarithmic frequency bonus: 50 uses → ~60pts, capped at 100
+            let freq_score = ((count as f32).ln() * 15.0).min(100.0) as i32;
+            score += if query.is_empty() { freq_score } else { freq_score / 2 };
         }
 
         for (alias, target) in &self.aliases {
@@ -492,7 +503,9 @@ pub fn import_config(src: &Path, config_dir: &Path) -> io::Result<()> {
 struct AppEntry {
     name: String,
     exec: String,
+    exec_name: String,
     comment: Option<String>,
+    icon_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -850,6 +863,17 @@ fn load_apps(home: &Path) -> Vec<AppEntry> {
         dirs.push(base.join("applications"));
     }
 
+    // Flatpak user apps
+    let flatpak_user = home.join(".local/share/flatpak/exports/share/applications");
+    if flatpak_user.exists() {
+        dirs.push(flatpak_user);
+    }
+    // Flatpak system apps
+    let flatpak_system = PathBuf::from("/var/lib/flatpak/exports/share/applications");
+    if flatpak_system.exists() {
+        dirs.push(flatpak_system);
+    }
+
     let mut seen = HashSet::new();
     let mut apps = Vec::new();
 
@@ -880,6 +904,7 @@ fn parse_desktop_file(path: &Path) -> Option<AppEntry> {
     let mut name = None;
     let mut exec = None;
     let mut comment = None;
+    let mut icon = None;
     let mut no_display = false;
     let mut hidden = false;
 
@@ -893,6 +918,8 @@ fn parse_desktop_file(path: &Path) -> Option<AppEntry> {
             exec = Some(clean_desktop_exec(value));
         } else if let Some(value) = line.strip_prefix("Comment=") {
             comment = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("Icon=") {
+            icon = Some(value.to_string());
         } else if line == "NoDisplay=true" {
             no_display = true;
         } else if line == "Hidden=true" {
@@ -904,10 +931,23 @@ fn parse_desktop_file(path: &Path) -> Option<AppEntry> {
         return None;
     }
 
+    let icon_name = icon.unwrap_or_else(|| "application-x-executable-symbolic".to_string());
+    let exec_name = exec.as_deref()
+        .and_then(|e| e.split_whitespace().next())
+        .map(|bin| {
+            Path::new(bin).file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(bin)
+                .to_string()
+        })
+        .unwrap_or_default();
+
     Some(AppEntry {
         name: name?,
         exec: exec?,
+        exec_name,
         comment,
+        icon_name,
     })
 }
 
@@ -921,9 +961,17 @@ fn clean_desktop_exec(exec: &str) -> String {
 fn search_apps(apps: &[AppEntry], query: &str) -> Vec<Action> {
     apps.iter()
         .filter_map(|app| {
-            let haystack = match &app.comment {
-                Some(comment) => format!("{} {comment}", app.name),
-                None => app.name.clone(),
+            let haystack = {
+                let mut h = app.name.clone();
+                if !app.exec_name.is_empty() && app.exec_name != app.name {
+                    h.push(' ');
+                    h.push_str(&app.exec_name);
+                }
+                if let Some(c) = &app.comment {
+                    h.push(' ');
+                    h.push_str(c);
+                }
+                h
             };
             let score = fuzzy_score(&haystack, query)?;
             Some(app_action(app, score + 100))
@@ -944,7 +992,7 @@ fn app_action(app: &AppEntry, score: i32) -> Action {
             .filter(|comment| !comment.trim().is_empty())
             .unwrap_or(&app.exec),
     )
-    .with_icon("application-x-executable-symbolic")
+    .with_icon(&app.icon_name)
 }
 
 fn load_named_values(path: &Path) -> Vec<NamedValue> {
@@ -1172,6 +1220,24 @@ fn load_preferences(path: &Path) -> HashMap<String, String> {
         .iter()
         .filter_map(|(key, value)| toml_value_string(value).map(|value| (key.clone(), value)))
         .collect()
+}
+
+fn load_frequencies(path: &Path) -> HashMap<String, u32> {
+    load_lines(path)
+        .into_iter()
+        .filter_map(|line| {
+            let (identity, count) = line.rsplit_once(':')?;
+            let count = count.parse::<u32>().ok()?;
+            Some((identity.to_string(), count))
+        })
+        .collect()
+}
+
+fn write_frequencies(path: &Path, frequencies: &HashMap<String, u32>) -> io::Result<()> {
+    let mut entries: Vec<_> = frequencies.iter().collect();
+    entries.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+    let lines: Vec<String> = entries.iter().map(|(k, v)| format!("{k}:{v}")).collect();
+    write_lines(path, &lines)
 }
 
 fn parse_preferences_table(value: Option<&toml::Value>) -> HashMap<String, String> {
@@ -2466,6 +2532,180 @@ fn sway_action_entries() -> Vec<SystemActionEntry> {
     ]
 }
 
+fn search_windows(query: &str) -> Vec<Action> {
+    let lower = query.trim().to_lowercase();
+    let (_has_prefix, needle) = if let Some(rest) = lower
+        .strip_prefix("windows ")
+        .or_else(|| lower.strip_prefix("window "))
+        .or_else(|| lower.strip_prefix("win "))
+    {
+        (true, rest.trim().to_string())
+    } else if lower == "win" || lower == "window" || lower == "windows" {
+        (true, String::new())
+    } else {
+        return Vec::new();
+    };
+
+    // Try niri
+    if let Ok(output) = Command::new("niri").args(["msg", "windows"]).output() {
+        if output.status.success() {
+            if let Ok(text) = std::str::from_utf8(&output.stdout) {
+                if let Ok(windows) = serde_json::from_str::<serde_json::Value>(text) {
+                    if let Some(arr) = windows.as_array() {
+                        if !arr.is_empty() {
+                            return niri_window_actions(arr, &needle);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Try Hyprland
+    if let Ok(output) = Command::new("hyprctl").args(["clients", "-j"]).output() {
+        if output.status.success() {
+            if let Ok(text) = std::str::from_utf8(&output.stdout) {
+                if let Ok(windows) = serde_json::from_str::<serde_json::Value>(text) {
+                    if let Some(arr) = windows.as_array() {
+                        if !arr.is_empty() {
+                            return hyprland_window_actions(arr, &needle);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Try Sway
+    if let Ok(output) = Command::new("swaymsg").args(["-t", "get_tree"]).output() {
+        if output.status.success() {
+            if let Ok(text) = std::str::from_utf8(&output.stdout) {
+                if let Ok(tree) = serde_json::from_str::<serde_json::Value>(text) {
+                    let mut nodes = Vec::new();
+                    collect_sway_windows(&tree, &mut nodes);
+                    if !nodes.is_empty() {
+                        return sway_window_actions(&nodes, &needle);
+                    }
+                }
+            }
+        }
+    }
+
+    Vec::new()
+}
+
+fn niri_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Action> {
+    windows
+        .iter()
+        .filter_map(|w| {
+            let id = w.get("id")?.as_u64()?;
+            let title = w.get("title")?.as_str().unwrap_or("(no title)");
+            let app_id = w.get("app_id")?.as_str().unwrap_or("");
+            let haystack = format!("{title} {app_id}");
+            let score = if needle.is_empty() {
+                Some(0)
+            } else {
+                fuzzy_score(&haystack, needle)
+            }?;
+            Some(
+                Action::new(
+                    "Window",
+                    title,
+                    ActionKind::Shell(ShellCommand::new(format!(
+                        "niri msg action focus-window --id {id}"
+                    ))),
+                    score + 280,
+                )
+                .with_subtitle(app_id)
+                .with_icon("window-symbolic"),
+            )
+        })
+        .collect()
+}
+
+fn hyprland_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Action> {
+    windows
+        .iter()
+        .filter_map(|w| {
+            let addr = w.get("address")?.as_str()?;
+            let title = w.get("title")?.as_str().unwrap_or("(no title)");
+            let class = w.get("class")?.as_str().unwrap_or("");
+            let haystack = format!("{title} {class}");
+            let score = if needle.is_empty() {
+                Some(0)
+            } else {
+                fuzzy_score(&haystack, needle)
+            }?;
+            Some(
+                Action::new(
+                    "Window",
+                    title,
+                    ActionKind::Shell(ShellCommand::new(format!(
+                        "hyprctl dispatch focuswindow address:{addr}"
+                    ))),
+                    score + 280,
+                )
+                .with_subtitle(class)
+                .with_icon("window-symbolic"),
+            )
+        })
+        .collect()
+}
+
+fn collect_sway_windows<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json::Value>) {
+    if node.get("type").and_then(|t| t.as_str()) == Some("con") {
+        if node
+            .get("name")
+            .and_then(|n| n.as_str())
+            .map_or(false, |n| !n.is_empty())
+        {
+            out.push(node);
+        }
+    }
+    if let Some(nodes) = node.get("nodes").and_then(|n| n.as_array()) {
+        for child in nodes {
+            collect_sway_windows(child, out);
+        }
+    }
+    if let Some(nodes) = node.get("floating_nodes").and_then(|n| n.as_array()) {
+        for child in nodes {
+            collect_sway_windows(child, out);
+        }
+    }
+}
+
+fn sway_window_actions(windows: &[&serde_json::Value], needle: &str) -> Vec<Action> {
+    windows
+        .iter()
+        .filter_map(|w| {
+            let id = w.get("id")?.as_u64()?;
+            let title = w.get("name")?.as_str().unwrap_or("(no title)");
+            let app_id = w
+                .get("app_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let haystack = format!("{title} {app_id}");
+            let score = if needle.is_empty() {
+                Some(0)
+            } else {
+                fuzzy_score(&haystack, needle)
+            }?;
+            Some(
+                Action::new(
+                    "Window",
+                    title,
+                    ActionKind::Shell(ShellCommand::new(format!(
+                        "swaymsg '[con_id={id}] focus'"
+                    ))),
+                    score + 280,
+                )
+                .with_subtitle(app_id)
+                .with_icon("window-symbolic"),
+            )
+        })
+        .collect()
+}
+
 fn search_processes(query: &str) -> Vec<Action> {
     if query.trim().is_empty() {
         return Vec::new();
@@ -3186,6 +3426,7 @@ mod tests {
             aliases: HashMap::new(),
             pins: HashSet::new(),
             recent: Vec::new(),
+            frequencies: HashMap::new(),
             files: Vec::new(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
@@ -3215,6 +3456,7 @@ mod tests {
             aliases: HashMap::new(),
             pins: HashSet::new(),
             recent: Vec::new(),
+            frequencies: HashMap::new(),
             files: Vec::new(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };

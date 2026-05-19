@@ -38,6 +38,7 @@ niri screenshot           Interactive screenshot (region)
 niri workspace            Focus next/previous workspace, move window
 hypr fullscreen           Hyprland: fullscreen, float, close, workspaces
 sway reload               Sway: reload, fullscreen, float, close, workspaces
+win firefox               Focus a running window (niri/Hyprland/sway)
 ai explain monads         Ask AI (Ollama/OpenAI-compatible) — response copied to clipboard
 trans hello in ru         Translate via LibreTranslate — result copied to clipboard
 translate hi in de        Same as trans, explicit prefix
@@ -50,6 +51,11 @@ shown for their respective prefixes.
 
 App detection reads `$XDG_DATA_HOME` and `$XDG_DATA_DIRS` so NixOS paths like
 `/run/current-system/sw/share/applications` are discovered automatically.
+Flatpak apps in `~/.local/share/flatpak/exports/share/applications` and
+`/var/lib/flatpak/exports/share/applications` are also included.
+App icons are sourced from the `Icon=` field in each `.desktop` file.
+The binary stem (e.g. `zen-beta`) is added to the search haystack so typing
+the executable name finds the app.
 
 ## GTK shortcuts
 
@@ -309,6 +315,7 @@ Network actions    Wi-Fi toggle, network settings
 Niri actions       screenshot, workspaces, window control (niri msg)
 Hyprland actions   screenshot, fullscreen, float, close, workspaces (hyprctl)
 Sway actions       screenshot, fullscreen, float, close, workspaces (swaymsg)
+Window switching   win <query> — focus open windows (niri/Hyprland/sway, live query)
 AI chat            OpenAI-compatible endpoint (default: Ollama gemma4:e4b)
 Translation        LibreTranslate with language suffix (trans hello in ru)
 GTK4 launcher      Layer-shell overlay (Wayland), daemon mode, clipboard monitor
