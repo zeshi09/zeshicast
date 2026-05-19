@@ -15,45 +15,67 @@ nix develop -f shell.nix --command cargo run --features gui --bin zeshicast-gtk
 
 Results carry Raycast-style metadata: title, subtitle, category, score and icon.
 The GTK launcher renders this as a compact command list with action buttons.
-Secondary actions are provided by the core: run, copy value, open containing
-folder, pin, unpin, and clipboard cleanup actions.
+Secondary actions (copy value, open folder, pin, unpin, set alias) are available
+in the action panel.
 
-Built-in Linux actions:
+## Built-in queries
 
 ```text
-system lock       lock screen
-system suspend    suspend machine
-system settings   open desktop settings
-system restart    reboot machine
-system power      power off machine
-proc firefox      search processes and build kill actions
-ai explain monads ask AI (LiteLLM/OpenAI-compatible) — response copied to clipboard
-trans hello in ru translate via LibreTranslate — result copied to clipboard
-translate hi in de same as trans, explicit prefix
+firefox                   Search installed .desktop apps (reads XDG_DATA_DIRS)
+file invoice              Search files under $HOME, open via xdg-open
+calc (12 + 8) / 5         Evaluate an expression
+shell systemctl status    Run a shell command
+system lock               Lock screen
+system suspend            Suspend machine
+system settings           Open desktop settings
+system restart            Reboot
+system power              Power off
+proc firefox              Search processes and build kill actions
+audio vol                 Volume up/down, mute, mic mute
+audio brightness          Brightness up/down
+net wifi                  Toggle Wi-Fi, open network settings
+niri screenshot           Interactive screenshot (region)
+niri workspace            Focus next/previous workspace, move window
+hypr fullscreen           Hyprland: fullscreen, float, close, workspaces
+sway reload               Sway: reload, fullscreen, float, close, workspaces
+ai explain monads         Ask AI (Ollama/OpenAI-compatible) — response copied to clipboard
+trans hello in ru         Translate via LibreTranslate — result copied to clipboard
+translate hi in de        Same as trans, explicit prefix
+clip password             Search clipboard history
 ```
 
-Restart and power-off actions are only returned for explicit `system ...`
-queries. AI and translate results are only shown for their respective prefixes.
+`system restart` and `system power` are only returned for explicit `system ...`
+queries. `ai`, `trans`/`translate`, `niri`, `hypr`, and `sway` results are only
+shown for their respective prefixes.
 
 App detection reads `$XDG_DATA_HOME` and `$XDG_DATA_DIRS` so NixOS paths like
-`/run/current-system/sw/share/applications` and per-user profile directories
-are discovered automatically.
+`/run/current-system/sw/share/applications` are discovered automatically.
 
-GTK shortcuts:
+## GTK shortcuts
 
 ```text
-Enter       run selected result (opens form panel for commands with missing arguments)
-Ctrl+Enter  copy selected value
-Ctrl+K      open action panel (pin, alias, secondary actions)
-Ctrl+B      open extension browser (list all custom commands)
-Esc         hide or close
+Enter        Run selected result (opens form panel for commands with missing args)
+Ctrl+Enter   Copy selected value
+Ctrl+K       Action panel — pin, unpin, set alias, secondary actions
+Ctrl+B       Extension browser — list all custom commands
+Ctrl+,       Preferences editor — AI endpoint, model, translate settings
+Esc          Hide (daemon mode) or quit
+Up/Down      Move selection
+```
+
+## CLI usage
+
+```bash
+zeshicast                       Start interactive REPL
+zeshicast firefox               Print matching actions and exit
+zeshicast --export [file]       Export config to tar.gz (default: zeshicast-config.tar.gz)
+zeshicast --import file.tar.gz  Import config from tar.gz
 ```
 
 ## Daemon mode
 
-Start a hidden resident GTK process. It keeps the launcher index warm, so later
-invocations show the window quickly. It also records text clipboard changes into
-the searchable clipboard history.
+A hidden resident GTK process keeps the launcher index warm for instant display
+and records text clipboard changes into the searchable clipboard history.
 
 ```bash
 nix develop -f shell.nix --command cargo run --features gui,layer-shell --bin zeshicast-gtk -- --daemon
@@ -67,11 +89,9 @@ nix develop -f shell.nix --command cargo run --features gui,layer-shell --bin ze
 scripts/install-user.sh --enable-daemon --start-daemon
 ```
 
-This installs binaries to `~/.local/bin`, desktop entries to
+Installs binaries to `~/.local/bin`, desktop entries to
 `~/.local/share/applications`, and a systemd user service to
 `~/.config/systemd/user/zeshicast-gtk.service`.
-
-Useful commands:
 
 ```bash
 systemctl --user status zeshicast-gtk.service
@@ -88,20 +108,20 @@ Bind this command in your compositor:
 ~/.local/bin/zeshicast-gtk
 ```
 
-Examples:
-
 ```ini
-# sway / i3-style config
+# Niri
+spawn-at-startup "~/.local/bin/zeshicast-gtk" "--daemon"
+# bind in config.kdl: key "Super+Space" { spawn "~/.local/bin/zeshicast-gtk"; }
+
+# Hyprland
+bind = SUPER, SPACE, exec, ~/.local/bin/zeshicast-gtk
+
+# sway / i3
 bindsym $mod+space exec ~/.local/bin/zeshicast-gtk
 ```
 
-```ini
-# Hyprland
-bind = SUPER, SPACE, exec, ~/.local/bin/zeshicast-gtk
-```
-
-For GNOME/KDE, add the same command through the desktop environment keyboard
-shortcuts settings.
+For GNOME/KDE, add the command through the desktop environment keyboard shortcuts
+settings.
 
 ## Config
 
@@ -116,40 +136,40 @@ shortcuts settings.
 ~/.config/zeshicast/recent.txt       updated automatically
 ```
 
-Pins can be edited from the CLI action menu or the GTK action bar.
+Pins and aliases can be set from the CLI action menu or the GTK action panel.
 
-Supported placeholders in quicklinks, snippets and commands:
+### Placeholders
 
 ```text
-{{query}}       current search query
-{{arg:name}}    typed command argument
-{{pref:name}}   extension preference value
-{{clipboard}}   latest clipboard history entry
-{{date}}        local date as YYYY-MM-DD
-{{time}}        local time as HH:MM:SS
-{{datetime}}    local date and time
-{{date:%d.%m.%Y}} custom chrono/strftime format
-{{time:%H:%M}}  custom chrono/strftime format
-{{calc:2 + 2}}  calculator result
+{{query}}           current search query
+{{arg:name}}        typed command argument
+{{pref:name}}       extension preference value
+{{clipboard}}       latest clipboard history entry
+{{date}}            local date as YYYY-MM-DD
+{{time}}            local time as HH:MM:SS
+{{datetime}}        local date and time
+{{date:%d.%m.%Y}}   custom chrono/strftime format
+{{time:%H:%M}}      custom time format
+{{calc:2 + 2}}      calculator result
 ```
 
-Examples:
+### Quicklinks and snippets
 
 ```text
 # ~/.config/zeshicast/quicklinks.txt
-Google | web,search = https://www.google.com/search?q={{query}}
-GitHub | dev,search = https://github.com/search?q={{query}}
+Google    | web,search = https://www.google.com/search?q={{query}}
+GitHub    | dev,search = https://github.com/search?q={{query}}
 
 # ~/.config/zeshicast/snippets.txt
-Today | date = {{date}}
-Meeting | work,date = {{date:%d.%m.%Y}} {{time:%H:%M}}
-Debug | dev = Query: {{query}}, Clipboard: {{clipboard}}
-VAT | finance = Total: {{calc:100 * 1.2}}
+Today     | date      = {{date}}
+Meeting   | work,date = {{date:%d.%m.%Y}} {{time:%H:%M}}
+Debug     | dev       = Query: {{query}}, Clipboard: {{clipboard}}
+VAT       | finance   = Total: {{calc:100 * 1.2}}
 ```
 
 Tags are optional. Search matches both names and tags.
 
-Custom commands are one TOML file per command:
+### Custom commands (shell mode)
 
 ```toml
 # ~/.config/zeshicast/commands/deploy.toml
@@ -161,35 +181,37 @@ command = "cd '{{pref:workspace}}' && deploy --env {{arg:env}} --service '{{arg:
 description = "Deploy a service"
 tags = ["work", "devops"]
 icon = "utilities-terminal-symbolic"
+permissions = ["shell"]
 arguments = [
-  { name = "env", type = "enum", required = true, options = ["dev", "prod"] },
+  { name = "env",     type = "enum", required = true, options = ["dev", "prod"] },
   { name = "service", type = "text", required = true },
-  { name = "force", type = "bool", default = "false" }
+  { name = "force",   type = "bool", default = "false" }
 ]
 
 [preferences]
 workspace = "~/Code"
 
 [env]
-DEPLOY_ENV = "{{arg:env}}"
+DEPLOY_ENV   = "{{arg:env}}"
 DEPLOY_TOKEN = "{{pref:deploy_token}}"
-  permissions = ["shell"]   # optional: "shell", "network", "filesystem"
 ```
 
-Only `name` and `command` are required. Optional fields are `category`,
-`keyword`, `argument_hint`, `arguments`, `preferences`, `env`, `description`,
-`tags` and `icon`. A keyword turns the command into a direct command mode:
-searching `deploy prod api worker` runs the command with `{{query}}` set to
-`prod api worker`, `{{arg:env}}` set to `prod`, and `{{arg:service}}` set to
-`api worker`. Supported argument types are `text`, `number`, `path`, `bool` and
-`enum`. Commands with missing required arguments are shown as disabled warning
-actions until the input is complete. Commands run through `sh -c`, so keep files
-under your own config directory and treat them like executable scripts.
+Only `name` and `command` are required. Optional fields: `category`, `keyword`,
+`argument_hint`, `arguments`, `preferences`, `env`, `description`, `tags`,
+`icon`, `permissions`.
 
-Command `[env]` values are expanded with the same placeholders as `command` and
-are injected only into that command process.
+A keyword enables direct command mode: `deploy prod api worker` sets `{{query}}`
+to `prod api worker`, `{{arg:env}}` to `prod`, and `{{arg:service}}` to
+`api worker`. Supported argument types: `text`, `number`, `path`, `bool`, `enum`.
+Commands with missing required arguments are shown as disabled warning actions
+until the input is complete. Commands run through `sh -c`.
 
-JSON commands can return dynamic result lists:
+`[env]` values are expanded with the same placeholders as `command` and injected
+only into that command process.
+
+`permissions` is informational: `"shell"`, `"network"`, `"filesystem"`.
+
+### Custom commands (JSON mode)
 
 ```toml
 # ~/.config/zeshicast/commands/search-docs.toml
@@ -197,13 +219,13 @@ name = "Search Docs"
 mode = "json"
 keyword = "docs"
 argument_hint = "<query>"
-command = "zeshicast-doc-search '{{query}}'"
+command = "my-doc-search '{{query}}'"
 arguments = [
   { name = "query", type = "text", required = true }
 ]
 ```
 
-The command stdout must be either an array or an object with `results`:
+The command stdout must be a JSON array (or `{"results": [...]}`) of objects:
 
 ```json
 [
@@ -220,29 +242,43 @@ The command stdout must be either an array or an object with `results`:
 ]
 ```
 
-Supported JSON action types are `open_url`, `open_path`, `copy`, `shell` and
-`none`. JSON commands execute only on direct keyword invocation, for example
-`docs gtk listbox`.
+Supported action types: `open_url`, `open_path`, `copy`, `shell`, `none`.
+JSON commands execute only on direct keyword invocation, e.g. `docs gtk listbox`.
 
-Global preferences live in `~/.config/zeshicast/preferences.toml`:
+### Example extension pack
 
-```toml
-workspace = "/home/me/Code"
-default_env = "dev"
-dry_run = true
+Ready-to-copy examples are in `packaging/examples/commands/`:
+
+```text
+github.toml     gh <query>       — open GitHub search in browser
+weather.toml    weather <city>   — open wttr.in forecast
+dict.toml       dict <word>      — open Merriam-Webster
+docker-ps.toml  docker <filter>  — list running containers (JSON mode, Enter stops)
+git-log.toml    git-log <path>   — show recent commits in pref:workspace
 ```
 
-The global file overrides defaults from each command's `[preferences]` table.
-Preferences currently support scalar TOML values: string, integer, float and
-boolean.
+Copy any file to `~/.config/zeshicast/commands/` to enable it.
 
-AI and translate preferences:
+### Global preferences
 
 ```toml
 # ~/.config/zeshicast/preferences.toml
-ai_endpoint    = "http://localhost:4000/v1"   # LiteLLM or any OpenAI-compatible endpoint
-ai_model       = "gpt-4"
-ai_api_key     = ""
+workspace  = "/home/me/Code"
+default_env = "dev"
+```
+
+The global file overrides per-command `[preferences]` defaults. Supported TOML
+scalar types: string, integer, float, boolean.
+
+Edit via `Ctrl+,` in the GTK launcher or directly in the file.
+
+### AI and translate preferences
+
+```toml
+# ~/.config/zeshicast/preferences.toml
+ai_endpoint        = "http://localhost:11434/v1"   # Ollama or any OpenAI-compatible endpoint
+ai_model           = "gemma4:e4b"
+ai_api_key         = ""
 translate_endpoint = "https://libretranslate.com"
 translate_api_key  = ""
 translate_target   = "en"
@@ -250,70 +286,37 @@ translate_target   = "en"
 
 ## Nix package
 
-Build and run with Nix flakes:
-
 ```bash
 nix build
 ./result/bin/zeshicast-gtk
 ```
 
-## Raycast Platform Plan
-
-Implemented foundation:
+## Implemented features
 
 ```text
-Core actions       apps, files, calculator, shell, quicklinks, snippets
+Core search        apps (.desktop, XDG_DATA_DIRS), files, calculator, shell
+Quicklinks         keyword-triggered browser URLs with placeholders
+Snippets           copy-to-clipboard text templates with placeholders
+Custom commands    shell and JSON modes, typed args, forms, env, preferences
 User memory        recent actions, pins, aliases
-Action UX          primary action, secondary actions, action panel
-Automation         clipboard history, placeholders, custom TOML commands
-Linux shell        xdg-open, .desktop parsing, GTK4/Wayland launcher
-Audio actions      volume up/down, mute, mic mute, brightness (wpctl/brightnessctl)
-Network actions    wifi toggle, network settings (nmcli)
-Niri actions       screenshot, workspace/window control (niri msg)
-Layer shell        gtk4-layer-shell overlay window (Wayland, --features layer-shell)
-XDG app detection  XDG_DATA_DIRS/XDG_DATA_HOME so NixOS paths are found
-HTTP actions       AI chat (OpenAI-compatible) and translation (LibreTranslate)
+Action UX          primary action, secondary actions, action panel (Ctrl+K)
+Clipboard history  GTK daemon records changes; searchable via clip prefix
+Placeholders       {{query}} {{arg:}} {{pref:}} {{clipboard}} {{date}} {{calc:}}
+System actions     lock, suspend, settings, restart, power off
+Process actions    search running processes, build kill actions
+Audio actions      volume up/down, mute, mic mute, brightness
+Network actions    Wi-Fi toggle, network settings
+Niri actions       screenshot, workspaces, window control (niri msg)
+Hyprland actions   screenshot, fullscreen, float, close, workspaces (hyprctl)
+Sway actions       screenshot, fullscreen, float, close, workspaces (swaymsg)
+AI chat            OpenAI-compatible endpoint (default: Ollama gemma4:e4b)
+Translation        LibreTranslate with language suffix (trans hello in ru)
+GTK4 launcher      Layer-shell overlay (Wayland), daemon mode, clipboard monitor
 Command forms      GTK form panel for commands with missing required arguments
-Extension browser  Ctrl+B panel listing all custom TOML commands
+Extension browser  Ctrl+B — list and inspect all custom commands
+Preferences editor Ctrl+, — edit AI/translate settings without touching files
+Permission field   permissions = ["shell","network","filesystem"] in command TOML
+Import/export      zeshicast --export / --import for config backup and migration
+Example extensions packaging/examples/commands/ — github, weather, dict, docker, git
 Nix package        flake.nix packages.default for nix build
 ```
-
-Next platform layers:
-
-```text
-1. Extension commands
-   - command manifests, keywords, argument hints: implemented
-   - typed arguments: text, number, path, enum, boolean: implemented in core
-   - per-command preferences: implemented in core
-   - environment variables: implemented in core
-   - JSON result lists: implemented in core
-   - GTK argument form panel: implemented
-
-2. Built-in Linux extensions
-   - system actions: lock screen, suspend, settings, restart, power off: implemented in core
-   - process actions: search process and kill: implemented in core
-   - audio actions: volume up/down, mute, mic mute, brightness: implemented in core
-   - network actions: wifi toggle, network settings: implemented in core
-   - Niri IPC actions: screenshot, workspace/window control: implemented in core
-   - window/workspace actions for other compositors (Hyprland, sway)
-
-3. GUI platform UX
-   - command forms for typed arguments: implemented
-   - extension browser: implemented (Ctrl+B)
-   - preferences editor
-   - richer action panel with command metadata
-
-4. Extension runtime
-   - executable/script commands with JSON input/output
-   - result lists emitted by extensions
-   - permission model for shell/network/filesystem capabilities
-
-5. Distribution
-   - example extension pack
-   - import/export user config
-   - Nix package: implemented (nix build)
-```
-
-The short-term goal is to make custom commands powerful enough that built-in
-features and user extensions share the same action model. After that, GTK can
-render forms and preferences without changing the core execution model.
