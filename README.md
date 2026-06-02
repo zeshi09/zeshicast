@@ -3,6 +3,9 @@
 Raycast-like launcher for Linux, written in Rust. The CLI works without GUI
 dependencies; the GTK4 launcher is behind the `gui` feature.
 
+See [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the
+plan to evolve Zeshicast toward a Vicinae-like Rust/GTK application.
+
 ## Run
 
 ```bash
@@ -33,13 +36,15 @@ system power              Power off
 proc firefox              Search processes and build kill actions
 audio vol                 Volume up/down, mute, mic mute
 audio brightness          Brightness up/down
+media next                MPRIS playback controls through playerctl
+notify dnd                Notification/DND actions for swaync or dunst
 net wifi                  Toggle Wi-Fi, open network settings
 niri screenshot           Interactive screenshot (region)
 niri workspace            Focus next/previous workspace, move window
 hypr fullscreen           Hyprland: fullscreen, float, close, workspaces
 sway reload               Sway: reload, fullscreen, float, close, workspaces
 win firefox               Focus a running window (niri/Hyprland/sway)
-ai explain monads         Ask AI (Ollama/OpenAI-compatible) — response copied to clipboard
+ai explain monads         Ask local AI through Ollama; response copied to clipboard
 trans hello in ru         Translate via LibreTranslate — result copied to clipboard
 translate hi in de        Same as trans, explicit prefix
 clip password             Search clipboard history
@@ -65,6 +70,13 @@ Ctrl+Enter   Copy selected value
 Ctrl+K       Action panel — pin, unpin, set alias, secondary actions
 Ctrl+B       Extension browser — list all custom commands
 Ctrl+,       Preferences editor — AI endpoint, model, translate settings
+Ctrl+D       Dashboard — clock, system, network, audio, media, notifications
+Ctrl+T       System Monitor — load, memory, disk, temperatures, top processes
+Ctrl+N       Network view — interfaces, Wi-Fi, VPN, DNS
+Ctrl+M       Media view — playerctl/MPRIS playback
+Ctrl+U       Notifications view — DND, close all, dunst history when available
+Ctrl+I       AI Chat — local prompt/answer view
+Ctrl+H       Clipboard history — copy, delete, clear recorded items
 Esc          Hide (daemon mode) or quit
 Up/Down      Move selection
 ```
@@ -282,7 +294,20 @@ Edit via `Ctrl+,` in the GTK launcher or directly in the file.
 
 ```toml
 # ~/.config/zeshicast/preferences.toml
-ai_endpoint        = "http://localhost:11434/v1"   # Ollama or any OpenAI-compatible endpoint
+ai_provider        = "ollama"                      # set to "openai" for /v1/chat/completions
+ui_font_family    = "Outfit, Inter, Noto Sans, sans-serif"
+ui_font_size      = "15"
+show_status_strip  = "true"
+status_items       = "clock,date,network,battery,audio,media"
+dashboard_enabled  = "true"
+network_enabled    = "true"
+media_enabled      = "true"
+notifications_enabled = "true"
+ai_enabled         = "true"
+dashboard_poll_interval_ms = "2000"
+ollama_endpoint    = "http://localhost:11434"
+ollama_model       = "gemma4:e4b"
+ai_endpoint        = "http://localhost:11434/v1"   # used when ai_provider = "openai"
 ai_model           = "gemma4:e4b"
 ai_api_key         = ""
 translate_endpoint = "https://libretranslate.com"
@@ -316,7 +341,12 @@ Niri actions       screenshot, workspaces, window control (niri msg)
 Hyprland actions   screenshot, fullscreen, float, close, workspaces (hyprctl)
 Sway actions       screenshot, fullscreen, float, close, workspaces (swaymsg)
 Window switching   win <query> — focus open windows (niri/Hyprland/sway, live query)
-AI chat            OpenAI-compatible endpoint (default: Ollama gemma4:e4b)
+AI chat            Ollama-compatible local endpoint, OpenAI-compatible quick mode optional
+Dashboard          optional control view with clock, system, network, audio, media, notifications
+System monitor     /proc stats, thermal sensors, top process list, terminate selected process
+Network view       interfaces, IP/MAC copy, DNS, nmcli Wi-Fi/VPN snapshot and actions
+Media view         playerctl/MPRIS status and previous/play-pause/next controls
+Notifications      swaync/dunst state, DND/close-all actions, dunst history parsing
 Translation        LibreTranslate with language suffix (trans hello in ru)
 GTK4 launcher      Layer-shell overlay (Wayland), daemon mode, clipboard monitor
 Command forms      GTK form panel for commands with missing required arguments

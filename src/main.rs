@@ -191,11 +191,13 @@ Queries:
   system lock               Search built-in system actions
   proc firefox              Search processes and build kill actions
   audio vol                 Audio actions: volume up/down, mute, mic mute, brightness
+  media next                MPRIS playback controls through playerctl
+  notify dnd                Notification/DND actions for swaync or dunst
   net wifi                  Network actions: toggle wifi, network settings
   niri screenshot           Niri compositor actions: screenshot, workspaces, windows
   hypr fullscreen           Hyprland compositor actions: screenshot, workspaces, windows
   sway reload               Sway compositor actions: screenshot, workspaces, windows
-  ai explain monads         Ask an AI (LiteLLM/OpenAI-compatible); response copied to clipboard
+  ai explain monads         Ask local AI through Ollama; response copied to clipboard
   trans hello in ru         Translate text via LibreTranslate; result copied to clipboard
   translate hello in de     Same as trans, with explicit language suffix
   docs                      Search custom command tags/descriptions
