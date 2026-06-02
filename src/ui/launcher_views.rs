@@ -103,6 +103,20 @@ pub(super) fn show_media_view(
     navigation.push(crate::ui::LauncherView::Media);
 }
 
+pub(super) fn show_script_output_view(
+    navigation: &crate::ui::NavigationStack,
+    entry: &gtk::Entry,
+    action_bar: &gtk::Box,
+    view: &crate::ui::ScriptOutputView,
+    script_title: &str,
+    stdout: &str,
+) {
+    crate::ui::set_script_output(view, script_title, stdout);
+    entry.set_visible(false);
+    action_bar.set_visible(false);
+    navigation.push(crate::ui::LauncherView::ScriptOutput);
+}
+
 pub(super) fn run_launcher_command(
     command: crate::LauncherCommand,
     navigation: &crate::ui::NavigationStack,

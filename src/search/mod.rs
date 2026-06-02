@@ -1,4 +1,5 @@
 pub(crate) mod apps;
+pub(crate) mod emoji;
 pub(crate) mod calculator;
 pub(crate) mod clipboard;
 pub(crate) mod commands;
@@ -19,6 +20,7 @@ use crate::{
     search_niri_actions, search_notification_actions, search_processes, search_sway_actions,
     search_system_actions, search_translate, search_windows,
 };
+use emoji::search_emoji;
 use scripts::search_scripts;
 
 pub(crate) struct SearchContext<'a> {
@@ -226,3 +228,11 @@ impl SearchProvider for ScriptsProvider<'_> {
 }
 
 pub(crate) use scripts::{ScriptEntry, load_script_entries};
+
+pub(crate) struct EmojiProvider;
+
+impl SearchProvider for EmojiProvider {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        search_emoji(context.query)
+    }
+}

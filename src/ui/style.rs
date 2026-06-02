@@ -20,6 +20,18 @@ pub fn install_css() {
     let panel_title_size = font_size + 1;
     let dashboard_clock_size = font_size + 11;
 
+    let density = preferences
+        .get("ui_density")
+        .map(String::as_str)
+        .unwrap_or("comfortable");
+    let row_height: u32 = if density == "compact" { 44 } else { 52 };
+
+    let theme = preferences
+        .get("ui_theme")
+        .map(String::as_str)
+        .unwrap_or("system");
+    apply_gtk_theme(theme);
+
     let css = "
         .launcher-window {
           background: alpha(@window_bg_color, 0.985);
@@ -70,7 +82,7 @@ pub fn install_css() {
 
         .result-row {
           border-radius: 0;
-          min-height: 52px;
+          min-height: __ROW_HEIGHT__px;
         }
 
         .result-row:selected {
@@ -351,10 +363,8 @@ pub fn install_css() {
     .replace("__SUBTITLE_SIZE__", &subtitle_size.to_string())
     .replace("__SEARCH_SIZE__", &search_size.to_string())
     .replace("__PANEL_TITLE_SIZE__", &panel_title_size.to_string())
-    .replace(
-        "__DASHBOARD_CLOCK_SIZE__",
-        &dashboard_clock_size.to_string(),
-    );
+    .replace("__DASHBOARD_CLOCK_SIZE__", &dashboard_clock_size.to_string())
+    .replace("__ROW_HEIGHT__", &row_height.to_string());
 
     let provider = CssProvider::new();
     provider.load_from_data(&css);
@@ -365,6 +375,16 @@ pub fn install_css() {
             &provider,
             STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+    }
+}
+
+fn apply_gtk_theme(theme: &str) {
+    if let Some(settings) = gtk::Settings::default() {
+        match theme {
+            "dark" => settings.set_gtk_application_prefer_dark_theme(true),
+            "light" => settings.set_gtk_application_prefer_dark_theme(false),
+            _ => {}
+        }
     }
 }
 

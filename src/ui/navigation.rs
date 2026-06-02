@@ -17,6 +17,7 @@ pub enum LauncherView {
     Network,
     Notifications,
     Preferences,
+    ScriptOutput,
     Snippets,
     SystemMonitor,
 }
@@ -35,6 +36,7 @@ impl LauncherView {
             Self::Network => "network",
             Self::Notifications => "notifications",
             Self::Preferences => "preferences",
+            Self::ScriptOutput => "script-output",
             Self::Snippets => "snippets",
             Self::SystemMonitor => "system-monitor",
         }

@@ -68,6 +68,7 @@ pub struct Action {
 pub enum SecondaryActionKind {
     Run,
     CopyValue,
+    TypeText,
     OpenParent,
     Pin,
     Unpin,

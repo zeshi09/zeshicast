@@ -5,6 +5,7 @@ use std::process::Command;
 #[derive(Debug, Clone, Default)]
 pub struct SystemSnapshot {
     pub load_average: Option<f32>,
+    pub cpu_count: Option<usize>,
     pub memory_total_kib: Option<u64>,
     pub memory_available_kib: Option<u64>,
     pub disk_total_kib: Option<u64>,
@@ -46,12 +47,26 @@ pub fn system_snapshot() -> SystemSnapshot {
     let disk = read_root_disk_usage().ok();
     SystemSnapshot {
         load_average: read_load_average().ok(),
+        cpu_count: read_cpu_count().ok(),
         memory_total_kib: read_meminfo_value("MemTotal").ok(),
         memory_available_kib: read_meminfo_value("MemAvailable").ok(),
         disk_total_kib: disk.map(|usage| usage.0),
         disk_used_kib: disk.map(|usage| usage.1),
         uptime_seconds: read_uptime_seconds().ok(),
         process_count: read_process_count().ok(),
+    }
+}
+
+fn read_cpu_count() -> io::Result<usize> {
+    let contents = fs::read_to_string("/proc/cpuinfo")?;
+    let count = contents
+        .lines()
+        .filter(|line| line.starts_with("processor"))
+        .count();
+    if count == 0 {
+        Err(io::Error::new(io::ErrorKind::InvalidData, "no processors found"))
+    } else {
+        Ok(count)
     }
 }
 

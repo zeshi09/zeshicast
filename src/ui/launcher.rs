@@ -6,10 +6,10 @@ use crate::ui::launcher_helpers::{
 };
 use crate::ui::launcher_views::{
     run_launcher_command, show_ai_chat_view, show_audio_view, show_dashboard_view, show_media_view,
-    show_network_view, show_notifications_view, show_system_monitor_view,
+    show_network_view, show_notifications_view, show_script_output_view, show_system_monitor_view,
 };
 use crate::{
-    Action, ActionPanelSection, ClipboardKind, ClipboardSummary, SecondaryActionKind,
+    Action, ActionKind, ActionPanelSection, ClipboardKind, ClipboardSummary, SecondaryActionKind,
     SnippetSummary, Zeshicast, ui::ActionPanelDisplayItem,
 };
 use gtk::gdk;
@@ -153,6 +153,7 @@ fn build_ui(
     *snippet_items.borrow_mut() = current_snippets.clone();
     let snippet_view = crate::ui::snippet_manager_view(&current_snippets);
     let preferences_view = crate::ui::preferences_view(launcher.borrow().get_preferences());
+    let script_output_view = crate::ui::script_output_view();
 
     navigation.add_page(crate::ui::LauncherView::Root, &search_page);
     navigation.add_page(crate::ui::LauncherView::Actions, &action_panel_view.root);
@@ -168,6 +169,7 @@ fn build_ui(
         &notifications_view.root,
     );
     navigation.add_page(crate::ui::LauncherView::Preferences, &preferences_view.root);
+    navigation.add_page(crate::ui::LauncherView::ScriptOutput, &script_output_view.root);
     navigation.add_page(crate::ui::LauncherView::Snippets, &snippet_view.root);
     navigation.add_page(
         crate::ui::LauncherView::SystemMonitor,
@@ -237,6 +239,7 @@ fn build_ui(
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
         let notifications_view = notifications_view.clone();
+        let script_output_view = script_output_view.clone();
         list.connect_row_activated(move |_, row| {
             if let Some(action) = action_for_row(&list_ref, &results, row) {
                 if let Some(command) = action.launcher_command() {
@@ -257,6 +260,20 @@ fn build_ui(
                     show_form_for_action(
                         &window, &launcher, &hold, &entry, &list_ref, &results, action,
                     );
+                } else if action.category == "Script" {
+                    if let Some(stdout) = run_script_capture(&action) {
+                        show_script_output_view(
+                            &navigation,
+                            &entry,
+                            &action_bar,
+                            &script_output_view,
+                            &action.title,
+                            &stdout,
+                        );
+                    } else {
+                        launcher.borrow_mut().run_action(&action);
+                        finish_interaction(&window, &hold);
+                    }
                 } else {
                     launcher.borrow_mut().run_action(&action);
                     finish_interaction(&window, &hold);
@@ -2024,6 +2041,23 @@ fn action_index_for_row(list: &ListBox, row: &gtk::ListBoxRow) -> Option<usize> 
         action_index += 1;
     }
     None
+}
+
+/// Run a Script action and return stdout if the script produces output (fullOutput / compact).
+/// Returns None if the script should just be spawned without capturing output.
+fn run_script_capture(action: &Action) -> Option<String> {
+    let ActionKind::Shell(cmd) = &action.kind else {
+        return None;
+    };
+    let path = std::path::Path::new(&cmd.command);
+    if !path.exists() {
+        return None;
+    }
+    let stdout = crate::search::scripts::run_script_stdout(path).ok()?;
+    if stdout.trim().is_empty() {
+        return None;
+    }
+    Some(stdout)
 }
 
 fn select_first_action_row(list: &ListBox) {

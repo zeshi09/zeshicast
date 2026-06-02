@@ -11,6 +11,7 @@ layer-shell = ["gui"]
 [dependencies]
 chrono = "0.4.44"
 gtk = { package = "gtk4", version = "0.11.3", optional = true }
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1.0.149"
 toml = "1.1.2"
 ureq = { version = "2", features = ["json"] }

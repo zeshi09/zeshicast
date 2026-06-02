@@ -1,6 +1,8 @@
 pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
     ("ui_font_family", "UI font family (restart required)"),
     ("ui_font_size", "UI base font size 12-22 (restart required)"),
+    ("ui_density", "Row density: comfortable (default) or compact"),
+    ("ui_theme", "Theme: system (default), dark, or light"),
     ("show_status_strip", "Show status strip (true/false)"),
     (
         "status_items",
@@ -50,6 +52,8 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
         keys: &[
             ("ui_font_family", "Font family (restart required)"),
             ("ui_font_size", "Font size 12-22 (restart required)"),
+            ("ui_density", "Row density: comfortable (default) or compact"),
+            ("ui_theme", "Theme: system (default), dark, or light"),
         ],
     },
     PrefSection {

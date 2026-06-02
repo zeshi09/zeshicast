@@ -3,21 +3,26 @@ use std::io;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use crate::services::storage;
 use crate::{
     Action, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider, ClipboardProvider,
-    CommandEntry, CommandsProvider, FileEntry, FilesProvider, HyprlandProvider, LauncherCommand,
-    MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider, NamedValue, NamedValuesProvider,
-    NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext, ProcessesProvider,
-    ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SecondaryAction,
+    CommandEntry, CommandsProvider, EmojiProvider, FileEntry, FilesProvider, HyprlandProvider,
+    LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider, NamedValue,
+    NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext,
+    ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SecondaryAction,
     SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
     app_action, append_alias, expand_placeholders, fuzzy_score, home_dir, load_aliases, load_apps,
-    load_clipboard_history, load_clipboard_timestamps, load_command_entries, load_file_index,
-    load_frequencies, load_lines, load_named_values, load_preferences, load_script_entries,
-    normalize_alias, search_audio_actions,
-    search_media_actions, search_network_actions, search_notification_actions,
-    search_system_actions, spawn_shell, unix_now, write_clipboard_history,
-    write_clipboard_timestamps, write_frequencies, write_lines, write_preferences,
+    load_clipboard_history, load_command_entries, load_file_index, load_frequencies, load_lines,
+    load_named_values, load_preferences, load_script_entries, normalize_alias,
+    search_audio_actions, search_media_actions, search_network_actions,
+    search_notification_actions, search_system_actions, spawn_shell, write_lines, write_preferences,
 };
+
+#[derive(Debug, Clone)]
+pub struct CalcHistoryEntry {
+    pub expr: String,
+    pub result: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct Zeshicast {
@@ -28,6 +33,7 @@ pub struct Zeshicast {
     pub(crate) scripts: Vec<ScriptEntry>,
     pub(crate) clipboard_history: Vec<String>,
     pub(crate) clipboard_timestamps: HashMap<String, i64>,
+    pub(crate) calc_history: Vec<CalcHistoryEntry>,
     pub(crate) preferences: HashMap<String, String>,
     pub(crate) aliases: HashMap<String, String>,
     pub(crate) pins: HashSet<String>,
@@ -171,10 +177,37 @@ impl Zeshicast {
         let home = home_dir();
         let config_dir = home.join(".config/zeshicast");
         let preferences = load_preferences(&config_dir.join("preferences.toml"));
-        let clipboard_history = load_clipboard_history(&config_dir.join("clipboard.txt"));
-        let clipboard_timestamps =
-            load_clipboard_timestamps(&config_dir.join("clipboard_timestamps.json"));
         let script_dirs = preference_script_dirs(&preferences, &config_dir);
+
+        // Migrate text-file clipboard to SQLite on first run
+        if !storage::clipboard_has_data(&config_dir) {
+            let legacy = load_clipboard_history(&config_dir.join("clipboard.txt"));
+            if !legacy.is_empty() {
+                storage::migrate_clipboard(&config_dir, &legacy).ok();
+            }
+        }
+
+        // Migrate text-file usage history to SQLite on first run
+        if !storage::usage_has_data(&config_dir) {
+            let recent_legacy = load_lines(&config_dir.join("recent.txt"))
+                .into_iter()
+                .map(|l| l.to_lowercase())
+                .collect::<Vec<_>>();
+            let freq_legacy = load_frequencies(&config_dir.join("frequencies.txt"));
+            if !recent_legacy.is_empty() {
+                storage::migrate_usage(&config_dir, &recent_legacy, &freq_legacy).ok();
+            }
+        }
+
+        let clip_rows = storage::clipboard_load(&config_dir);
+        let clipboard_history: Vec<String> = clip_rows.iter().map(|(t, _)| t.clone()).collect();
+        let clipboard_timestamps: HashMap<String, i64> =
+            clip_rows.into_iter().collect();
+
+        let recent = storage::usage_recent(&config_dir, 50);
+        let frequencies = storage::usage_frequencies(&config_dir);
+
+        let calc_history = load_calc_history(&config_dir.join("calc_history.json"));
         Self {
             apps: load_apps(&home),
             quicklinks: load_named_values(&config_dir.join("quicklinks.txt")),
@@ -183,17 +216,15 @@ impl Zeshicast {
             scripts: load_script_entries(&script_dirs),
             clipboard_history,
             clipboard_timestamps,
+            calc_history,
             preferences,
             aliases: load_aliases(&config_dir.join("aliases.txt")),
             pins: load_lines(&config_dir.join("pins.txt"))
                 .into_iter()
                 .map(|line| line.to_lowercase())
                 .collect(),
-            recent: load_lines(&config_dir.join("recent.txt"))
-                .into_iter()
-                .map(|line| line.to_lowercase())
-                .collect(),
-            frequencies: load_frequencies(&config_dir.join("frequencies.txt")),
+            recent,
+            frequencies,
             files: load_file_index(&home),
             config_dir,
         }
@@ -300,6 +331,7 @@ impl Zeshicast {
             actions.extend(WebProvider.search(&search_context));
         }
         actions.extend(ScriptsProvider { entries: &self.scripts }.search(&search_context));
+        actions.extend(EmojiProvider.search(&search_context));
         actions.extend(
             ClipboardProvider {
                 entries: &self.clipboard_history,
@@ -341,6 +373,11 @@ impl Zeshicast {
 
     pub fn run_action(&mut self, action: &Action) {
         action.run();
+        if action.category == "Calculator" {
+            if let Some((expr, result)) = action.title.split_once(" = ") {
+                self.record_calc(expr.trim(), result.trim());
+            }
+        }
         if let Err(error) = self.record_recent(action) {
             eprintln!("failed to record recent action: {error}");
         }
@@ -348,6 +385,8 @@ impl Zeshicast {
 
     pub fn available_secondary_actions(&self, action: &Action) -> Vec<SecondaryAction> {
         use crate::ActionPanelSection as S;
+        let can_type = is_wtype_available();
+        let is_text_action = matches!(action.category.as_str(), "Snippet" | "Clipboard");
         let mut actions = vec![
             SecondaryAction::new(
                 SecondaryActionKind::Run,
@@ -362,6 +401,15 @@ impl Zeshicast {
                 S::Primary,
             ),
         ];
+
+        if can_type && is_text_action {
+            actions.push(SecondaryAction::new(
+                SecondaryActionKind::TypeText,
+                "Expand (type text)",
+                "input-keyboard-symbolic",
+                S::Primary,
+            ));
+        }
 
         if action.parent_dir().is_some() {
             actions.push(SecondaryAction::new(
@@ -406,6 +454,19 @@ impl Zeshicast {
         actions
     }
 
+    pub fn record_calc(&mut self, expr: &str, result: &str) {
+        self.calc_history.retain(|e| e.expr != expr);
+        self.calc_history.insert(0, CalcHistoryEntry {
+            expr: expr.to_string(),
+            result: result.to_string(),
+        });
+        self.calc_history.truncate(20);
+        save_calc_history(
+            &self.config_dir.join("calc_history.json"),
+            &self.calc_history,
+        );
+    }
+
     pub fn is_recent(&self, action: &Action) -> bool {
         let identity = action.identity().to_lowercase();
         self.recent.iter().any(|entry| entry == &identity)
@@ -428,6 +489,7 @@ impl Zeshicast {
         match secondary {
             SecondaryActionKind::Run => self.run_action(action),
             SecondaryActionKind::CopyValue => action.copy_value(),
+            SecondaryActionKind::TypeText => type_text_via_wtype(&action.value()),
             SecondaryActionKind::OpenParent => action.open_parent_dir(),
             SecondaryActionKind::Pin => self.pin_action(action)?,
             SecondaryActionKind::Unpin => self.unpin_action(action)?,
@@ -442,42 +504,35 @@ impl Zeshicast {
         if text.is_empty() {
             return Ok(false);
         }
-
-        self.clipboard_timestamps.entry(text.clone()).or_insert_with(unix_now);
-        self.clipboard_history.retain(|entry| entry != &text);
+        storage::clipboard_insert(&self.config_dir, &text)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        self.clipboard_timestamps
+            .entry(text.clone())
+            .or_insert_with(crate::unix_now);
+        self.clipboard_history.retain(|e| e != &text);
         self.clipboard_history.insert(0, text);
         self.clipboard_history.truncate(MAX_CLIPBOARD_ENTRIES);
-        self.write_clipboard()?;
         Ok(true)
     }
 
     pub fn delete_clipboard_item(&mut self, action: &Action) -> io::Result<()> {
-        let value = action.value();
-        self.delete_clipboard_value(&value)
+        self.delete_clipboard_value(&action.value())
     }
 
     pub fn delete_clipboard_value(&mut self, value: &str) -> io::Result<()> {
-        self.clipboard_history.retain(|entry| entry != value);
+        storage::clipboard_delete(&self.config_dir, value)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        self.clipboard_history.retain(|e| e != value);
         self.clipboard_timestamps.remove(value);
-        self.write_clipboard()
+        Ok(())
     }
 
     pub fn clear_clipboard_history(&mut self) -> io::Result<()> {
+        storage::clipboard_clear(&self.config_dir)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
         self.clipboard_history.clear();
         self.clipboard_timestamps.clear();
-        self.write_clipboard()
-    }
-
-    fn write_clipboard(&self) -> io::Result<()> {
-        write_clipboard_history(
-            &self.config_dir.join("clipboard.txt"),
-            &self.clipboard_history,
-        )?;
-        write_clipboard_timestamps(
-            &self.config_dir.join("clipboard_timestamps.json"),
-            &self.clipboard_history,
-            &self.clipboard_timestamps,
-        )
+        Ok(())
     }
 
     pub fn list_clipboard_history(&self) -> Vec<ClipboardSummary> {
@@ -625,6 +680,19 @@ impl Zeshicast {
             .search(&search_context),
         );
 
+        for (i, entry) in self.calc_history.iter().enumerate() {
+            actions.push(
+                Action::new(
+                    "Calculator",
+                    format!("{} = {}", entry.expr, entry.result),
+                    ActionKind::Copy(entry.result.clone()),
+                    15 - i as i32,
+                )
+                .with_subtitle("Recent calculation · copy result")
+                .with_icon("accessories-calculator-symbolic"),
+            );
+        }
+
         actions
     }
 
@@ -770,12 +838,13 @@ impl Zeshicast {
 
     fn record_recent(&mut self, action: &Action) -> io::Result<()> {
         let identity = action.identity().to_lowercase();
-        self.recent.retain(|entry| entry != &identity);
+        storage::usage_record(&self.config_dir, &identity)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        self.recent.retain(|e| e != &identity);
         self.recent.insert(0, identity.clone());
         self.recent.truncate(50);
-        write_lines(&self.config_dir.join("recent.txt"), &self.recent)?;
         *self.frequencies.entry(identity).or_insert(0) += 1;
-        write_frequencies(&self.config_dir.join("frequencies.txt"), &self.frequencies)
+        Ok(())
     }
 
     fn write_pins(&self) -> io::Result<()> {
@@ -835,6 +904,60 @@ fn parse_bool_preference(value: &str) -> Option<bool> {
         "false" | "no" | "off" | "0" => Some(false),
         _ => None,
     }
+}
+
+fn load_calc_history(path: &std::path::Path) -> Vec<CalcHistoryEntry> {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(array) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    let Some(items) = array.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let expr = item.get("e")?.as_str()?.to_string();
+            let result = item.get("r")?.as_str()?.to_string();
+            Some(CalcHistoryEntry { expr, result })
+        })
+        .collect()
+}
+
+fn save_calc_history(path: &std::path::Path, history: &[CalcHistoryEntry]) {
+    let array: Vec<serde_json::Value> = history
+        .iter()
+        .map(|e| serde_json::json!({"e": e.expr, "r": e.result}))
+        .collect();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    if let Ok(json) = serde_json::to_string(&array) {
+        std::fs::write(path, json).ok();
+    }
+}
+
+fn is_wtype_available() -> bool {
+    std::process::Command::new("which")
+        .arg("wtype")
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
+fn type_text_via_wtype(text: &str) {
+    std::thread::spawn({
+        let text = text.to_string();
+        move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::process::Command::new("wtype")
+                .arg(&text)
+                .spawn()
+                .ok();
+        }
+    });
 }
 
 fn preference_script_dirs(

@@ -20,6 +20,7 @@ pub(crate) fn load_clipboard_history(path: &Path) -> Vec<String> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub(crate) fn write_clipboard_history(path: &Path, entries: &[String]) -> io::Result<()> {
     let lines = entries
         .iter()

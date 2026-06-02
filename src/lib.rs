@@ -15,11 +15,10 @@ pub use action::{
     SecondaryAction, SecondaryActionKind,
 };
 pub(crate) use action::{ActionKind, HttpRequest, ShellCommand};
-pub use app::{ClipboardKind, ClipboardSummary, CommandSummary, SnippetSummary, Zeshicast};
+pub use app::{CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary, SnippetSummary, Zeshicast};
 pub(crate) use config::{
-    append_alias, home_dir, load_aliases, load_clipboard_timestamps, load_frequencies, load_lines,
-    load_preferences, normalize_alias, toml_value_string, unix_now, write_clipboard_timestamps,
-    write_frequencies, write_lines, write_preferences,
+    append_alias, home_dir, load_aliases, load_frequencies, load_lines, load_preferences,
+    normalize_alias, toml_value_string, unix_now, write_lines, write_preferences,
 };
 pub use config::{export_config, import_config};
 #[cfg(test)]
@@ -31,7 +30,7 @@ pub(crate) use search::apps::{AppEntry, app_action, load_apps, search_apps};
 pub(crate) use search::calculator::{Calculator, format_number, looks_like_expression};
 pub(crate) use search::clipboard::{
     MAX_CLIPBOARD_ENTRIES, clipboard_preview, load_clipboard_history, normalize_clipboard_text,
-    search_clipboard, write_clipboard_history,
+    search_clipboard,
 };
 #[cfg(test)]
 pub(crate) use search::clipboard::{decode_clipboard_line, encode_clipboard_line};
@@ -60,7 +59,7 @@ pub(crate) use search::windows::{
     search_hyprland_actions, search_niri_actions, search_sway_actions, search_windows,
 };
 pub(crate) use search::{
-    AppsProvider, AudioProvider, ClipboardProvider, CommandsProvider, FilesProvider,
+    AppsProvider, AudioProvider, ClipboardProvider, CommandsProvider, EmojiProvider, FilesProvider,
     HyprlandProvider, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
     NotificationsProvider, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
     SearchProvider, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
@@ -70,7 +69,8 @@ pub use services::audio::{
     AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
 };
 pub use services::battery::{BatteryDeviceSnapshot, BatterySnapshot, battery_snapshot};
-pub use services::local_ai::{LocalAiConfig, ask_local_ai};
+pub use services::local_ai::{LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming};
+pub use services::storage as storage_service;
 pub use services::media::{MediaSnapshot, media_snapshot};
 pub use services::network::{
     NetworkInterfaceSnapshot, NetworkSnapshot, VpnConnectionSnapshot, WifiNetworkSnapshot,
@@ -347,6 +347,7 @@ mod tests {
             clipboard_history: Vec::new(),
             scripts: Vec::new(),
             clipboard_timestamps: HashMap::new(),
+            calc_history: Vec::new(),
             preferences: HashMap::new(),
             aliases: HashMap::new(),
             pins: HashSet::new(),
@@ -379,6 +380,7 @@ mod tests {
             clipboard_history: vec!["secret".to_string()],
             scripts: Vec::new(),
             clipboard_timestamps: HashMap::new(),
+            calc_history: Vec::new(),
             preferences: HashMap::new(),
             aliases: HashMap::new(),
             pins: HashSet::new(),
@@ -785,6 +787,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             clipboard_history: Vec::new(),
             scripts: Vec::new(),
             clipboard_timestamps: HashMap::new(),
+            calc_history: Vec::new(),
             preferences: HashMap::new(),
             aliases: HashMap::new(),
             pins: HashSet::new(),
@@ -846,6 +849,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             clipboard_history: Vec::new(),
             scripts: Vec::new(),
             clipboard_timestamps: HashMap::new(),
+            calc_history: Vec::new(),
             preferences,
             aliases: HashMap::new(),
             pins: HashSet::new(),

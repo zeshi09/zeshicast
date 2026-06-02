@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 
 use crate::Zeshicast;
+use crate::services::local_ai::{StreamChunk, ask_local_ai_streaming};
 use gtk::glib;
 use gtk::prelude::*;
 
@@ -17,32 +17,66 @@ pub(super) fn ask_ai_from_view(
         return;
     }
 
-    ai_chat_view.output.set_text("Thinking...");
+    // UI: enter "thinking" state
+    ai_chat_view.output.set_text("");
+    ai_chat_view.status.set_text("Thinking…");
+    ai_chat_view.status.set_visible(true);
+    ai_chat_view.ask.set_visible(false);
+    ai_chat_view.stop.set_visible(true);
+    ai_chat_view.copy.set_sensitive(false);
+    ai_chat_view.save.set_sensitive(false);
+
     let config = local_ai_config(launcher);
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let result = crate::ask_local_ai(&config, &prompt).map_err(|error| error.to_string());
-        let _ = sender.send(result);
-    });
+    let (tx, rx) = mpsc::sync_channel::<StreamChunk>(64);
+    let cancel_flag = ask_local_ai_streaming(config, prompt, tx);
+
+    // Connect stop button to cancel flag
+    {
+        let cancel_flag2 = cancel_flag.clone();
+        ai_chat_view.stop.connect_clicked(move |_| {
+            cancel_flag2.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+    }
 
     let ai_chat_view = ai_chat_view.clone();
-    glib::timeout_add_local(Duration::from_millis(100), move || {
-        match receiver.try_recv() {
-            Ok(Ok(answer)) => {
-                ai_chat_view.output.set_text(&answer);
-                glib::ControlFlow::Break
-            }
-            Ok(Err(error)) => {
-                ai_chat_view.output.set_text(&error);
-                glib::ControlFlow::Break
-            }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                ai_chat_view.output.set_text("AI request failed");
-                glib::ControlFlow::Break
+    let accumulated = Rc::new(RefCell::new(String::new()));
+    glib::timeout_add_local(Duration::from_millis(30), move || {
+        loop {
+            match rx.try_recv() {
+                Ok(StreamChunk::Token(token)) => {
+                    accumulated.borrow_mut().push_str(&token);
+                    ai_chat_view.output.set_text(&*accumulated.borrow());
+                }
+                Ok(StreamChunk::Done) => {
+                    finish_ai_view(&ai_chat_view);
+                    return glib::ControlFlow::Break;
+                }
+                Ok(StreamChunk::Cancelled) => {
+                    ai_chat_view.status.set_text("Cancelled");
+                    finish_ai_view(&ai_chat_view);
+                    return glib::ControlFlow::Break;
+                }
+                Ok(StreamChunk::Error(e)) => {
+                    ai_chat_view.output.set_text(&e);
+                    finish_ai_view(&ai_chat_view);
+                    return glib::ControlFlow::Break;
+                }
+                Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    finish_ai_view(&ai_chat_view);
+                    return glib::ControlFlow::Break;
+                }
             }
         }
     });
+}
+
+fn finish_ai_view(view: &crate::ui::AiChatView) {
+    view.status.set_visible(false);
+    view.ask.set_visible(true);
+    view.stop.set_visible(false);
+    view.copy.set_sensitive(true);
+    view.save.set_sensitive(true);
 }
 
 pub(super) fn ai_snippet_name(prompt: &str) -> String {

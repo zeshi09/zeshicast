@@ -6,7 +6,7 @@ use chrono::Local;
 use gtk::prelude::*;
 use gtk::{
     Box as GtkBox, Box, Button, DrawingArea, DropDown, Entry, Grid, Image, Label, ListBox,
-    ListBoxRow, Orientation, ProgressBar, StringList,
+    ListBoxRow, Orientation, Paned, ProgressBar, Stack, StringList,
 };
 
 use crate::{
@@ -38,6 +38,8 @@ pub struct AiChatView {
     pub input: Entry,
     pub output: Label,
     pub ask: Button,
+    pub stop: Button,
+    pub status: Label,
     pub copy: Button,
     pub use_clipboard: Button,
     pub save: Button,
@@ -61,6 +63,13 @@ pub struct AudioView {
 pub struct MetricGraph {
     area: DrawingArea,
     values: Rc<RefCell<Vec<f64>>>,
+}
+
+#[derive(Clone)]
+pub struct ScriptOutputView {
+    pub root: GtkBox,
+    pub title: gtk::Label,
+    pub output: gtk::Label,
 }
 
 #[derive(Clone)]
@@ -88,8 +97,11 @@ pub struct DashboardView {
     pub date: Label,
     pub uptime: Label,
     pub load: Label,
+    pub load_sub: Label,
     pub memory: Label,
+    pub memory_sub: Label,
     pub disk: Label,
+    pub disk_sub: Label,
     pub network: Label,
     pub battery: Label,
     pub battery_card: GtkBox,
@@ -181,6 +193,7 @@ pub struct SnippetManagerView {
 #[derive(Clone)]
 pub struct PreferencesView {
     pub root: GtkBox,
+    pub search: Entry,
     pub fields: Vec<(String, Entry)>,
     pub save: Button,
     pub cancel: Button,
@@ -270,16 +283,27 @@ pub fn ai_chat_view() -> AiChatView {
     input.add_css_class("search-entry");
     composer.append(&input);
 
+    let status = Label::new(None);
+    status.add_css_class("result-subtitle");
+    status.set_xalign(0.0);
+    status.set_visible(false);
+    composer.append(&status);
+
     let buttons = dashboard_card_actions();
+    buttons.set_halign(gtk::Align::End);
     let copy = dashboard_button("Copy");
     let use_clipboard = dashboard_button("Use Clipboard");
     let save = dashboard_button("Save Snippet");
     let ask = dashboard_button("Ask");
     ask.add_css_class("suggested-action");
+    let stop = dashboard_button("Stop");
+    stop.add_css_class("destructive-action");
+    stop.set_visible(false);
     buttons.append(&copy);
     buttons.append(&use_clipboard);
     buttons.append(&save);
     buttons.append(&ask);
+    buttons.append(&stop);
     composer.append(&buttons);
     root.append(&composer);
 
@@ -288,6 +312,8 @@ pub fn ai_chat_view() -> AiChatView {
         input,
         output,
         ask,
+        stop,
+        status,
         copy,
         use_clipboard,
         save,
@@ -345,6 +371,38 @@ fn action_section_header_row(title: &str) -> gtk::ListBoxRow {
     label.set_margin_end(10);
     row.set_child(Some(&label));
     row
+}
+
+pub fn script_output_view() -> ScriptOutputView {
+    let root = super::panel_root(10, 12);
+    root.set_vexpand(true);
+
+    let title = super::panel_title("Script Output");
+    root.append(&title);
+
+    let scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
+    scroll.add_css_class("results-scroll");
+    let output = Label::new(None);
+    output.add_css_class("result-subtitle");
+    output.set_wrap(true);
+    output.set_xalign(0.0);
+    output.set_yalign(0.0);
+    output.set_selectable(true);
+    output.set_margin_top(6);
+    output.set_margin_start(4);
+    scroll.set_child(Some(&output));
+    root.append(&scroll);
+
+    ScriptOutputView { root, title, output }
+}
+
+pub fn set_script_output(view: &ScriptOutputView, script_title: &str, stdout: &str) {
+    view.title.set_text(&format!("Script: {script_title}"));
+    view.output.set_text(stdout.trim());
 }
 
 pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserView {
@@ -418,6 +476,7 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     let root = super::panel_root(10, 12);
     root.set_vexpand(true);
 
+    // ── Header: clock + date + uptime ────────────────────────────────────────
     let header = GtkBox::new(Orientation::Horizontal, 12);
     header.add_css_class("dashboard-header");
     header.set_hexpand(true);
@@ -428,19 +487,22 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     clock_block.append(&clock);
     clock_block.append(&date);
     header.append(&clock_block);
-
     let uptime = dashboard_subtitle_label();
     uptime.add_css_class("dashboard-header-stat");
     header.append(&uptime);
     root.append(&header);
 
+    // ── Metric cards (public MetricCard widget) ───────────────────────────────
     let metric_grid = dashboard_grid();
-    let (load_card, load, load_bar) =
-        dashboard_metric_card("Load", "utilities-system-monitor-symbolic");
-    let (memory_card, memory, memory_bar) = dashboard_metric_card("Memory", "media-flash-symbolic");
-    let (disk_card, disk, disk_bar) = dashboard_metric_card("Disk", "drive-harddisk-symbolic");
-    let (processes_card, processes) =
-        dashboard_control_card("Processes", "application-x-executable-symbolic");
+    let (load_card, load, load_sub, load_bar) =
+        super::metric_card("Load", "utilities-system-monitor-symbolic");
+    let (memory_card, memory, memory_sub, memory_bar) =
+        super::metric_card("Memory", "media-flash-symbolic");
+    let (disk_card, disk, disk_sub, disk_bar) =
+        super::metric_card("Disk", "drive-harddisk-symbolic");
+    let (processes_card, processes, _actions_row) =
+        super::control_card("Processes", "application-x-executable-symbolic");
+
     let load_graph = metric_graph();
     let memory_graph = metric_graph();
     let disk_graph = metric_graph();
@@ -453,59 +515,50 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     metric_grid.attach(&processes_card, 1, 1, 1, 1);
     root.append(&metric_grid);
 
+    // ── Control cards (public ControlCard widget) ─────────────────────────────
     let control_grid = dashboard_grid();
-    let (network_card, network) = dashboard_control_card("Network", "network-wireless-symbolic");
-    let (audio_card, audio) = dashboard_control_card("Audio Mixer", "audio-volume-high-symbolic");
-    let (battery_card, battery) = dashboard_control_card("Power", "battery-good-symbolic");
-    let (media_card, media) = dashboard_control_card("Media", "media-playback-start-symbolic");
-    let (notifications_card, notifications) =
-        dashboard_control_card("Notifications", "preferences-system-notifications-symbolic");
-    let ai_card = dashboard_plain_card("AI", "system-search-symbolic");
+    let (network_card, network, network_row) =
+        super::control_card("Network", "network-wireless-symbolic");
+    let (audio_card, audio, audio_row) =
+        super::control_card("Audio Mixer", "audio-volume-high-symbolic");
+    let (battery_card, battery, power_row) =
+        super::control_card("Power", "battery-good-symbolic");
+    let (media_card, media, media_row) =
+        super::control_card("Media", "media-playback-start-symbolic");
+    let (notifications_card, notifications, notify_row) =
+        super::control_card("Notifications", "preferences-system-notifications-symbolic");
+    let (ai_card, _ai_state, ai_row) =
+        super::control_card("AI & System", "system-search-symbolic");
 
-    let open_network = dashboard_button("Network");
+    let open_network = dashboard_button("Open");
     let toggle_wifi = dashboard_button("Wi-Fi");
-    let network_actions = dashboard_card_actions();
-    network_actions.append(&open_network);
-    network_actions.append(&toggle_wifi);
-    network_card.append(&network_actions);
+    network_row.append(&open_network);
+    network_row.append(&toggle_wifi);
 
     let open_audio = dashboard_button("Mixer");
     let toggle_mute = dashboard_button("Mute");
-    let audio_actions = dashboard_card_actions();
-    audio_actions.append(&open_audio);
-    audio_actions.append(&toggle_mute);
-    audio_card.append(&audio_actions);
+    audio_row.append(&open_audio);
+    audio_row.append(&toggle_mute);
 
     let lock = dashboard_button("Lock");
     let suspend = dashboard_button("Suspend");
     let toggle_bluetooth = dashboard_button("Bluetooth");
-    let power_actions = dashboard_card_actions();
-    power_actions.append(&lock);
-    power_actions.append(&suspend);
-    power_actions.append(&toggle_bluetooth);
-    battery_card.append(&power_actions);
+    power_row.append(&lock);
+    power_row.append(&suspend);
+    power_row.append(&toggle_bluetooth);
 
-    let open_media = dashboard_button("Media");
-    let media_actions = dashboard_card_actions();
-    media_actions.append(&open_media);
-    media_card.append(&media_actions);
+    let open_media = dashboard_button("Open");
+    media_row.append(&open_media);
 
     let open_notifications = dashboard_button("Notify");
     let toggle_dnd = dashboard_button("DND");
-    let notification_actions = dashboard_card_actions();
-    notification_actions.append(&open_notifications);
-    notification_actions.append(&toggle_dnd);
-    notifications_card.append(&notification_actions);
+    notify_row.append(&open_notifications);
+    notify_row.append(&toggle_dnd);
 
     let open_ai = dashboard_button("AI Chat");
     let open_system = dashboard_button("System");
-    let ai_description = dashboard_card_value();
-    ai_description.set_text("Local assistant and deeper system view");
-    let ai_actions = dashboard_card_actions();
-    ai_actions.append(&open_ai);
-    ai_actions.append(&open_system);
-    ai_card.append(&ai_description);
-    ai_card.append(&ai_actions);
+    ai_row.append(&open_ai);
+    ai_row.append(&open_system);
 
     let dashboard_cards = vec![
         network_card,
@@ -524,8 +577,11 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         date,
         uptime,
         load,
+        load_sub,
         memory,
+        memory_sub,
         disk,
+        disk_sub,
         network,
         battery,
         battery_card,
@@ -574,15 +630,18 @@ pub fn system_monitor_view(
     root.append(&header);
 
     let metric_grid = dashboard_grid();
-    let (uptime_card, uptime) = dashboard_control_card("Uptime", "appointment-soon-symbolic");
-    let (load_card, load, load_bar) =
-        dashboard_metric_card("Load", "utilities-system-monitor-symbolic");
-    let (memory_card, memory, memory_bar) = dashboard_metric_card("Memory", "media-flash-symbolic");
-    let (disk_card, disk, disk_bar) = dashboard_metric_card("Disk", "drive-harddisk-symbolic");
-    let (temperature_card, temperature) =
-        dashboard_control_card("Temperature", "weather-clear-symbolic");
-    let (process_count_card, process_count) =
-        dashboard_control_card("Processes", "application-x-executable-symbolic");
+    let (uptime_card, uptime, _) =
+        super::control_card("Uptime", "appointment-soon-symbolic");
+    let (load_card, load, _, load_bar) =
+        super::metric_card("Load", "utilities-system-monitor-symbolic");
+    let (memory_card, memory, _, memory_bar) =
+        super::metric_card("Memory", "media-flash-symbolic");
+    let (disk_card, disk, _, disk_bar) =
+        super::metric_card("Disk", "drive-harddisk-symbolic");
+    let (temperature_card, temperature, _) =
+        super::control_card("Temperature", "weather-clear-symbolic");
+    let (process_count_card, process_count, _) =
+        super::control_card("Processes", "application-x-executable-symbolic");
     let load_graph = metric_graph();
     let memory_graph = metric_graph();
     let disk_graph = metric_graph();
@@ -685,9 +744,9 @@ pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView 
     root.append(&header);
 
     let overview_grid = dashboard_grid();
-    let (backend_card, backend) = dashboard_control_card("Backend", "applications-system-symbolic");
-    let (count_card, count) = dashboard_control_card("History", "document-open-recent-symbolic");
-    let (dnd_card, dnd) = dashboard_control_card("DND", "notifications-disabled-symbolic");
+    let (backend_card, backend, _) = super::control_card("Backend", "applications-system-symbolic");
+    let (count_card, count, _) = super::control_card("History", "document-open-recent-symbolic");
+    let (dnd_card, dnd, _) = super::control_card("DND", "notifications-disabled-symbolic");
     overview_grid.attach(&backend_card, 0, 0, 1, 1);
     overview_grid.attach(&count_card, 1, 0, 1, 1);
     overview_grid.attach(&dnd_card, 0, 1, 1, 1);
@@ -1093,48 +1152,69 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
         &snapshot
             .load_average
             .map(|load| format!("{load:.2}"))
-            .unwrap_or("unknown".to_string()),
+            .unwrap_or_else(|| "—".to_string()),
+    );
+    view.load_sub.set_text(
+        &snapshot
+            .cpu_count
+            .map(|n| format!("{n} cores"))
+            .unwrap_or_default(),
     );
     let load_fraction = snapshot.load_average.map(load_fraction).unwrap_or_default();
     view.load_bar.set_fraction(load_fraction);
     push_metric_graph(&view.load_graph, load_fraction);
-    view.memory.set_text(
-        &snapshot
-            .memory_used_percent()
-            .map(|percent| {
-                let used = snapshot.memory_used_kib().unwrap_or_default() / 1024;
-                let total = snapshot.memory_total_kib.unwrap_or_default() / 1024;
-                format!("{percent:.0}%  ({used} / {total} MiB)")
-            })
-            .unwrap_or("unknown".to_string()),
-    );
+
     let memory_fraction = snapshot
         .memory_used_percent()
         .map(|percent| (percent / 100.0).clamp(0.0, 1.0) as f64)
         .unwrap_or_default();
+    view.memory.set_text(
+        &snapshot
+            .memory_used_percent()
+            .map(|p| format!("{p:.0}%"))
+            .unwrap_or_else(|| "—".to_string()),
+    );
+    view.memory_sub.set_text(
+        &snapshot
+            .memory_used_percent()
+            .map(|_| {
+                let used = snapshot.memory_used_kib().unwrap_or_default() / 1024;
+                let total = snapshot.memory_total_kib.unwrap_or_default() / 1024;
+                format!("{used} / {total} MiB")
+            })
+            .unwrap_or_default(),
+    );
     view.memory_bar.set_fraction(memory_fraction);
     push_metric_graph(&view.memory_graph, memory_fraction);
-    view.disk.set_text(
-        &snapshot
-            .disk_used_percent()
-            .map(|percent| {
-                let used = snapshot.disk_used_kib.unwrap_or_default() / 1024;
-                let total = snapshot.disk_total_kib.unwrap_or_default() / 1024;
-                format!("{percent:.0}%  ({used} / {total} MiB)")
-            })
-            .unwrap_or("unknown".to_string()),
-    );
+
     let disk_fraction = snapshot
         .disk_used_percent()
         .map(|percent| (percent / 100.0).clamp(0.0, 1.0) as f64)
         .unwrap_or_default();
+    view.disk.set_text(
+        &snapshot
+            .disk_used_percent()
+            .map(|p| format!("{p:.0}%"))
+            .unwrap_or_else(|| "—".to_string()),
+    );
+    view.disk_sub.set_text(
+        &snapshot
+            .disk_used_percent()
+            .map(|_| {
+                let used = snapshot.disk_used_kib.unwrap_or_default() / (1024 * 1024);
+                let total = snapshot.disk_total_kib.unwrap_or_default() / (1024 * 1024);
+                format!("{used} / {total} GiB")
+            })
+            .unwrap_or_default(),
+    );
     view.disk_bar.set_fraction(disk_fraction);
     push_metric_graph(&view.disk_graph, disk_fraction);
+
     view.processes.set_text(
         &snapshot
             .process_count
             .map(|count| count.to_string())
-            .unwrap_or("unknown".to_string()),
+            .unwrap_or_else(|| "—".to_string()),
     );
 }
 
@@ -1405,24 +1485,6 @@ fn dashboard_plain_card(title: &str, icon_name: &str) -> GtkBox {
     card
 }
 
-fn dashboard_metric_card(title: &str, icon_name: &str) -> (GtkBox, Label, ProgressBar) {
-    let card = dashboard_plain_card(title, icon_name);
-    let value = dashboard_card_value();
-    let bar = ProgressBar::new();
-    bar.add_css_class("dashboard-metric-bar");
-    bar.set_show_text(false);
-    bar.set_hexpand(true);
-    card.append(&value);
-    card.append(&bar);
-    (card, value, bar)
-}
-
-fn dashboard_control_card(title: &str, icon_name: &str) -> (GtkBox, Label) {
-    let card = dashboard_plain_card(title, icon_name);
-    let value = dashboard_card_value();
-    card.append(&value);
-    (card, value)
-}
 
 fn dashboard_card_value() -> Label {
     let label = Label::new(None);
@@ -1927,7 +1989,6 @@ pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&Clipboard
 }
 
 pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
-    use gtk::{Paned, Stack};
 
     let outer = super::panel_root(0, 0);
     outer.set_vexpand(true);
@@ -1941,6 +2002,18 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
     let header = super::panel_title("Preferences");
     header_box.append(&header);
     outer.append(&header_box);
+
+    let search = Entry::builder()
+        .placeholder_text("Search preferences…")
+        .hexpand(true)
+        .build();
+    search.add_css_class("search-entry");
+    let search_row = GtkBox::new(Orientation::Horizontal, 0);
+    search_row.set_margin_start(14);
+    search_row.set_margin_end(14);
+    search_row.set_margin_bottom(6);
+    search_row.append(&search);
+    outer.append(&search_row);
 
     let paned = Paned::new(Orientation::Horizontal);
     paned.set_vexpand(true);
@@ -2023,6 +2096,36 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
         let _ = &sidebar_clone;
     });
 
+    {
+        let sidebar2 = sidebar.clone();
+        let stack2 = content_stack.clone();
+        search.connect_changed(move |entry| {
+            let query = entry.text().to_lowercase();
+            let mut first_match: Option<usize> = None;
+            for (i, section) in super::preferences::PREFERENCE_SECTIONS.iter().enumerate() {
+                let visible = query.is_empty()
+                    || section.name.to_lowercase().contains(&query)
+                    || section.keys.iter().any(|(_, desc)| {
+                        desc.to_lowercase().contains(&query)
+                    });
+                if let Some(row) = sidebar2.row_at_index(i as i32) {
+                    row.set_visible(visible);
+                }
+                if visible && first_match.is_none() {
+                    first_match = Some(i);
+                }
+            }
+            if let Some(idx) = first_match {
+                if let Some(row) = sidebar2.row_at_index(idx as i32) {
+                    sidebar2.select_row(Some(&row));
+                    if let Some(section) = super::preferences::PREFERENCE_SECTIONS.get(idx) {
+                        stack2.set_visible_child_name(section.name);
+                    }
+                }
+            }
+        });
+    }
+
     if let Some(row) = sidebar.row_at_index(0) {
         sidebar.select_row(Some(&row));
     }
@@ -2049,6 +2152,7 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
 
     PreferencesView {
         root: outer,
+        search,
         fields,
         save,
         cancel,
