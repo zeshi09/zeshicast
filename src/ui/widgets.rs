@@ -1,7 +1,7 @@
 use gtk::prelude::*;
 use gtk::{
-    ApplicationWindow, Box as GtkBox, Button, Image, Label, ListBox, ListBoxRow, Orientation,
-    PolicyType, ProgressBar, ScrolledWindow,
+    ApplicationWindow, Box as GtkBox, Button, Label, ListBox, ListBoxRow, Orientation, PolicyType,
+    ProgressBar, ScrolledWindow,
 };
 
 use crate::Action;
@@ -96,9 +96,7 @@ pub fn result_row(action: &Action) -> ListBoxRow {
     layout.set_margin_start(14);
     layout.set_margin_end(14);
 
-    let icon = Image::from_icon_name(&action.icon_name);
-    icon.add_css_class("result-icon");
-    icon.set_pixel_size(28);
+    let icon = super::icons::fa_icon(&action.icon_name, 28);
 
     let text = GtkBox::new(Orientation::Horizontal, 8);
     text.set_hexpand(true);
@@ -148,9 +146,7 @@ pub fn metric_card(
     card.set_hexpand(true);
 
     let header = GtkBox::new(Orientation::Horizontal, 6);
-    let icon = Image::from_icon_name(icon_name);
-    icon.set_pixel_size(16);
-    icon.add_css_class("result-icon");
+    let icon = super::icons::fa_icon(icon_name, 16);
     let title_label = Label::new(Some(title));
     title_label.add_css_class("dashboard-card-title");
     title_label.set_hexpand(true);
@@ -184,9 +180,7 @@ pub fn control_card(title: &str, icon_name: &str) -> (GtkBox, Label, GtkBox) {
     card.set_hexpand(true);
 
     let header = GtkBox::new(Orientation::Horizontal, 6);
-    let icon = Image::from_icon_name(icon_name);
-    icon.set_pixel_size(16);
-    icon.add_css_class("result-icon");
+    let icon = super::icons::fa_icon(icon_name, 16);
     let title_label = Label::new(Some(title));
     title_label.add_css_class("dashboard-card-title");
     title_label.set_hexpand(true);
@@ -235,9 +229,7 @@ pub fn secondary_action_row(icon_name: &str, title: &str) -> ListBoxRow {
     layout.set_margin_start(10);
     layout.set_margin_end(10);
 
-    let icon = Image::from_icon_name(icon_name);
-    icon.set_pixel_size(20);
-    icon.add_css_class("result-icon");
+    let icon = super::icons::fa_icon(icon_name, 20);
 
     let label = Label::new(Some(title));
     label.add_css_class("result-title");

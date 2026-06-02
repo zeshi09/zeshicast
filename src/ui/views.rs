@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use chrono::Local;
+use gtk::cairo;
 use gtk::prelude::*;
 use gtk::{
     Box as GtkBox, Box, Button, DrawingArea, DropDown, Entry, Grid, Image, Label, ListBox,
@@ -96,21 +97,19 @@ pub struct DashboardView {
     pub clock: Label,
     pub date: Label,
     pub uptime: Label,
+    pub battery: Label,
+    pub processes: Label,
     pub load: Label,
     pub load_sub: Label,
     pub memory: Label,
     pub memory_sub: Label,
     pub disk: Label,
     pub disk_sub: Label,
+    pub thermal: Label,
     pub network: Label,
-    pub battery: Label,
-    pub battery_card: GtkBox,
-    pub dashboard_cards: Vec<GtkBox>,
-    pub control_grid: Grid,
     pub audio: Label,
     pub media: Label,
     pub notifications: Label,
-    pub processes: Label,
     pub load_bar: ProgressBar,
     pub memory_bar: ProgressBar,
     pub disk_bar: ProgressBar,
@@ -473,35 +472,72 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
 }
 
 pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
-    let root = super::panel_root(10, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
+    root.set_margin_top(14);
+    root.set_margin_bottom(14);
+    root.set_margin_start(14);
+    root.set_margin_end(14);
 
-    // ── Header: clock + date + uptime ────────────────────────────────────────
-    let header = GtkBox::new(Orientation::Horizontal, 12);
-    header.add_css_class("dashboard-header");
-    header.set_hexpand(true);
-    let clock = dashboard_value_label();
-    let date = dashboard_subtitle_label();
-    let clock_block = GtkBox::new(Orientation::Vertical, 2);
+    // ── Header ────────────────────────────────────────────────────────────────
+    let header = GtkBox::new(Orientation::Horizontal, 10);
+    header.set_margin_bottom(12);
+
+    let clock = Label::new(None);
+    clock.add_css_class("dashboard-clock");
+    clock.set_xalign(0.0);
+
+    let date = Label::new(None);
+    date.add_css_class("dashboard-date");
+    date.set_xalign(0.0);
+
+    let clock_block = GtkBox::new(Orientation::Vertical, 0);
     clock_block.set_hexpand(true);
+    clock_block.set_valign(gtk::Align::Center);
     clock_block.append(&clock);
     clock_block.append(&date);
     header.append(&clock_block);
-    let uptime = dashboard_subtitle_label();
-    uptime.add_css_class("dashboard-header-stat");
-    header.append(&uptime);
+
+    let stats_row = GtkBox::new(Orientation::Horizontal, 6);
+    stats_row.set_valign(gtk::Align::Center);
+
+    let uptime = dashboard_stat_chip();
+    let battery = dashboard_stat_chip();
+    battery.set_visible(false);
+    let processes = dashboard_stat_chip();
+    stats_row.append(&uptime);
+    stats_row.append(&battery);
+    stats_row.append(&processes);
+    header.append(&stats_row);
     root.append(&header);
 
-    // ── Metric cards (public MetricCard widget) ───────────────────────────────
-    let metric_grid = dashboard_grid();
+    // ── Metric row (4 cards side by side) ────────────────────────────────────
+    let metric_row = GtkBox::new(Orientation::Horizontal, 8);
+    metric_row.set_margin_bottom(8);
+
     let (load_card, load, load_sub, load_bar) =
-        super::metric_card("Load", "utilities-system-monitor-symbolic");
+        super::metric_card("CPU", "utilities-system-monitor-symbolic");
     let (memory_card, memory, memory_sub, memory_bar) =
         super::metric_card("Memory", "media-flash-symbolic");
     let (disk_card, disk, disk_sub, disk_bar) =
         super::metric_card("Disk", "drive-harddisk-symbolic");
-    let (processes_card, processes, _actions_row) =
-        super::control_card("Processes", "application-x-executable-symbolic");
+
+    let thermal_card = GtkBox::new(Orientation::Vertical, 4);
+    thermal_card.add_css_class("dashboard-card");
+    thermal_card.set_hexpand(true);
+    let thermal_header = GtkBox::new(Orientation::Horizontal, 6);
+    let thermal_icon = super::icons::fa_icon("weather-clear-symbolic", 14);
+    let thermal_title = Label::new(Some("Temp"));
+    thermal_title.add_css_class("dashboard-card-title");
+    thermal_title.set_hexpand(true);
+    thermal_title.set_xalign(0.0);
+    thermal_header.append(&thermal_icon);
+    thermal_header.append(&thermal_title);
+    thermal_card.append(&thermal_header);
+    let thermal = Label::new(Some("—"));
+    thermal.add_css_class("dashboard-metric-value");
+    thermal.set_xalign(0.0);
+    thermal_card.append(&thermal);
 
     let load_graph = metric_graph();
     let memory_graph = metric_graph();
@@ -509,26 +545,24 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     load_card.append(&load_graph.area);
     memory_card.append(&memory_graph.area);
     disk_card.append(&disk_graph.area);
-    metric_grid.attach(&load_card, 0, 0, 1, 1);
-    metric_grid.attach(&memory_card, 1, 0, 1, 1);
-    metric_grid.attach(&disk_card, 0, 1, 1, 1);
-    metric_grid.attach(&processes_card, 1, 1, 1, 1);
-    root.append(&metric_grid);
 
-    // ── Control cards (public ControlCard widget) ─────────────────────────────
+    metric_row.append(&load_card);
+    metric_row.append(&memory_card);
+    metric_row.append(&disk_card);
+    metric_row.append(&thermal_card);
+    root.append(&metric_row);
+
+    // ── Control grid (2×2) ────────────────────────────────────────────────────
     let control_grid = dashboard_grid();
+
     let (network_card, network, network_row) =
         super::control_card("Network", "network-wireless-symbolic");
     let (audio_card, audio, audio_row) =
-        super::control_card("Audio Mixer", "audio-volume-high-symbolic");
-    let (battery_card, battery, power_row) =
-        super::control_card("Power", "battery-good-symbolic");
+        super::control_card("Audio", "audio-volume-high-symbolic");
     let (media_card, media, media_row) =
         super::control_card("Media", "media-playback-start-symbolic");
     let (notifications_card, notifications, notify_row) =
         super::control_card("Notifications", "preferences-system-notifications-symbolic");
-    let (ai_card, _ai_state, ai_row) =
-        super::control_card("AI & System", "system-search-symbolic");
 
     let open_network = dashboard_button("Open");
     let toggle_wifi = dashboard_button("Wi-Fi");
@@ -540,13 +574,6 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     audio_row.append(&open_audio);
     audio_row.append(&toggle_mute);
 
-    let lock = dashboard_button("Lock");
-    let suspend = dashboard_button("Suspend");
-    let toggle_bluetooth = dashboard_button("Bluetooth");
-    power_row.append(&lock);
-    power_row.append(&suspend);
-    power_row.append(&toggle_bluetooth);
-
     let open_media = dashboard_button("Open");
     media_row.append(&open_media);
 
@@ -555,42 +582,45 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     notify_row.append(&open_notifications);
     notify_row.append(&toggle_dnd);
 
-    let open_ai = dashboard_button("AI Chat");
-    let open_system = dashboard_button("System");
-    ai_row.append(&open_ai);
-    ai_row.append(&open_system);
-
-    let dashboard_cards = vec![
-        network_card,
-        audio_card,
-        battery_card.clone(),
-        media_card,
-        notifications_card,
-        ai_card,
-    ];
-    layout_dashboard_cards(&control_grid, &dashboard_cards);
+    control_grid.attach(&network_card, 0, 0, 1, 1);
+    control_grid.attach(&audio_card, 1, 0, 1, 1);
+    control_grid.attach(&media_card, 0, 1, 1, 1);
+    control_grid.attach(&notifications_card, 1, 1, 1, 1);
     root.append(&control_grid);
+
+    // ── Quick actions row ─────────────────────────────────────────────────────
+    let quick_row = GtkBox::new(Orientation::Horizontal, 6);
+    quick_row.set_margin_top(8);
+    let open_ai = dashboard_button("AI Chat");
+    let open_system = dashboard_button("System Monitor");
+    let lock = dashboard_button("Lock");
+    let suspend = dashboard_button("Suspend");
+    let toggle_bluetooth = dashboard_button("Bluetooth");
+    quick_row.append(&open_ai);
+    quick_row.append(&open_system);
+    quick_row.append(&lock);
+    quick_row.append(&suspend);
+    quick_row.append(&toggle_bluetooth);
+    root.append(&quick_row);
 
     let view = DashboardView {
         root,
         clock,
         date,
         uptime,
+        battery,
+        processes,
         load,
         load_sub,
         memory,
         memory_sub,
         disk,
         disk_sub,
+        thermal,
         network,
-        battery,
-        battery_card,
-        dashboard_cards,
-        control_grid,
         audio,
         media,
         notifications,
-        processes,
         load_bar,
         memory_bar,
         disk_bar,
@@ -1213,9 +1243,17 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     view.processes.set_text(
         &snapshot
             .process_count
-            .map(|count| count.to_string())
-            .unwrap_or_else(|| "—".to_string()),
+            .map(|count| format!("{count} proc"))
+            .unwrap_or_default(),
     );
+}
+
+pub fn set_dashboard_thermal(view: &DashboardView, celsius: Option<f32>) {
+    if let Some(t) = celsius {
+        view.thermal.set_text(&format!("{t:.0} °C"));
+    } else {
+        view.thermal.set_text("—");
+    }
 }
 
 pub fn set_dashboard_network_snapshot(view: &DashboardView, snapshot: &NetworkSnapshot) {
@@ -1254,20 +1292,16 @@ pub fn set_dashboard_network_snapshot(view: &DashboardView, snapshot: &NetworkSn
 
 pub fn set_dashboard_battery_snapshot(view: &DashboardView, snapshot: &BatterySnapshot) {
     let Some(battery) = snapshot.primary() else {
-        view.battery_card.set_visible(false);
-        layout_dashboard_cards(&view.control_grid, &view.dashboard_cards);
+        view.battery.set_visible(false);
         return;
     };
-    view.battery_card.set_visible(true);
-    layout_dashboard_cards(&view.control_grid, &view.dashboard_cards);
-
     let capacity = battery
         .capacity_percent
         .map(|value| format!("{value}%"))
-        .unwrap_or("unknown".to_string());
-    let status = battery.status.as_deref().unwrap_or("unknown");
-    view.battery
-        .set_text(&format!("{}  {capacity}  {status}", battery.name));
+        .unwrap_or_default();
+    let status = battery.status.as_deref().unwrap_or("");
+    view.battery.set_text(&format!("⚡ {capacity} {status}").trim().to_string());
+    view.battery.set_visible(true);
 }
 
 pub fn set_dashboard_audio_snapshot(view: &DashboardView, snapshot: &AudioSnapshot) {
@@ -1438,6 +1472,14 @@ pub fn snippet_manager_view(items: &[SnippetSummary]) -> SnippetManagerView {
     SnippetManagerView { root, list }
 }
 
+fn dashboard_stat_chip() -> Label {
+    let label = Label::new(None);
+    label.add_css_class("dashboard-stat-chip");
+    label.set_xalign(0.5);
+    label.set_valign(gtk::Align::Center);
+    label
+}
+
 fn dashboard_value_label() -> Label {
     let label = Label::new(None);
     label.add_css_class("dashboard-clock");
@@ -1508,15 +1550,6 @@ fn dashboard_button(label: &str) -> Button {
     button
 }
 
-fn layout_dashboard_cards(grid: &Grid, cards: &[GtkBox]) {
-    while let Some(child) = grid.first_child() {
-        grid.remove(&child);
-    }
-
-    for (index, card) in cards.iter().filter(|card| card.is_visible()).enumerate() {
-        grid.attach(card, (index % 2) as i32, (index / 2) as i32, 1, 1);
-    }
-}
 
 fn audio_device_controls(
     card: &GtkBox,
@@ -1648,52 +1681,55 @@ fn audio_stream_row(stream: &AudioStreamSnapshot) -> gtk::ListBoxRow {
 fn metric_graph() -> MetricGraph {
     let area = DrawingArea::new();
     area.add_css_class("metric-graph");
-    area.set_content_height(36);
-    area.set_size_request(-1, 36);
+    area.set_content_height(52);
+    area.set_size_request(-1, 52);
     area.set_hexpand(true);
     let values = Rc::new(RefCell::new(Vec::<f64>::new()));
     let draw_values = Rc::clone(&values);
     area.set_draw_func(move |_, cr, width, height| {
         let values = draw_values.borrow();
-        if width <= 1 || height <= 1 {
+        let w = width as f64;
+        let h = height as f64;
+        if w <= 1.0 || h <= 1.0 || values.is_empty() {
             return;
         }
 
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.06);
-        cr.rectangle(0.0, 0.0, width as f64, height as f64);
-        let _ = cr.fill();
+        let n = values.len();
+        let step = w / (n.saturating_sub(1).max(1)) as f64;
 
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.10);
-        cr.set_line_width(1.0);
-        for line in [0.33_f64, 0.66] {
-            let y = height as f64 * line;
-            cr.move_to(0.0, y);
-            cr.line_to(width as f64, y);
-            let _ = cr.stroke();
+        // Compute y positions
+        let ys: Vec<f64> = values
+            .iter()
+            .map(|v| h - (v.clamp(0.0, 1.0) * (h - 2.0)) - 1.0)
+            .collect();
+
+        // ── Fill under the line ───────────────────────────────────────────────
+        cr.move_to(0.0, h);
+        for (i, &y) in ys.iter().enumerate() {
+            cr.line_to(i as f64 * step, y);
         }
+        cr.line_to((n - 1) as f64 * step, h);
+        cr.close_path();
 
-        if values.is_empty() {
-            return;
-        }
+        // Gradient fill: accent color at top, transparent at bottom
+        let gradient = cairo::LinearGradient::new(0.0, 0.0, 0.0, h);
+        gradient.add_color_stop_rgba(0.0, 0.54, 0.706, 0.973, 0.28);
+        gradient.add_color_stop_rgba(1.0, 0.54, 0.706, 0.973, 0.02);
+        cr.set_source(&gradient).ok();
+        cr.fill().ok();
 
-        let mut points = values.iter().copied().collect::<Vec<_>>();
-        if points.len() == 1 {
-            points.insert(0, points[0]);
-        }
-
-        cr.set_source_rgba(0.31, 0.67, 0.98, 0.92);
-        cr.set_line_width(2.0);
-        let step = width as f64 / points.len().saturating_sub(1).max(1) as f64;
-        for (index, value) in points.iter().enumerate() {
-            let x = index as f64 * step;
-            let y = height as f64 - (value.clamp(0.0, 1.0) * height as f64);
-            if index == 0 {
+        // ── Line on top ───────────────────────────────────────────────────────
+        cr.set_source_rgba(0.54, 0.706, 0.973, 0.88);
+        cr.set_line_width(1.5);
+        for (i, &y) in ys.iter().enumerate() {
+            let x = i as f64 * step;
+            if i == 0 {
                 cr.move_to(x, y);
             } else {
                 cr.line_to(x, y);
             }
         }
-        let _ = cr.stroke();
+        cr.stroke().ok();
     });
 
     MetricGraph { area, values }
@@ -1701,11 +1737,9 @@ fn metric_graph() -> MetricGraph {
 
 fn push_metric_graph(graph: &MetricGraph, value: f64) {
     let mut values = graph.values.borrow_mut();
-    if values.is_empty() {
-        values.extend(std::iter::repeat(value.clamp(0.0, 1.0)).take(12));
-    }
+    // Start empty — graph fills from left as data arrives
     values.push(value.clamp(0.0, 1.0));
-    if values.len() > 48 {
+    if values.len() > 60 {
         values.remove(0);
     }
     graph.area.queue_draw();

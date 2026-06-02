@@ -1,4 +1,5 @@
 mod forms;
+pub(crate) mod icons;
 mod launcher;
 mod launcher_helpers;
 mod launcher_views;
@@ -25,7 +26,7 @@ pub use views::{
     set_action_panel_items, set_action_panel_list, set_audio_snapshot, set_clipboard_detail,
     set_clipboard_history_items, set_dashboard_audio_snapshot, set_dashboard_battery_snapshot,
     set_dashboard_media_snapshot, set_dashboard_network_snapshot,
-    set_dashboard_notification_snapshot, set_dashboard_snapshot, set_media_snapshot,
+    set_dashboard_notification_snapshot, set_dashboard_snapshot, set_dashboard_thermal, set_media_snapshot,
     set_network_snapshot, set_notification_snapshot, set_script_output, set_snippet_items,
     set_system_monitor_snapshot, set_system_monitor_thermal_snapshot, snippet_manager_view,
     system_monitor_view,

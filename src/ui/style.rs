@@ -18,7 +18,7 @@ pub fn install_css() {
     let subtitle_size = font_size.saturating_sub(3).max(11);
     let search_size = font_size + 2;
     let panel_title_size = font_size + 1;
-    let dashboard_clock_size = font_size + 11;
+    let dashboard_clock_size = font_size + 18;
 
     let density = preferences
         .get("ui_density")
@@ -33,6 +33,13 @@ pub fn install_css() {
     apply_gtk_theme(theme);
 
     let css = "
+        entry,
+        entry:focus,
+        entry:focus-visible {
+          outline: none;
+          box-shadow: none;
+        }
+
         .launcher-window {
           background: alpha(@window_bg_color, 0.985);
           border: 1px solid alpha(@window_fg_color, 0.12);
@@ -66,6 +73,12 @@ pub fn install_css() {
           padding: 0 4px;
           background: transparent;
           border: none;
+          box-shadow: none;
+          outline: none;
+        }
+
+        .search-entry:focus {
+          outline: none;
           box-shadow: none;
         }
 
@@ -130,6 +143,13 @@ pub fn install_css() {
           color: alpha(@window_fg_color, 0.8);
         }
 
+        .fa-icon {
+          font-family: 'Font Awesome 6 Free', 'Font Awesome 6 Free Solid',
+                       'FontAwesome', 'Font Awesome 5 Free';
+          font-weight: 900;
+          color: alpha(@window_fg_color, 0.72);
+        }
+
         .action-bar {
           padding: 7px 12px;
           border-top: 1px solid alpha(@window_fg_color, 0.08);
@@ -172,6 +192,22 @@ pub fn install_css() {
         .dashboard-clock {
           font-size: __DASHBOARD_CLOCK_SIZE__px;
           font-weight: 700;
+          letter-spacing: -0.5px;
+        }
+
+        .dashboard-date {
+          color: alpha(@window_fg_color, 0.52);
+          font-size: __FONT_SIZE__px;
+          font-weight: 400;
+        }
+
+        .dashboard-stat-chip {
+          color: alpha(@window_fg_color, 0.68);
+          font-size: __SUBTITLE_SIZE__px;
+          padding: 3px 10px;
+          border-radius: 20px;
+          background: alpha(@window_fg_color, 0.06);
+          border: 1px solid alpha(@window_fg_color, 0.09);
         }
 
         .dashboard-header {
@@ -186,53 +222,67 @@ pub fn install_css() {
         }
 
         .dashboard-card {
-          min-height: 72px;
-          padding: 10px;
-          border-radius: 8px;
-          background: alpha(@window_fg_color, 0.045);
-          border: 1px solid alpha(@window_fg_color, 0.075);
+          min-height: 86px;
+          padding: 10px 12px;
+          border-radius: 10px;
+          background: alpha(@window_fg_color, 0.042);
+          border: 1px solid alpha(@window_fg_color, 0.07);
         }
 
         .dashboard-card-title {
-          color: alpha(@window_fg_color, 0.72);
+          color: alpha(@window_fg_color, 0.60);
           font-size: __SUBTITLE_SIZE__px;
           font-weight: 600;
-          min-height: 18px;
+          min-height: 16px;
+        }
+
+        .dashboard-metric-value {
+          color: @window_fg_color;
+          font-size: __FONT_SIZE__px;
+          font-weight: 700;
+          min-height: 20px;
         }
 
         .dashboard-card-value {
-          color: @window_fg_color;
+          color: alpha(@window_fg_color, 0.80);
           font-size: __SUBTITLE_SIZE__px;
-          min-height: 18px;
+          min-height: 16px;
         }
 
         .dashboard-card-actions {
-          padding-top: 2px;
+          padding-top: 4px;
+          gap: 4px;
         }
 
         .dashboard-button {
-          min-height: 26px;
+          min-height: 24px;
           padding: 0 8px;
-          border-radius: 7px;
+          border-radius: 6px;
           font-size: __SUBTITLE_SIZE__px;
+          background: alpha(@window_fg_color, 0.06);
+          border: 1px solid alpha(@window_fg_color, 0.09);
+        }
+
+        .dashboard-button:hover {
+          background: alpha(@window_fg_color, 0.10);
         }
 
         .dashboard-metric-bar trough {
-          min-height: 6px;
-          border-radius: 4px;
+          min-height: 3px;
+          border-radius: 2px;
           background: alpha(@window_fg_color, 0.10);
         }
 
         .dashboard-metric-bar progress {
-          min-height: 6px;
-          border-radius: 4px;
-          background: @accent_color;
+          min-height: 3px;
+          border-radius: 2px;
+          background: alpha(@accent_color, 0.72);
         }
 
         .metric-graph {
-          min-height: 36px;
+          min-height: 52px;
           border-radius: 6px;
-          background: alpha(@window_fg_color, 0.035);
+          margin-top: 6px;
         }
 
         .audio-volume-bar trough {
