@@ -33,4 +33,76 @@ pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
         "translate_target",
         "Translate target language (e.g. en, ru, de)",
     ),
+    (
+        "script_dirs",
+        "Script directories (comma-separated paths)",
+    ),
+];
+
+pub(crate) struct PrefSection {
+    pub(crate) name: &'static str,
+    pub(crate) keys: &'static [(&'static str, &'static str)],
+}
+
+pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
+    PrefSection {
+        name: "Appearance",
+        keys: &[
+            ("ui_font_family", "Font family (restart required)"),
+            ("ui_font_size", "Font size 12-22 (restart required)"),
+        ],
+    },
+    PrefSection {
+        name: "General",
+        keys: &[
+            ("show_status_strip", "Show status strip (true/false)"),
+            (
+                "status_items",
+                "Status items (clock,date,network,battery,audio,media)",
+            ),
+            ("dashboard_enabled", "Dashboard enabled (true/false)"),
+            (
+                "dashboard_poll_interval_ms",
+                "Dashboard refresh interval (ms)",
+            ),
+        ],
+    },
+    PrefSection {
+        name: "Features",
+        keys: &[
+            ("network_enabled", "Network features (true/false)"),
+            ("media_enabled", "Media features (true/false)"),
+            (
+                "notifications_enabled",
+                "Notifications features (true/false)",
+            ),
+        ],
+    },
+    PrefSection {
+        name: "AI",
+        keys: &[
+            ("ai_enabled", "AI features enabled (true/false)"),
+            ("ai_provider", "AI provider (ollama/openai)"),
+            ("ollama_endpoint", "Ollama endpoint"),
+            ("ollama_model", "Ollama model"),
+            ("ai_endpoint", "AI/OpenAI endpoint"),
+            ("ai_model", "AI model"),
+            ("ai_api_key", "AI API key"),
+        ],
+    },
+    PrefSection {
+        name: "Extensions",
+        keys: &[
+            (
+                "script_dirs",
+                "Script directories (comma-separated paths)",
+            ),
+            ("translate_endpoint", "Translate endpoint (LibreTranslate)"),
+            ("translate_api_key", "Translate API key"),
+            (
+                "translate_target",
+                "Translate target language (e.g. en, ru, de)",
+            ),
+        ],
+    },
 ];

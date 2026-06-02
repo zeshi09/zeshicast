@@ -1,7 +1,7 @@
 use gtk::prelude::*;
 use gtk::{
     ApplicationWindow, Box as GtkBox, Button, Image, Label, ListBox, ListBoxRow, Orientation,
-    PolicyType, ScrolledWindow,
+    PolicyType, ProgressBar, ScrolledWindow,
 };
 
 use crate::Action;
@@ -135,6 +135,77 @@ pub fn result_row(action: &Action) -> ListBoxRow {
     layout.append(&category);
     row.set_child(Some(&layout));
     row
+}
+
+/// Compact reusable card with title, icon, value label, subtitle, and progress bar.
+/// Used in Dashboard and System Monitor for CPU/memory/disk/battery metrics.
+pub fn metric_card(
+    title: &str,
+    icon_name: &str,
+) -> (GtkBox, Label, Label, ProgressBar) {
+    let card = GtkBox::new(Orientation::Vertical, 4);
+    card.add_css_class("dashboard-card");
+    card.set_hexpand(true);
+
+    let header = GtkBox::new(Orientation::Horizontal, 6);
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(16);
+    icon.add_css_class("result-icon");
+    let title_label = Label::new(Some(title));
+    title_label.add_css_class("dashboard-card-title");
+    title_label.set_hexpand(true);
+    title_label.set_xalign(0.0);
+    let value_label = Label::new(None);
+    value_label.add_css_class("dashboard-card-value");
+    value_label.set_xalign(1.0);
+    header.append(&icon);
+    header.append(&title_label);
+    header.append(&value_label);
+    card.append(&header);
+
+    let subtitle_label = Label::new(None);
+    subtitle_label.add_css_class("result-subtitle");
+    subtitle_label.set_xalign(0.0);
+    subtitle_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    card.append(&subtitle_label);
+
+    let bar = ProgressBar::new();
+    bar.add_css_class("dashboard-metric-bar");
+    card.append(&bar);
+
+    (card, value_label, subtitle_label, bar)
+}
+
+/// Reusable card with title, icon, a status label, and optional action buttons row.
+/// Used in Dashboard for network/audio/media/notifications control surfaces.
+pub fn control_card(title: &str, icon_name: &str) -> (GtkBox, Label, GtkBox) {
+    let card = GtkBox::new(Orientation::Vertical, 4);
+    card.add_css_class("dashboard-card");
+    card.set_hexpand(true);
+
+    let header = GtkBox::new(Orientation::Horizontal, 6);
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(16);
+    icon.add_css_class("result-icon");
+    let title_label = Label::new(Some(title));
+    title_label.add_css_class("dashboard-card-title");
+    title_label.set_hexpand(true);
+    title_label.set_xalign(0.0);
+    header.append(&icon);
+    header.append(&title_label);
+    card.append(&header);
+
+    let state_label = Label::new(None);
+    state_label.add_css_class("dashboard-card-value");
+    state_label.set_xalign(0.0);
+    state_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    card.append(&state_label);
+
+    let actions_row = GtkBox::new(Orientation::Horizontal, 4);
+    actions_row.add_css_class("dashboard-card-actions");
+    card.append(&actions_row);
+
+    (card, state_label, actions_row)
 }
 
 pub fn section_header(title: &str) -> ListBoxRow {

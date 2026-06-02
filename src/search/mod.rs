@@ -7,6 +7,7 @@ pub(crate) mod media;
 pub(crate) mod named_values;
 pub(crate) mod notifications;
 pub(crate) mod processes;
+pub(crate) mod scripts;
 pub(crate) mod system;
 pub(crate) mod web;
 pub(crate) mod windows;
@@ -18,6 +19,7 @@ use crate::{
     search_niri_actions, search_notification_actions, search_processes, search_sway_actions,
     search_system_actions, search_translate, search_windows,
 };
+use scripts::search_scripts;
 
 pub(crate) struct SearchContext<'a> {
     pub(crate) query: &'a str,
@@ -212,3 +214,15 @@ impl SearchProvider for ProcessesProvider {
         }
     }
 }
+
+pub(crate) struct ScriptsProvider<'a> {
+    pub(crate) entries: &'a [scripts::ScriptEntry],
+}
+
+impl SearchProvider for ScriptsProvider<'_> {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        search_scripts(self.entries, context.query)
+    }
+}
+
+pub(crate) use scripts::{ScriptEntry, load_script_entries};

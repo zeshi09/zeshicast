@@ -8,13 +8,15 @@ use crate::{
     CommandEntry, CommandsProvider, FileEntry, FilesProvider, HyprlandProvider, LauncherCommand,
     MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider, NamedValue, NamedValuesProvider,
     NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext, ProcessesProvider,
-    SearchContext, SearchProvider, SecondaryAction, SecondaryActionKind, ShellCommand,
-    SwayProvider, SystemProvider, WebProvider, WindowsProvider, app_action, append_alias,
-    expand_placeholders, fuzzy_score, home_dir, load_aliases, load_apps, load_clipboard_history,
-    load_command_entries, load_file_index, load_frequencies, load_lines, load_named_values,
-    load_preferences, normalize_alias, search_audio_actions, search_media_actions,
-    search_network_actions, search_notification_actions, search_system_actions, spawn_shell,
-    write_clipboard_history, write_frequencies, write_lines, write_preferences,
+    ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SecondaryAction,
+    SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
+    app_action, append_alias, expand_placeholders, fuzzy_score, home_dir, load_aliases, load_apps,
+    load_clipboard_history, load_clipboard_timestamps, load_command_entries, load_file_index,
+    load_frequencies, load_lines, load_named_values, load_preferences, load_script_entries,
+    normalize_alias, search_audio_actions,
+    search_media_actions, search_network_actions, search_notification_actions,
+    search_system_actions, spawn_shell, unix_now, write_clipboard_history,
+    write_clipboard_timestamps, write_frequencies, write_lines, write_preferences,
 };
 
 #[derive(Debug, Clone)]
@@ -23,7 +25,9 @@ pub struct Zeshicast {
     pub(crate) quicklinks: Vec<NamedValue>,
     pub(crate) snippets: Vec<NamedValue>,
     pub(crate) commands: Vec<CommandEntry>,
+    pub(crate) scripts: Vec<ScriptEntry>,
     pub(crate) clipboard_history: Vec<String>,
+    pub(crate) clipboard_timestamps: HashMap<String, i64>,
     pub(crate) preferences: HashMap<String, String>,
     pub(crate) aliases: HashMap<String, String>,
     pub(crate) pins: HashSet<String>,
@@ -75,6 +79,7 @@ pub struct ClipboardSummary {
     pub value: String,
     pub kind: ClipboardKind,
     pub size_bytes: usize,
+    pub timestamp: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -165,13 +170,20 @@ impl Zeshicast {
     pub fn load() -> Self {
         let home = home_dir();
         let config_dir = home.join(".config/zeshicast");
+        let preferences = load_preferences(&config_dir.join("preferences.toml"));
+        let clipboard_history = load_clipboard_history(&config_dir.join("clipboard.txt"));
+        let clipboard_timestamps =
+            load_clipboard_timestamps(&config_dir.join("clipboard_timestamps.json"));
+        let script_dirs = preference_script_dirs(&preferences, &config_dir);
         Self {
             apps: load_apps(&home),
             quicklinks: load_named_values(&config_dir.join("quicklinks.txt")),
             snippets: load_named_values(&config_dir.join("snippets.txt")),
             commands: load_command_entries(&config_dir.join("commands")),
-            clipboard_history: load_clipboard_history(&config_dir.join("clipboard.txt")),
-            preferences: load_preferences(&config_dir.join("preferences.toml")),
+            scripts: load_script_entries(&script_dirs),
+            clipboard_history,
+            clipboard_timestamps,
+            preferences,
             aliases: load_aliases(&config_dir.join("aliases.txt")),
             pins: load_lines(&config_dir.join("pins.txt"))
                 .into_iter()
@@ -287,6 +299,7 @@ impl Zeshicast {
         if self.preference_enabled("ai_enabled", true) {
             actions.extend(WebProvider.search(&search_context));
         }
+        actions.extend(ScriptsProvider { entries: &self.scripts }.search(&search_context));
         actions.extend(
             ClipboardProvider {
                 entries: &self.clipboard_history,
@@ -334,16 +347,19 @@ impl Zeshicast {
     }
 
     pub fn available_secondary_actions(&self, action: &Action) -> Vec<SecondaryAction> {
+        use crate::ActionPanelSection as S;
         let mut actions = vec![
             SecondaryAction::new(
                 SecondaryActionKind::Run,
                 "Run",
                 "media-playback-start-symbolic",
+                S::Primary,
             ),
             SecondaryAction::new(
                 SecondaryActionKind::CopyValue,
                 "Copy Value",
                 "edit-copy-symbolic",
+                S::Primary,
             ),
         ];
 
@@ -352,6 +368,7 @@ impl Zeshicast {
                 SecondaryActionKind::OpenParent,
                 "Open Containing Folder",
                 "folder-open-symbolic",
+                S::Primary,
             ));
         }
 
@@ -360,11 +377,13 @@ impl Zeshicast {
                 SecondaryActionKind::DeleteClipboardItem,
                 "Delete Clipboard Item",
                 "edit-delete-symbolic",
+                S::Clipboard,
             ));
             actions.push(SecondaryAction::new(
                 SecondaryActionKind::ClearClipboardHistory,
                 "Clear Clipboard History",
                 "edit-clear-symbolic",
+                S::Danger,
             ));
         }
 
@@ -373,16 +392,32 @@ impl Zeshicast {
                 SecondaryActionKind::Unpin,
                 "Unpin",
                 "view-pin-symbolic",
+                S::Manage,
             ));
         } else {
             actions.push(SecondaryAction::new(
                 SecondaryActionKind::Pin,
                 "Pin",
                 "view-pin-symbolic",
+                S::Manage,
             ));
         }
 
         actions
+    }
+
+    pub fn is_recent(&self, action: &Action) -> bool {
+        let identity = action.identity().to_lowercase();
+        self.recent.iter().any(|entry| entry == &identity)
+    }
+
+    pub fn recent_top_identities(&self, count: usize) -> Vec<String> {
+        self.recent
+            .iter()
+            .filter(|id| !self.pins.contains(*id))
+            .take(count)
+            .cloned()
+            .collect()
     }
 
     pub fn run_secondary_action(
@@ -408,13 +443,11 @@ impl Zeshicast {
             return Ok(false);
         }
 
+        self.clipboard_timestamps.entry(text.clone()).or_insert_with(unix_now);
         self.clipboard_history.retain(|entry| entry != &text);
         self.clipboard_history.insert(0, text);
         self.clipboard_history.truncate(MAX_CLIPBOARD_ENTRIES);
-        write_clipboard_history(
-            &self.config_dir.join("clipboard.txt"),
-            &self.clipboard_history,
-        )?;
+        self.write_clipboard()?;
         Ok(true)
     }
 
@@ -424,18 +457,26 @@ impl Zeshicast {
     }
 
     pub fn delete_clipboard_value(&mut self, value: &str) -> io::Result<()> {
-        self.clipboard_history.retain(|entry| entry != &value);
-        write_clipboard_history(
-            &self.config_dir.join("clipboard.txt"),
-            &self.clipboard_history,
-        )
+        self.clipboard_history.retain(|entry| entry != value);
+        self.clipboard_timestamps.remove(value);
+        self.write_clipboard()
     }
 
     pub fn clear_clipboard_history(&mut self) -> io::Result<()> {
         self.clipboard_history.clear();
+        self.clipboard_timestamps.clear();
+        self.write_clipboard()
+    }
+
+    fn write_clipboard(&self) -> io::Result<()> {
         write_clipboard_history(
             &self.config_dir.join("clipboard.txt"),
             &self.clipboard_history,
+        )?;
+        write_clipboard_timestamps(
+            &self.config_dir.join("clipboard_timestamps.json"),
+            &self.clipboard_history,
+            &self.clipboard_timestamps,
         )
     }
 
@@ -447,6 +488,7 @@ impl Zeshicast {
                 value: entry.clone(),
                 kind: classify_clipboard_text(entry),
                 size_bytes: entry.len(),
+                timestamp: self.clipboard_timestamps.get(entry).copied(),
             })
             .collect()
     }
@@ -793,6 +835,21 @@ fn parse_bool_preference(value: &str) -> Option<bool> {
         "false" | "no" | "off" | "0" => Some(false),
         _ => None,
     }
+}
+
+fn preference_script_dirs(
+    preferences: &HashMap<String, String>,
+    config_dir: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    let custom = preferences.get("script_dirs").map(|value| {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .collect::<Vec<_>>()
+    });
+    custom.unwrap_or_else(|| vec![config_dir.join("scripts")])
 }
 
 #[derive(Debug, Clone)]

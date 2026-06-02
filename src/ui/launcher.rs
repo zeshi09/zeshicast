@@ -9,8 +9,8 @@ use crate::ui::launcher_views::{
     show_network_view, show_notifications_view, show_system_monitor_view,
 };
 use crate::{
-    Action, ClipboardKind, ClipboardSummary, SecondaryActionKind, SnippetSummary, Zeshicast,
-    ui::ActionPanelDisplayItem,
+    Action, ActionPanelSection, ClipboardKind, ClipboardSummary, SecondaryActionKind,
+    SnippetSummary, Zeshicast, ui::ActionPanelDisplayItem,
 };
 use gtk::gdk;
 use gtk::gio;
@@ -25,6 +25,7 @@ pub type WindowConfigurator = fn(&ApplicationWindow);
 #[derive(Clone)]
 struct ActionPanelItem {
     display: ActionPanelDisplayItem,
+    section: ActionPanelSection,
     kind: ActionPanelItemKind,
 }
 
@@ -923,14 +924,19 @@ fn append_grouped_root_actions(
     list: &ListBox,
     actions: Vec<Action>,
 ) -> Vec<Action> {
-    let sections = ["Favourites", "Command Center", "Applications", "Library"];
+    let recent_top: std::collections::HashSet<String> = launcher
+        .recent_top_identities(8)
+        .into_iter()
+        .collect();
+
+    let sections = ["Favourites", "Recent", "Command Center", "Applications", "Library"];
     let mut buckets = sections
         .iter()
         .map(|section| (*section, Vec::<Action>::new()))
         .collect::<Vec<_>>();
 
     for action in actions {
-        let section = root_action_section(launcher, &action);
+        let section = root_action_section(launcher, &action, &recent_top);
         if let Some((_, actions)) = buckets.iter_mut().find(|(name, _)| *name == section) {
             actions.push(action);
         }
@@ -950,9 +956,18 @@ fn append_grouped_root_actions(
     displayed_actions
 }
 
-fn root_action_section(launcher: &Zeshicast, action: &Action) -> &'static str {
+fn root_action_section(
+    launcher: &Zeshicast,
+    action: &Action,
+    recent_top: &std::collections::HashSet<String>,
+) -> &'static str {
     if launcher.is_pinned(action) {
         return "Favourites";
+    }
+
+    let identity = action.identity().to_lowercase();
+    if recent_top.contains(&identity) {
+        return "Recent";
     }
 
     match action.category.as_str() {
@@ -1396,7 +1411,10 @@ fn show_action_panel_view(
             display: ActionPanelDisplayItem {
                 title: secondary.title,
                 icon_name: secondary.icon_name,
+                is_section_header: false,
+                is_destructive: secondary.section.is_danger(),
             },
+            section: secondary.section,
             kind: ActionPanelItemKind::Secondary(secondary.kind),
         })
         .collect::<Vec<_>>();
@@ -1404,7 +1422,10 @@ fn show_action_panel_view(
         display: ActionPanelDisplayItem {
             title: "Set Alias".to_string(),
             icon_name: "insert-link-symbolic".to_string(),
+            is_section_header: false,
+            is_destructive: false,
         },
+        section: ActionPanelSection::Manage,
         kind: ActionPanelItemKind::SetAlias,
     });
 
@@ -1440,7 +1461,33 @@ fn filter_action_panel_items(
 }
 
 fn action_panel_displays(items: &[ActionPanelItem]) -> Vec<ActionPanelDisplayItem> {
-    items.iter().map(|item| item.display.clone()).collect()
+    const SECTION_ORDER: &[ActionPanelSection] = &[
+        ActionPanelSection::Primary,
+        ActionPanelSection::Manage,
+        ActionPanelSection::Clipboard,
+        ActionPanelSection::Danger,
+    ];
+
+    let mut result = Vec::new();
+    for &section in SECTION_ORDER {
+        let section_items: Vec<&ActionPanelItem> = items
+            .iter()
+            .filter(|item| item.section == section)
+            .collect();
+        if section_items.is_empty() {
+            continue;
+        }
+        result.push(ActionPanelDisplayItem {
+            title: section.title().to_string(),
+            icon_name: String::new(),
+            is_section_header: true,
+            is_destructive: false,
+        });
+        for item in section_items {
+            result.push(item.display.clone());
+        }
+    }
+    result
 }
 
 fn run_action_panel_row(

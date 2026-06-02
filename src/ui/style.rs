@@ -262,6 +262,89 @@ pub fn install_css() {
         .process-memory-bar progress {
           min-height: 4px;
         }
+
+        .action-section-row {
+          min-height: 24px;
+        }
+
+        .action-section-label {
+          color: alpha(@window_fg_color, 0.50);
+          font-size: __SUBTITLE_SIZE__px;
+          font-weight: 600;
+          min-height: 14px;
+          padding-top: 6px;
+          padding-bottom: 2px;
+        }
+
+        .result-row.danger {
+          color: #ff6b5f;
+        }
+
+        .result-row.danger .result-title {
+          color: #ff6b5f;
+        }
+
+        .result-row.danger .result-icon {
+          color: #ff6b5f;
+        }
+
+        .pref-sidebar {
+          background: alpha(@window_fg_color, 0.04);
+          border-right: 1px solid alpha(@window_fg_color, 0.08);
+          min-width: 160px;
+        }
+
+        .pref-sidebar-row {
+          min-height: 36px;
+          border-radius: 0;
+        }
+
+        .pref-sidebar-row:selected {
+          background: alpha(@accent_color, 0.18);
+          color: @window_fg_color;
+        }
+
+        .pref-sidebar-label {
+          font-size: __FONT_SIZE__px;
+          font-weight: 500;
+        }
+
+        .pref-content {
+          padding: 12px 14px;
+        }
+
+        .pref-field-row {
+          padding: 5px 0;
+        }
+
+        .pref-field-label {
+          font-size: __SUBTITLE_SIZE__px;
+          color: alpha(@window_fg_color, 0.85);
+        }
+
+        .clipboard-ago {
+          color: alpha(@window_fg_color, 0.45);
+          font-size: __SUBTITLE_SIZE__px;
+          min-width: 60px;
+        }
+
+        .ai-context-chip {
+          background: alpha(@accent_color, 0.14);
+          border: 1px solid alpha(@accent_color, 0.3);
+          border-radius: 8px;
+          padding: 2px 8px;
+          font-size: __SUBTITLE_SIZE__px;
+          color: @accent_color;
+        }
+
+        .ai-model-chip {
+          background: alpha(@window_fg_color, 0.07);
+          border: 1px solid alpha(@window_fg_color, 0.12);
+          border-radius: 8px;
+          padding: 2px 8px;
+          font-size: __SUBTITLE_SIZE__px;
+          color: alpha(@window_fg_color, 0.65);
+        }
         "
     .replace("__FONT_FAMILY__", &font_family)
     .replace("__FONT_SIZE__", &font_size.to_string())

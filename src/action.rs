@@ -76,6 +76,29 @@ pub enum SecondaryActionKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionPanelSection {
+    Primary,
+    Manage,
+    Clipboard,
+    Danger,
+}
+
+impl ActionPanelSection {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Primary => "Primary",
+            Self::Manage => "Manage",
+            Self::Clipboard => "Clipboard",
+            Self::Danger => "Danger",
+        }
+    }
+
+    pub fn is_danger(self) -> bool {
+        matches!(self, Self::Danger)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LauncherCommand {
     AiChat,
     Audio,
@@ -91,6 +114,7 @@ pub struct SecondaryAction {
     pub kind: SecondaryActionKind,
     pub title: String,
     pub icon_name: String,
+    pub section: ActionPanelSection,
 }
 
 impl SecondaryAction {
@@ -98,11 +122,13 @@ impl SecondaryAction {
         kind: SecondaryActionKind,
         title: impl Into<String>,
         icon_name: impl Into<String>,
+        section: ActionPanelSection,
     ) -> Self {
         Self {
             kind,
             title: title.into(),
             icon_name: icon_name.into(),
+            section,
         }
     }
 }

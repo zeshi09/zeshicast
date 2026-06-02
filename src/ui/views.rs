@@ -5,8 +5,8 @@ use std::rc::Rc;
 use chrono::Local;
 use gtk::prelude::*;
 use gtk::{
-    Box as GtkBox, Button, DrawingArea, DropDown, Entry, Grid, Image, Label, ListBox, ListBoxRow,
-    Orientation, ProgressBar, StringList,
+    Box as GtkBox, Box, Button, DrawingArea, DropDown, Entry, Grid, Image, Label, ListBox,
+    ListBoxRow, Orientation, ProgressBar, StringList,
 };
 
 use crate::{
@@ -19,6 +19,8 @@ use crate::{
 pub struct ActionPanelDisplayItem {
     pub title: String,
     pub icon_name: String,
+    pub is_section_header: bool,
+    pub is_destructive: bool,
 }
 
 #[derive(Clone)]
@@ -218,14 +220,25 @@ pub fn action_panel_view() -> ActionPanelView {
 }
 
 pub fn ai_chat_view() -> AiChatView {
-    let root = super::panel_root(10, 12);
+    let root = super::panel_root(8, 12);
     root.set_vexpand(true);
 
-    let header = super::panel_title("AI Chat");
-    root.append(&header);
+    let header_row = Box::new(Orientation::Horizontal, 8);
+    let title = super::panel_title("AI Chat");
+    title.set_hexpand(true);
+    let model_chip = Label::new(Some("local model"));
+    model_chip.add_css_class("ai-model-chip");
+    header_row.append(&title);
+    header_row.append(&model_chip);
+    root.append(&header_row);
 
-    let answer_card = dashboard_plain_card("Answer", "system-search-symbolic");
-    answer_card.set_vexpand(true);
+    let answer_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .propagate_natural_height(false)
+        .vexpand(true)
+        .build();
+    answer_scroll.add_css_class("results-scroll");
     let output = Label::new(Some(
         "Ask a quick question to a local Ollama-compatible model.",
     ));
@@ -233,27 +246,36 @@ pub fn ai_chat_view() -> AiChatView {
     output.set_wrap(true);
     output.set_xalign(0.0);
     output.set_yalign(0.0);
-    output.set_vexpand(true);
-    answer_card.append(&output);
-    root.append(&answer_card);
+    output.set_margin_start(4);
+    output.set_margin_end(4);
+    output.set_margin_top(6);
+    output.set_margin_bottom(6);
+    output.set_selectable(true);
+    answer_scroll.set_child(Some(&output));
+    root.append(&answer_scroll);
 
     let composer = dashboard_plain_card("Composer", "document-edit-symbolic");
+
+    let context_row = Box::new(Orientation::Horizontal, 6);
+    let context_chip = Label::new(Some(""));
+    context_chip.add_css_class("ai-context-chip");
+    context_chip.set_visible(false);
+    context_row.append(&context_chip);
+    composer.append(&context_row);
+
     let input = Entry::builder()
-        .placeholder_text("Ask local AI")
+        .placeholder_text("Ask local AI…")
         .hexpand(true)
         .build();
     input.add_css_class("search-entry");
     composer.append(&input);
 
     let buttons = dashboard_card_actions();
-    buttons.set_halign(gtk::Align::End);
-
     let copy = dashboard_button("Copy");
     let use_clipboard = dashboard_button("Use Clipboard");
-    let save = dashboard_button("Save as Snippet");
+    let save = dashboard_button("Save Snippet");
     let ask = dashboard_button("Ask");
     ask.add_css_class("suggested-action");
-
     buttons.append(&copy);
     buttons.append(&use_clipboard);
     buttons.append(&save);
@@ -288,13 +310,41 @@ pub fn set_action_panel_list(list: &ListBox, items: &[ActionPanelDisplayItem]) {
         list.remove(&child);
     }
 
+    let mut first_selectable: Option<gtk::ListBoxRow> = None;
     for item in items {
-        list.append(&super::secondary_action_row(&item.icon_name, &item.title));
+        if item.is_section_header {
+            let row = action_section_header_row(&item.title);
+            list.append(&row);
+        } else {
+            let row = super::secondary_action_row(&item.icon_name, &item.title);
+            if item.is_destructive {
+                row.add_css_class("danger");
+            }
+            if first_selectable.is_none() {
+                first_selectable = Some(row.clone());
+            }
+            list.append(&row);
+        }
     }
 
-    if let Some(row) = list.row_at_index(0) {
+    if let Some(row) = first_selectable {
         list.select_row(Some(&row));
     }
+}
+
+fn action_section_header_row(title: &str) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    row.add_css_class("action-section-row");
+    row.set_selectable(false);
+    row.set_activatable(false);
+
+    let label = Label::new(Some(title));
+    label.add_css_class("action-section-label");
+    label.set_xalign(0.0);
+    label.set_margin_start(10);
+    label.set_margin_end(10);
+    row.set_child(Some(&label));
+    row
 }
 
 pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserView {
@@ -1877,59 +1927,128 @@ pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&Clipboard
 }
 
 pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
-    let root = super::panel_root(12, 16);
-    root.set_vexpand(true);
+    use gtk::{Paned, Stack};
 
+    let outer = super::panel_root(0, 0);
+    outer.set_vexpand(true);
+    outer.set_hexpand(true);
+
+    let header_box = GtkBox::new(Orientation::Horizontal, 0);
+    header_box.set_margin_top(12);
+    header_box.set_margin_start(14);
+    header_box.set_margin_end(14);
+    header_box.set_margin_bottom(8);
     let header = super::panel_title("Preferences");
-    root.append(&header);
+    header_box.append(&header);
+    outer.append(&header_box);
 
-    let fields_box = GtkBox::new(Orientation::Vertical, 8);
-    fields_box.set_vexpand(true);
+    let paned = Paned::new(Orientation::Horizontal);
+    paned.set_vexpand(true);
+    paned.set_hexpand(true);
+    paned.set_position(160);
+    paned.set_shrink_start_child(false);
+    paned.set_shrink_end_child(false);
+
+    let sidebar = super::results_list();
+    sidebar.add_css_class("pref-sidebar");
+    sidebar.set_vexpand(true);
+    sidebar.set_activate_on_single_click(true);
+
+    let content_stack = Stack::new();
+    content_stack.set_vexpand(true);
+    content_stack.set_hexpand(true);
+
     let mut fields = Vec::new();
-    for (key, description) in super::preferences::KNOWN_PREFERENCES {
-        let row = GtkBox::new(Orientation::Horizontal, 8);
 
-        let label = Label::new(Some(description));
-        label.set_width_chars(36);
-        label.set_xalign(0.0);
-        label.set_halign(gtk::Align::Start);
-        row.append(&label);
+    for section in super::preferences::PREFERENCE_SECTIONS {
+        let sidebar_row = gtk::ListBoxRow::new();
+        sidebar_row.add_css_class("pref-sidebar-row");
+        let sidebar_label = Label::new(Some(section.name));
+        sidebar_label.add_css_class("pref-sidebar-label");
+        sidebar_label.set_xalign(0.0);
+        sidebar_label.set_margin_start(12);
+        sidebar_label.set_margin_end(12);
+        sidebar_row.set_child(Some(&sidebar_label));
+        sidebar.append(&sidebar_row);
 
-        let entry = Entry::new();
-        entry.set_hexpand(true);
-        if let Some(value) = current.get(*key) {
-            entry.set_text(value);
+        let fields_box = GtkBox::new(Orientation::Vertical, 6);
+        fields_box.add_css_class("pref-content");
+        fields_box.set_vexpand(true);
+
+        for (key, description) in section.keys {
+            let row = GtkBox::new(Orientation::Vertical, 2);
+            row.add_css_class("pref-field-row");
+
+            let label = Label::new(Some(description));
+            label.add_css_class("pref-field-label");
+            label.set_xalign(0.0);
+            row.append(&label);
+
+            let entry = Entry::new();
+            entry.set_hexpand(true);
+            if let Some(value) = current.get(*key) {
+                entry.set_text(value);
+            }
+            entry.set_placeholder_text(Some(key));
+            row.append(&entry);
+
+            fields.push((key.to_string(), entry));
+            fields_box.append(&row);
         }
-        entry.set_placeholder_text(Some(key));
-        row.append(&entry);
 
-        fields.push((key.to_string(), entry));
-        fields_box.append(&row);
+        let content_scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .child(&fields_box)
+            .build();
+        content_scroller.set_vexpand(true);
+        content_stack.add_named(&content_scroller, Some(section.name));
     }
-    let fields_scroller = gtk::ScrolledWindow::builder()
+
+    let sidebar_scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .propagate_natural_height(false)
-        .child(&fields_box)
+        .child(&sidebar)
         .build();
-    fields_scroller.add_css_class("results-scroll");
-    fields_scroller.set_vexpand(true);
-    root.append(&fields_scroller);
+    sidebar_scroller.add_css_class("pref-sidebar");
+    sidebar_scroller.set_vexpand(true);
+
+    let sidebar_clone = sidebar.clone();
+    let stack_clone = content_stack.clone();
+    sidebar.connect_row_activated(move |_, row| {
+        let index = row.index() as usize;
+        if let Some(section) = super::preferences::PREFERENCE_SECTIONS.get(index) {
+            stack_clone.set_visible_child_name(section.name);
+        }
+        let _ = &sidebar_clone;
+    });
+
+    if let Some(row) = sidebar.row_at_index(0) {
+        sidebar.select_row(Some(&row));
+    }
+    if let Some(first) = super::preferences::PREFERENCE_SECTIONS.first() {
+        content_stack.set_visible_child_name(first.name);
+    }
+
+    paned.set_start_child(Some(&sidebar_scroller));
+    paned.set_end_child(Some(&content_stack));
+    outer.append(&paned);
 
     let buttons = GtkBox::new(Orientation::Horizontal, 8);
     buttons.set_halign(gtk::Align::End);
-    buttons.set_margin_top(4);
+    buttons.set_margin_top(6);
+    buttons.set_margin_end(14);
+    buttons.set_margin_bottom(10);
 
     let cancel = Button::with_label("Cancel");
     let save = Button::with_label("Save");
     save.add_css_class("suggested-action");
-
     buttons.append(&cancel);
     buttons.append(&save);
-    root.append(&buttons);
+    outer.append(&buttons);
 
     PreferencesView {
-        root,
+        root: outer,
         fields,
         save,
         cancel,
@@ -1960,7 +2079,7 @@ fn clipboard_row(item: &ClipboardSummary) -> gtk::ListBoxRow {
     title.set_hexpand(true);
 
     let subtitle = Label::new(Some(&format!(
-        "{} - {}",
+        "{} · {}",
         item.kind.label(),
         format_bytes(item.size_bytes)
     )));
@@ -1973,6 +2092,15 @@ fn clipboard_row(item: &ClipboardSummary) -> gtk::ListBoxRow {
 
     layout.append(&icon);
     layout.append(&text);
+
+    if let Some(ts) = item.timestamp {
+        let ago = Label::new(Some(&crate::config::format_time_ago(ts)));
+        ago.add_css_class("clipboard-ago");
+        ago.set_xalign(1.0);
+        ago.set_valign(gtk::Align::Center);
+        layout.append(&ago);
+    }
+
     row.set_child(Some(&layout));
     row
 }

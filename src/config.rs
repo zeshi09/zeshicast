@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn export_config(config_dir: &Path, dest: &Path) -> io::Result<()> {
     let status = Command::new("tar")
@@ -159,4 +160,64 @@ pub(crate) fn write_lines(path: &Path, lines: &[String]) -> io::Result<()> {
         writeln!(file, "{line}")?;
     }
     Ok(())
+}
+
+pub(crate) fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+pub(crate) fn load_clipboard_timestamps(path: &Path) -> HashMap<String, i64> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    let Ok(array) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return HashMap::new();
+    };
+    let Some(items) = array.as_array() else {
+        return HashMap::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let text = item.get("t")?.as_str()?.to_string();
+            let ts = item.get("ts")?.as_i64()?;
+            Some((text, ts))
+        })
+        .collect()
+}
+
+pub(crate) fn write_clipboard_timestamps(
+    path: &Path,
+    entries: &[String],
+    timestamps: &HashMap<String, i64>,
+) -> io::Result<()> {
+    let array: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|t| {
+            let ts = timestamps.get(t).copied().unwrap_or_else(unix_now);
+            serde_json::json!({"t": t, "ts": ts})
+        })
+        .collect();
+    let content = serde_json::to_string(&array).unwrap_or_else(|_| "[]".to_string());
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, content)
+}
+
+pub(crate) fn format_time_ago(ts: i64) -> String {
+    let now = unix_now();
+    let delta = now.saturating_sub(ts);
+    if delta < 60 {
+        "just now".to_string()
+    } else if delta < 3600 {
+        format!("{} min ago", delta / 60)
+    } else if delta < 86400 {
+        format!("{} h ago", delta / 3600)
+    } else {
+        format!("{} d ago", delta / 86400)
+    }
 }
