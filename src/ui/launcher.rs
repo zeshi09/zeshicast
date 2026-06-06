@@ -114,10 +114,6 @@ fn build_ui(
     configure_window(&window);
 
     let root = GtkBox::new(Orientation::Vertical, 0);
-    root.set_margin_top(0);
-    root.set_margin_bottom(0);
-    root.set_margin_start(0);
-    root.set_margin_end(0);
 
     let entry = Entry::builder()
         .placeholder_text("Search for apps and commands…")
@@ -304,8 +300,8 @@ fn build_ui(
         let ai_chat_view = ai_chat_view.clone();
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
-        let emoji_view_c = emoji_view.clone();
-        let font_view_c = font_view.clone();
+        let emoji_view = emoji_view.clone();
+        let font_view = font_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
@@ -322,8 +318,8 @@ fn build_ui(
                         &ai_chat_view,
                         &audio_view,
                         &dashboard_view,
-                        &emoji_view_c,
-                        &font_view_c,
+                        &emoji_view,
+                        &font_view,
                         &system_monitor_view,
                         &media_view,
                         &network_list,
@@ -368,8 +364,8 @@ fn build_ui(
         let ai_chat_view = ai_chat_view.clone();
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
-        let emoji_view_key = emoji_view.clone();
-        let font_view_key = font_view.clone();
+        let emoji_view = emoji_view.clone();
+        let font_view = font_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
@@ -397,8 +393,8 @@ fn build_ui(
                 &ai_chat_view,
                 &audio_view,
                 &dashboard_view,
-                &emoji_view_key,
-                &font_view_key,
+                &emoji_view,
+                &font_view,
                 &system_monitor_view,
                 &media_view,
                 &network_list,
@@ -2005,8 +2001,8 @@ fn action_bar(
         let ai_chat_view = ai_chat_view.clone();
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
-        let emoji_view_run = emoji_view.clone();
-        let font_view_run = font_view.clone();
+        let emoji_view = emoji_view.clone();
+        let font_view = font_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_list.clone();
@@ -2024,8 +2020,8 @@ fn action_bar(
                 &ai_chat_view,
                 &audio_view,
                 &dashboard_view,
-                &emoji_view_run,
-                &font_view_run,
+                &emoji_view,
+                &font_view,
                 &system_monitor_view,
                 &media_view,
                 &network_list,

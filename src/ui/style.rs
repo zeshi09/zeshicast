@@ -74,23 +74,12 @@ pub fn install_css() {
   animation: launcher-open 110ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-.window-invisible {
-  opacity: 0;
-  transform: scale(0.96) translateY(-4px);
-}
-
 /* ════════════════════════════════════════════════════════════
    SEARCH BAR
    ════════════════════════════════════════════════════════════ */
 
 .search-bar {
   min-height: 60px;
-  padding: 0 14px;
-  border-bottom: 1px solid alpha(@window_fg_color, 0.070);
-}
-
-/* alias for sub-views that still use search-shell */
-.search-shell {
   padding: 0 14px;
   border-bottom: 1px solid alpha(@window_fg_color, 0.070);
 }
@@ -303,12 +292,6 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.28);
 }
 
-.overflow-counter {
-  font-size: 11px;
-  color: alpha(@window_fg_color, 0.280);
-  letter-spacing: 0.010em;
-}
-
 /* ════════════════════════════════════════════════════════════
    ACTION PANEL
    ════════════════════════════════════════════════════════════ */
@@ -334,6 +317,13 @@ entry, entry:focus, entry:focus-visible {
   text-transform: uppercase;
   color: alpha(@window_fg_color, 0.280);
   min-height: 24px;
+}
+
+.action-panel-title {
+  font-size: __PANEL_TITLE_SIZE__px;
+  font-weight: 600;
+  color: alpha(@window_fg_color, 0.850);
+  letter-spacing: -0.010em;
 }
 
 .action-panel-filter {
@@ -427,17 +417,6 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.550);
 }
 
-/* backward compat */
-.action-button {
-  min-width: 26px;
-  min-height: 26px;
-  padding: 0;
-  border-radius: 6px;
-  background: transparent;
-  border: 1px solid transparent;
-  color: alpha(@window_fg_color, 0.280);
-}
-
 .action-bar-more {
   padding: 3px 8px;
   border-radius: 6px;
@@ -463,21 +442,6 @@ entry, entry:focus, entry:focus-visible {
   letter-spacing: -0.01em;
 }
 
-/* backward compat */
-.footer-action {
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: transparent;
-  border: 1px solid alpha(@window_fg_color, 0.100);
-  color: alpha(@window_fg_color, 0.300);
-  font-size: __SUBTITLE_SIZE__px;
-  min-height: 30px;
-}
-
-.footer-action:hover {
-  background: alpha(@window_fg_color, 0.055);
-}
-
 /* ════════════════════════════════════════════════════════════
    STATUS STRIP
    ════════════════════════════════════════════════════════════ */
@@ -492,13 +456,6 @@ entry, entry:focus, entry:focus-visible {
   font-weight: 600;
   color: alpha(@window_fg_color, 0.450);
   letter-spacing: -0.010em;
-}
-
-/* backward compat */
-.status-clock {
-  font-size: __SUBTITLE_SIZE__px;
-  font-weight: 600;
-  color: alpha(@window_fg_color, 0.450);
 }
 
 .status-date {
@@ -563,27 +520,26 @@ entry, entry:focus, entry:focus-visible {
   border-radius: 7px;
 }
 
-.stat-chip-label {
-  font-size: 11px;
-  color: alpha(@window_fg_color, 0.360);
-  font-weight: 500;
+/* ── Signal bars (Wi-Fi strength indicator) ── */
+.signal-bar-filled {
+  background: alpha(@window_fg_color, 0.72);
+  border-radius: 1px;
 }
 
-.stat-chip-value {
-  font-size: 12px;
-  color: alpha(@window_fg_color, 0.780);
-  font-weight: 600;
-  letter-spacing: -0.010em;
+.signal-bar-empty {
+  background: alpha(@window_fg_color, 0.14);
+  border-radius: 1px;
 }
 
-/* backward compat */
-.dashboard-stat-chip {
-  padding: 4px 9px;
-  background: alpha(@window_fg_color, 0.050);
-  border: 1px solid alpha(@window_fg_color, 0.080);
-  border-radius: 7px;
-  color: alpha(@window_fg_color, 0.680);
-  font-size: __SUBTITLE_SIZE__px;
+/* ── Audio device radio dot ── */
+.radio-dot-active {
+  background: @accent_color;
+  border-radius: 50px;
+}
+
+.radio-dot-inactive {
+  background: alpha(@window_fg_color, 0.20);
+  border-radius: 50px;
 }
 
 /* ── Metric cards ── */
@@ -624,25 +580,7 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.360);
 }
 
-/* ── Progress bars (new design) ── */
-.progress-track {
-  min-height: 3px;
-  background: alpha(@window_fg_color, 0.070);
-  border-radius: 2px;
-  margin-top: 8px;
-}
-
-.progress-fill {
-  min-height: 3px;
-  border-radius: 2px;
-  background: @accent_color;
-  transition: min-width 600ms cubic-bezier(0.34, 1.10, 0.64, 1);
-}
-
-.progress-fill.warn  { background: #F5A623; }
-.progress-fill.crit  { background: #FF6B5F; }
-
-/* ── Progress bars (GTK ProgressBar widget compat) ── */
+/* ── Progress bars (GTK ProgressBar) ── */
 .dashboard-metric-bar trough {
   min-height: 3px;
   border-radius: 2px;
@@ -734,13 +672,6 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.550);
 }
 
-.dashboard-metric-value {
-  font-size: __FONT_SIZE__px;
-  font-weight: 700;
-  color: @window_fg_color;
-  min-height: 20px;
-}
-
 .dashboard-card-value {
   font-size: 14px;
   font-weight: 600;
@@ -750,13 +681,6 @@ entry, entry:focus, entry:focus-visible {
 
 .dashboard-card-actions {
   padding-top: 4px;
-}
-
-.dashboard-header-stat {
-  padding: 7px 10px;
-  border-radius: 8px;
-  background: alpha(@window_fg_color, 0.050);
-  border: 1px solid alpha(@window_fg_color, 0.080);
 }
 
 .dashboard-button {
@@ -806,7 +730,6 @@ entry, entry:focus, entry:focus-visible {
   color: @accent_color;
 }
 
-/* backward compat */
 /* ── Emoji Picker ── */
 .emoji-btn {
   background: transparent;
@@ -829,14 +752,6 @@ entry, entry:focus, entry:focus-visible {
   color: #4BD98A;
   text-align: center;
   letter-spacing: -0.01em;
-}
-
-.ai-model-chip {
-  background: alpha(@window_fg_color, 0.040);
-  border: 1px solid alpha(@window_fg_color, 0.070);
-  border-radius: 5px;
-  font-size: 11px;
-  color: alpha(@window_fg_color, 0.380);
 }
 
 .ai-message-user {
@@ -882,15 +797,6 @@ entry, entry:focus, entry:focus-visible {
   color: white;
 }
 
-.ai-context-chip {
-  background: alpha(@accent_color, 0.140);
-  border: 1px solid alpha(@accent_color, 0.300);
-  border-radius: 8px;
-  padding: 2px 8px;
-  font-size: __SUBTITLE_SIZE__px;
-  color: @accent_color;
-}
-
 /* ════════════════════════════════════════════════════════════
    CLIPBOARD VIEW
    ════════════════════════════════════════════════════════════ */
@@ -928,13 +834,6 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.280);
 }
 
-/* backward compat */
-.clipboard-ago {
-  color: alpha(@window_fg_color, 0.280);
-  font-size: __SUBTITLE_SIZE__px;
-  min-width: 60px;
-}
-
 /* ════════════════════════════════════════════════════════════
    AUDIO VIEW
    ════════════════════════════════════════════════════════════ */
@@ -961,20 +860,13 @@ entry, entry:focus, entry:focus-visible {
    SYSTEM MONITOR
    ════════════════════════════════════════════════════════════ */
 
-.resource-graphs {
-  padding: 4px 0;
-}
-
-.resource-bar trough,
 .process-memory-bar trough {
   min-height: 6px;
   border-radius: 4px;
   background: alpha(@window_fg_color, 0.100);
 }
 
-.resource-bar progress,
 .process-memory-bar progress {
-  min-height: 6px;
   border-radius: 4px;
   background: @accent_color;
 }

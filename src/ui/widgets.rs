@@ -1,6 +1,6 @@
 use gtk::prelude::*;
 use gtk::{
-    ApplicationWindow, Box as GtkBox, Button, Label, ListBox, ListBoxRow, Orientation, PolicyType,
+    ApplicationWindow, Box as GtkBox, Label, ListBox, ListBoxRow, Orientation, PolicyType,
     ProgressBar, ScrolledWindow,
 };
 
@@ -61,13 +61,6 @@ pub fn scrollable_list(list: &ListBox) -> ScrolledWindow {
     scroller.add_css_class("results-scroll");
     scroller.set_vexpand(true);
     scroller
-}
-
-pub fn action_button(icon_name: &str, tooltip: &str) -> Button {
-    let button = Button::builder().icon_name(icon_name).build();
-    button.add_css_class("action-button");
-    button.set_tooltip_text(Some(tooltip));
-    button
 }
 
 pub fn move_selection(list: &ListBox, delta: i32) {

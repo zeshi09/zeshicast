@@ -280,7 +280,6 @@ pub fn ai_chat_view() -> AiChatView {
     // ── Model selector bar ───────────────────────────────────────────────────
     let model_bar = GtkBox::new(Orientation::Horizontal, 6);
     model_bar.add_css_class("ai-model-bar");
-    model_bar.set_margin_top(0);
 
     let model_label = Label::new(Some("Model"));
     model_label.add_css_class("action-panel-label");
@@ -1354,8 +1353,6 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         }
 
         let layout = GtkBox::new(Orientation::Horizontal, 10);
-        layout.set_margin_top(0);
-        layout.set_margin_bottom(0);
         layout.set_margin_start(14);
         layout.set_margin_end(14);
 
@@ -1936,54 +1933,6 @@ fn dashboard_stat_chip() -> Label {
     label
 }
 
-fn dashboard_value_label() -> Label {
-    let label = Label::new(None);
-    label.add_css_class("dashboard-clock");
-    label.set_xalign(0.0);
-    label
-}
-
-fn dashboard_subtitle_label() -> Label {
-    let label = Label::new(None);
-    label.add_css_class("result-subtitle");
-    label.set_xalign(0.0);
-    label
-}
-
-fn dashboard_grid() -> Grid {
-    let grid = Grid::new();
-    grid.set_column_spacing(8);
-    grid.set_row_spacing(8);
-    grid.set_column_homogeneous(true);
-    grid.set_hexpand(true);
-    grid
-}
-
-fn dashboard_plain_card(title: &str, icon_name: &str) -> GtkBox {
-    let card = GtkBox::new(Orientation::Vertical, 6);
-    card.add_css_class("dashboard-card");
-    card.set_hexpand(true);
-
-    let header = GtkBox::new(Orientation::Horizontal, 8);
-    header.set_hexpand(true);
-
-    let icon = Image::from_icon_name(icon_name);
-    icon.add_css_class("result-icon");
-    icon.set_pixel_size(18);
-    header.append(&icon);
-
-    let title = Label::new(Some(title));
-    title.add_css_class("dashboard-card-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    header.append(&title);
-
-    card.append(&header);
-    card
-}
-
-
 fn audio_device_row(name: &str, active: bool) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.add_css_class("result-row");
@@ -1998,11 +1947,7 @@ fn audio_device_row(name: &str, active: bool) -> gtk::ListBoxRow {
     dot.set_width_request(7);
     dot.set_height_request(7);
     dot.set_valign(gtk::Align::Center);
-    if active {
-        dot.add_css_class("stat-chip");
-    } else {
-        dot.add_css_class("section-header-row");
-    }
+    dot.add_css_class(if active { "radio-dot-active" } else { "radio-dot-inactive" });
     layout.append(&dot);
 
     let label = Label::new(Some(name));
@@ -2021,59 +1966,12 @@ fn audio_device_row(name: &str, active: bool) -> gtk::ListBoxRow {
     row
 }
 
-fn dashboard_card_value() -> Label {
-    let label = Label::new(None);
-    label.add_css_class("dashboard-card-value");
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    label.set_wrap(false);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label
-}
-
-fn dashboard_card_actions() -> GtkBox {
-    let actions = GtkBox::new(Orientation::Horizontal, 6);
-    actions.add_css_class("dashboard-card-actions");
-    actions
-}
-
 fn dashboard_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("dashboard-button");
     button
 }
 
-
-fn audio_device_controls(
-    card: &GtkBox,
-    mute_icon_name: &str,
-) -> (Label, Label, ProgressBar, Button) {
-    let name = dashboard_card_value();
-    card.append(&name);
-
-    let controls = GtkBox::new(Orientation::Horizontal, 10);
-    controls.set_hexpand(true);
-
-    let bar = ProgressBar::new();
-    bar.add_css_class("audio-volume-bar");
-    bar.set_show_text(false);
-    bar.set_hexpand(true);
-    controls.append(&bar);
-
-    let volume = Label::new(None);
-    volume.add_css_class("audio-volume-value");
-    controls.append(&volume);
-
-    let mute = Button::builder()
-        .icon_name(mute_icon_name)
-        .tooltip_text("Toggle mute")
-        .build();
-    mute.add_css_class("dashboard-button");
-    controls.append(&mute);
-
-    card.append(&controls);
-    (name, volume, bar, mute)
-}
 
 fn set_audio_device(
     name: &Label,
@@ -2304,17 +2202,16 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     layout.append(&title);
 
-    // Mini CPU progress bar (36×3px)
-    // Mini memory bar (36×3px, relative to max)
+    // Mini memory usage bar (36×3px, width relative to max in process list)
     let mem_frac = process.memory_kib
         .map(|v| v as f64 / max_memory_kib.max(1) as f64)
         .unwrap_or(0.0);
-    let cpu_bar = ProgressBar::new();
-    cpu_bar.add_css_class("process-memory-bar");
-    cpu_bar.set_fraction(mem_frac.clamp(0.0, 1.0));
-    cpu_bar.set_show_text(false);
-    cpu_bar.set_width_request(36);
-    layout.append(&cpu_bar);
+    let mem_bar = ProgressBar::new();
+    mem_bar.add_css_class("process-memory-bar");
+    mem_bar.set_fraction(mem_frac.clamp(0.0, 1.0));
+    mem_bar.set_show_text(false);
+    mem_bar.set_width_request(36);
+    layout.append(&mem_bar);
 
     // MEM
     let mem_text = process.memory_kib
@@ -2335,7 +2232,6 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
     layout.append(&kill_btn);
 
     row.set_child(Some(&layout));
-    let _ = max_memory_kib;
     row
 }
 
@@ -2462,7 +2358,6 @@ pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryVie
 
     // Copy button (full width, bottom)
     let copy_row = GtkBox::new(Orientation::Horizontal, 0);
-    copy_row.set_margin_top(0);
     copy_row.add_css_class("ai-input-row");
 
     let copy = Button::with_label("Copy to clipboard");
@@ -3148,8 +3043,6 @@ fn clipboard_row(item: &ClipboardSummary) -> gtk::ListBoxRow {
     row.add_css_class("result-row");
 
     let layout = GtkBox::new(Orientation::Horizontal, 8);
-    layout.set_margin_top(0);
-    layout.set_margin_bottom(0);
     layout.set_margin_start(12);
     layout.set_margin_end(12);
     layout.set_valign(gtk::Align::Center);
@@ -3195,26 +3088,6 @@ fn clipboard_row(item: &ClipboardSummary) -> gtk::ListBoxRow {
     row
 }
 
-fn clipboard_metadata_row(label: &str) -> (GtkBox, Label) {
-    let row = GtkBox::new(Orientation::Horizontal, 8);
-    row.set_hexpand(true);
-
-    let name = Label::new(Some(label));
-    name.add_css_class("result-subtitle");
-    name.set_xalign(0.0);
-    name.set_width_chars(6);
-    row.append(&name);
-
-    let value = Label::new(None);
-    value.add_css_class("dashboard-card-value");
-    value.set_xalign(1.0);
-    value.set_hexpand(true);
-    value.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    row.append(&value);
-
-    (row, value)
-}
-
 fn clipboard_detail_text(value: &str) -> String {
     const MAX_DETAIL_CHARS: usize = 1400;
     if value.chars().count() <= MAX_DETAIL_CHARS {
@@ -3244,8 +3117,6 @@ fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
     }
 
     let layout = GtkBox::new(Orientation::Horizontal, 10);
-    layout.set_margin_top(0);
-    layout.set_margin_bottom(0);
     layout.set_margin_start(14);
     layout.set_margin_end(14);
     layout.set_valign(gtk::Align::Center);
@@ -3326,11 +3197,7 @@ fn signal_bars(signal_percent: u32) -> GtkBox {
         bar.set_width_request(3);
         bar.set_height_request(h);
         bar.set_valign(gtk::Align::End);
-        if i < filled {
-            bar.add_css_class("stat-chip");
-        } else {
-            bar.add_css_class("section-header-row");
-        }
+        bar.add_css_class(if i < filled { "signal-bar-filled" } else { "signal-bar-empty" });
         container.append(&bar);
     }
     container
