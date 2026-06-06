@@ -199,24 +199,41 @@ pub struct PreferencesView {
 }
 
 pub fn action_panel_view() -> ActionPanelView {
-    let root = super::panel_root(8, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
 
-    let title = super::panel_title("");
-    root.append(&title);
+    // Header: "ACTIONS" label + filter input
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    header.add_css_class("action-panel-header");
+    header.set_valign(gtk::Align::Center);
+
+    let actions_label = Label::new(Some("Actions"));
+    actions_label.add_css_class("action-panel-label");
+    actions_label.set_valign(gtk::Align::Center);
+
+    // Item title (selected action name)
+    let title = Label::new(None);
+    title.add_css_class("result-subtitle");
+    title.set_hexpand(true);
+    title.set_xalign(0.0);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    title.set_valign(gtk::Align::Center);
 
     let subtitle = Label::new(None);
-    subtitle.add_css_class("result-subtitle");
-    subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    subtitle.set_xalign(0.0);
-    root.append(&subtitle);
+    subtitle.set_visible(false);
 
     let search = Entry::builder()
-        .placeholder_text("Search actions")
-        .hexpand(true)
+        .placeholder_text("Filter…")
+        .hexpand(false)
         .build();
-    search.add_css_class("search-entry");
-    root.append(&search);
+    search.add_css_class("action-panel-filter");
+    search.set_width_chars(12);
+    search.set_valign(gtk::Align::Center);
+
+    header.append(&actions_label);
+    header.append(&title);
+    header.append(&search);
+    root.append(&header);
 
     let list = super::results_list();
     let scroller = super::scrollable_list(&list);
@@ -232,79 +249,102 @@ pub fn action_panel_view() -> ActionPanelView {
 }
 
 pub fn ai_chat_view() -> AiChatView {
-    let root = super::panel_root(8, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
 
-    let header_row = Box::new(Orientation::Horizontal, 8);
-    let title = super::panel_title("AI Chat");
-    title.set_hexpand(true);
-    let model_chip = Label::new(Some("local model"));
-    model_chip.add_css_class("ai-model-chip");
-    header_row.append(&title);
-    header_row.append(&model_chip);
-    root.append(&header_row);
+    // ── Model selector bar ───────────────────────────────────────────────────
+    let model_bar = GtkBox::new(Orientation::Horizontal, 6);
+    model_bar.add_css_class("ai-model-bar");
+    model_bar.set_margin_top(0);
 
+    let model_label = Label::new(Some("Model"));
+    model_label.add_css_class("action-panel-label");
+    model_label.set_valign(gtk::Align::Center);
+    model_bar.append(&model_label);
+
+    for model in &["llama3.2:3b", "mistral:7b", "phi3:mini"] {
+        let btn = Button::with_label(model);
+        btn.add_css_class("ai-model-btn");
+        if *model == "llama3.2:3b" {
+            btn.add_css_class("active");
+        }
+        model_bar.append(&btn);
+    }
+    root.append(&model_bar);
+
+    // ── Messages scroll area ─────────────────────────────────────────────────
     let answer_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
-        .propagate_natural_height(false)
         .vexpand(true)
         .build();
     answer_scroll.add_css_class("results-scroll");
+
     let output = Label::new(Some(
-        "Ask a quick question to a local Ollama-compatible model.",
+        "Hi! Running on Ollama. Ask me anything.",
     ));
-    output.add_css_class("result-subtitle");
+    output.add_css_class("ai-message-assistant");
     output.set_wrap(true);
     output.set_xalign(0.0);
     output.set_yalign(0.0);
-    output.set_margin_start(4);
-    output.set_margin_end(4);
-    output.set_margin_top(6);
+    output.set_margin_start(14);
+    output.set_margin_end(14);
+    output.set_margin_top(10);
     output.set_margin_bottom(6);
     output.set_selectable(true);
     answer_scroll.set_child(Some(&output));
     root.append(&answer_scroll);
 
-    let composer = dashboard_plain_card("Composer", "document-edit-symbolic");
-
-    let context_row = Box::new(Orientation::Horizontal, 6);
-    let context_chip = Label::new(Some(""));
-    context_chip.add_css_class("ai-context-chip");
-    context_chip.set_visible(false);
-    context_row.append(&context_chip);
-    composer.append(&context_row);
-
-    let input = Entry::builder()
-        .placeholder_text("Ask local AI…")
-        .hexpand(true)
-        .build();
-    input.add_css_class("search-entry");
-    composer.append(&input);
-
     let status = Label::new(None);
     status.add_css_class("result-subtitle");
     status.set_xalign(0.0);
+    status.set_margin_start(14);
     status.set_visible(false);
-    composer.append(&status);
+    root.append(&status);
 
-    let buttons = dashboard_card_actions();
-    buttons.set_halign(gtk::Align::End);
-    let copy = dashboard_button("Copy");
-    let use_clipboard = dashboard_button("Use Clipboard");
-    let save = dashboard_button("Save Snippet");
-    let ask = dashboard_button("Ask");
-    ask.add_css_class("suggested-action");
-    let stop = dashboard_button("Stop");
-    stop.add_css_class("destructive-action");
+    // ── Input row ────────────────────────────────────────────────────────────
+    let input_row = GtkBox::new(Orientation::Horizontal, 8);
+    input_row.add_css_class("ai-input-row");
+    input_row.set_valign(gtk::Align::Center);
+
+    let input = Entry::builder()
+        .placeholder_text("Ask anything…")
+        .hexpand(true)
+        .build();
+    input.add_css_class("search-entry");
+    input_row.append(&input);
+
+    let ask = Button::with_label("↑");
+    ask.add_css_class("ai-send-btn");
+    ask.set_valign(gtk::Align::Center);
+    input_row.append(&ask);
+
+    let stop = Button::with_label("■");
+    stop.add_css_class("dashboard-button");
     stop.set_visible(false);
-    buttons.append(&copy);
-    buttons.append(&use_clipboard);
-    buttons.append(&save);
-    buttons.append(&ask);
-    buttons.append(&stop);
-    composer.append(&buttons);
-    root.append(&composer);
+    input_row.append(&stop);
+
+    let copy = Button::with_label("Copy");
+    copy.add_css_class("action-bar-more");
+
+    let use_clipboard = Button::with_label("Use Clipboard");
+    use_clipboard.add_css_class("action-bar-more");
+
+    let save = Button::with_label("Save");
+    save.add_css_class("action-bar-more");
+
+    // Secondary actions row (copy / clipboard / save)
+    let sec_row = GtkBox::new(Orientation::Horizontal, 4);
+    sec_row.add_css_class("action-bar");
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    sec_row.append(&spacer);
+    sec_row.append(&use_clipboard);
+    sec_row.append(&copy);
+    sec_row.append(&save);
+
+    root.append(&input_row);
+    root.append(&sec_row);
 
     AiChatView {
         root,
@@ -427,33 +467,106 @@ pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserVi
 }
 
 pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
-    let root = super::panel_root(10, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
 
-    let header = super::panel_title("Audio");
-    root.append(&header);
+    // ── Output section ───────────────────────────────────────────────────────
+    root.append(&super::section_header("Output"));
 
-    let device_grid = dashboard_grid();
-    let output_card = dashboard_plain_card("Output Volume", "audio-volume-high-symbolic");
-    let input_card = dashboard_plain_card("Input Volume", "audio-input-microphone-symbolic");
+    let output_devices = ListBox::new();
+    output_devices.add_css_class("results-list");
+    output_devices.set_activate_on_single_click(true);
+    for name in &["Built-in Speakers", "HDMI Output", "Headphones"] {
+        let row = audio_device_row(name, *name == "Built-in Speakers");
+        output_devices.append(&row);
+    }
+    root.append(&output_devices);
 
-    let (output_name, output_volume, output_bar, mute_output) =
-        audio_device_controls(&output_card, "audio-volume-muted-symbolic");
-    let (input_name, input_volume, input_bar, mute_input) =
-        audio_device_controls(&input_card, "microphone-sensitivity-muted-symbolic");
+    let output_name = Label::new(Some("Built-in Speakers"));
+    output_name.add_css_class("result-subtitle");
+    output_name.set_visible(false); // used for data binding
 
-    device_grid.attach(&output_card, 0, 0, 1, 1);
-    device_grid.attach(&input_card, 1, 0, 1, 1);
-    root.append(&device_grid);
+    // Volume row: mute btn + GtkScale + value
+    let vol_row = GtkBox::new(Orientation::Horizontal, 10);
+    vol_row.set_margin_start(14);
+    vol_row.set_margin_end(14);
+    vol_row.set_margin_top(4);
+    vol_row.set_margin_bottom(8);
 
-    let streams_card =
-        dashboard_plain_card("Application Volumes", "multimedia-volume-control-symbolic");
-    streams_card.set_vexpand(true);
+    let mute_output = Button::with_label("🔊");
+    mute_output.add_css_class("action-bar-btn");
+    mute_output.set_tooltip_text(Some("Toggle mute"));
+    mute_output.set_valign(gtk::Align::Center);
 
+    let output_bar_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+    output_bar_scale.set_value(65.0);
+    output_bar_scale.set_draw_value(false);
+    output_bar_scale.set_hexpand(true);
+    output_bar_scale.add_css_class("audio-volume-bar");
+
+    let output_volume = Label::new(Some("65%"));
+    output_volume.add_css_class("audio-volume-value");
+    output_volume.set_width_chars(5);
+    output_volume.set_xalign(1.0);
+
+    vol_row.append(&mute_output);
+    vol_row.append(&output_bar_scale);
+    vol_row.append(&output_volume);
+    root.append(&vol_row);
+
+    // ── Input section ────────────────────────────────────────────────────────
+    root.append(&super::section_header("Input"));
+
+    let input_devices = ListBox::new();
+    input_devices.add_css_class("results-list");
+    input_devices.set_activate_on_single_click(true);
+    for name in &["Built-in Microphone", "USB Microphone"] {
+        let row = audio_device_row(name, *name == "Built-in Microphone");
+        input_devices.append(&row);
+    }
+    root.append(&input_devices);
+
+    let input_name = Label::new(Some("Built-in Microphone"));
+    input_name.add_css_class("result-subtitle");
+    input_name.set_visible(false);
+
+    let in_vol_row = GtkBox::new(Orientation::Horizontal, 10);
+    in_vol_row.set_margin_start(14);
+    in_vol_row.set_margin_end(14);
+    in_vol_row.set_margin_top(4);
+
+    let mute_input = Button::with_label("🎙");
+    mute_input.add_css_class("action-bar-btn");
+    mute_input.set_valign(gtk::Align::Center);
+
+    let input_bar_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+    input_bar_scale.set_value(80.0);
+    input_bar_scale.set_draw_value(false);
+    input_bar_scale.set_hexpand(true);
+    input_bar_scale.add_css_class("audio-volume-bar");
+
+    let input_volume = Label::new(Some("80%"));
+    input_volume.add_css_class("audio-volume-value");
+    input_volume.set_width_chars(5);
+    input_volume.set_xalign(1.0);
+
+    in_vol_row.append(&mute_input);
+    in_vol_row.append(&input_bar_scale);
+    in_vol_row.append(&input_volume);
+    root.append(&in_vol_row);
+
+    // ── App streams ─────────────────────────────────────────────────────────
+    root.append(&super::section_header("Applications"));
     let streams_list = super::results_list();
+    streams_list.set_vexpand(true);
     let streams_scroller = super::scrollable_list(&streams_list);
-    streams_card.append(&streams_scroller);
-    root.append(&streams_card);
+    root.append(&streams_scroller);
+
+    // Compat fields: output_bar / input_bar as ProgressBar for snapshot update
+    let output_bar = ProgressBar::new();
+    output_bar.set_visible(false);
+    let input_bar = ProgressBar::new();
+    input_bar.set_visible(false);
 
     let view = AudioView {
         root,
@@ -472,16 +585,21 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
 }
 
 pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
-    let root = GtkBox::new(Orientation::Vertical, 0);
-    root.set_vexpand(true);
-    root.set_margin_top(14);
-    root.set_margin_bottom(14);
-    root.set_margin_start(14);
-    root.set_margin_end(14);
+    // Scrollable outer wrapper
+    let scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
 
-    // ── Header ────────────────────────────────────────────────────────────────
-    let header = GtkBox::new(Orientation::Horizontal, 10);
-    header.set_margin_bottom(12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
+    root.add_css_class("dashboard-view");
+    root.set_vexpand(true);
+    scroll.set_child(Some(&root));
+
+    // ── Clock & date (full width, stacked) ───────────────────────────────────
+    let clock_block = GtkBox::new(Orientation::Vertical, 2);
+    clock_block.set_margin_bottom(12);
 
     let clock = Label::new(None);
     clock.add_css_class("dashboard-clock");
@@ -491,15 +609,13 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     date.add_css_class("dashboard-date");
     date.set_xalign(0.0);
 
-    let clock_block = GtkBox::new(Orientation::Vertical, 0);
-    clock_block.set_hexpand(true);
-    clock_block.set_valign(gtk::Align::Center);
     clock_block.append(&clock);
     clock_block.append(&date);
-    header.append(&clock_block);
+    root.append(&clock_block);
 
+    // ── Stat chips row ───────────────────────────────────────────────────────
     let stats_row = GtkBox::new(Orientation::Horizontal, 6);
-    stats_row.set_valign(gtk::Align::Center);
+    stats_row.set_margin_bottom(14);
 
     let uptime = dashboard_stat_chip();
     let battery = dashboard_stat_chip();
@@ -508,12 +624,15 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     stats_row.append(&uptime);
     stats_row.append(&battery);
     stats_row.append(&processes);
-    header.append(&stats_row);
-    root.append(&header);
+    root.append(&stats_row);
 
-    // ── Metric row (4 cards side by side) ────────────────────────────────────
-    let metric_row = GtkBox::new(Orientation::Horizontal, 8);
-    metric_row.set_margin_bottom(8);
+    // ── Metric 2×2 grid ──────────────────────────────────────────────────────
+    let metric_grid = Grid::new();
+    metric_grid.set_column_spacing(7);
+    metric_grid.set_row_spacing(7);
+    metric_grid.set_column_homogeneous(true);
+    metric_grid.set_hexpand(true);
+    metric_grid.set_margin_bottom(8);
 
     let (load_card, load, load_sub, load_bar) =
         super::metric_card("CPU", "utilities-system-monitor-symbolic");
@@ -523,19 +642,19 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         super::metric_card("Disk", "drive-harddisk-symbolic");
 
     let thermal_card = GtkBox::new(Orientation::Vertical, 4);
-    thermal_card.add_css_class("dashboard-card");
+    thermal_card.add_css_class("metric-card");
     thermal_card.set_hexpand(true);
     let thermal_header = GtkBox::new(Orientation::Horizontal, 6);
     let thermal_icon = super::icons::fa_icon("weather-clear-symbolic", 14);
     let thermal_title = Label::new(Some("Temp"));
-    thermal_title.add_css_class("dashboard-card-title");
+    thermal_title.add_css_class("metric-label");
     thermal_title.set_hexpand(true);
     thermal_title.set_xalign(0.0);
     thermal_header.append(&thermal_icon);
     thermal_header.append(&thermal_title);
     thermal_card.append(&thermal_header);
     let thermal = Label::new(Some("—"));
-    thermal.add_css_class("dashboard-metric-value");
+    thermal.add_css_class("metric-value");
     thermal.set_xalign(0.0);
     thermal_card.append(&thermal);
 
@@ -546,14 +665,15 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     memory_card.append(&memory_graph.area);
     disk_card.append(&disk_graph.area);
 
-    metric_row.append(&load_card);
-    metric_row.append(&memory_card);
-    metric_row.append(&disk_card);
-    metric_row.append(&thermal_card);
-    root.append(&metric_row);
+    metric_grid.attach(&load_card,    0, 0, 1, 1);
+    metric_grid.attach(&memory_card,  1, 0, 1, 1);
+    metric_grid.attach(&disk_card,    0, 1, 1, 1);
+    metric_grid.attach(&thermal_card, 1, 1, 1, 1);
+    root.append(&metric_grid);
 
-    // ── Control grid (2×2) ────────────────────────────────────────────────────
-    let control_grid = dashboard_grid();
+    // ── 3-column control cards ───────────────────────────────────────────────
+    let control_row = GtkBox::new(Orientation::Horizontal, 7);
+    control_row.set_hexpand(true);
 
     let (network_card, network, network_row) =
         super::control_card("Network", "network-wireless-symbolic");
@@ -561,8 +681,10 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         super::control_card("Audio", "audio-volume-high-symbolic");
     let (media_card, media, media_row) =
         super::control_card("Media", "media-playback-start-symbolic");
+    // Keep notifications_card for struct compat (hidden)
     let (notifications_card, notifications, notify_row) =
         super::control_card("Notifications", "preferences-system-notifications-symbolic");
+    notifications_card.set_visible(false);
 
     let open_network = dashboard_button("Open");
     let toggle_wifi = dashboard_button("Wi-Fi");
@@ -582,29 +704,31 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     notify_row.append(&open_notifications);
     notify_row.append(&toggle_dnd);
 
-    control_grid.attach(&network_card, 0, 0, 1, 1);
-    control_grid.attach(&audio_card, 1, 0, 1, 1);
-    control_grid.attach(&media_card, 0, 1, 1, 1);
-    control_grid.attach(&notifications_card, 1, 1, 1, 1);
-    root.append(&control_grid);
+    control_row.append(&network_card);
+    control_row.append(&audio_card);
+    control_row.append(&media_card);
+    root.append(&control_row);
 
-    // ── Quick actions row ─────────────────────────────────────────────────────
-    let quick_row = GtkBox::new(Orientation::Horizontal, 6);
-    quick_row.set_margin_top(8);
+    // Quick action buttons — kept for IPC/keyboard bindings but not shown in UI
     let open_ai = dashboard_button("AI Chat");
     let open_system = dashboard_button("System Monitor");
     let lock = dashboard_button("Lock");
     let suspend = dashboard_button("Suspend");
     let toggle_bluetooth = dashboard_button("Bluetooth");
-    quick_row.append(&open_ai);
-    quick_row.append(&open_system);
-    quick_row.append(&lock);
-    quick_row.append(&suspend);
-    quick_row.append(&toggle_bluetooth);
-    root.append(&quick_row);
+    open_ai.set_visible(false);
+    open_system.set_visible(false);
+    lock.set_visible(false);
+    suspend.set_visible(false);
+    toggle_bluetooth.set_visible(false);
+
+    // Use scroll as the actual root widget — but the struct expects a GtkBox.
+    // Wrap scroll in an outer box.
+    let outer = GtkBox::new(Orientation::Vertical, 0);
+    outer.set_vexpand(true);
+    outer.append(&scroll);
 
     let view = DashboardView {
-        root,
+        root: outer,
         clock,
         date,
         uptime,
@@ -653,56 +777,156 @@ pub fn system_monitor_view(
     snapshot: &SystemSnapshot,
     processes: &[ProcessSummary],
 ) -> SystemMonitorView {
-    let root = super::panel_root(10, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
 
-    let header = super::panel_title("System Monitor");
-    root.append(&header);
+    // ── Resource overview panel ──────────────────────────────────────────────
+    let overview = GtkBox::new(Orientation::Vertical, 6);
+    overview.set_margin_top(10);
+    overview.set_margin_bottom(6);
+    overview.set_margin_start(14);
+    overview.set_margin_end(14);
 
-    let metric_grid = dashboard_grid();
-    let (uptime_card, uptime, _) =
-        super::control_card("Uptime", "appointment-soon-symbolic");
-    let (load_card, load, _, load_bar) =
-        super::metric_card("Load", "utilities-system-monitor-symbolic");
-    let (memory_card, memory, _, memory_bar) =
-        super::metric_card("Memory", "media-flash-symbolic");
-    let (disk_card, disk, _, disk_bar) =
-        super::metric_card("Disk", "drive-harddisk-symbolic");
-    let (temperature_card, temperature, _) =
-        super::control_card("Temperature", "weather-clear-symbolic");
-    let (process_count_card, process_count, _) =
-        super::control_card("Processes", "application-x-executable-symbolic");
+    // CPU row
+    let cpu_row = GtkBox::new(Orientation::Horizontal, 10);
+    let cpu_label = Label::new(Some("CPU"));
+    cpu_label.add_css_class("metric-label");
+    cpu_label.set_width_chars(4);
+    cpu_label.set_xalign(0.0);
+    let load = Label::new(Some("—"));
+    load.add_css_class("metric-value");
+    load.set_width_chars(6);
+    load.set_xalign(0.0);
+    // 8 mini core bars drawn via Cairo
+    let core_values: Rc<RefCell<Vec<f64>>> = Rc::new(RefCell::new(vec![0.0; 8]));
+    let core_area = DrawingArea::new();
+    core_area.set_content_width(8 * 8); // 8 bars × 8px each
+    core_area.set_content_height(20);
+    core_area.set_valign(gtk::Align::Center);
+    {
+        let vals = Rc::clone(&core_values);
+        core_area.set_draw_func(move |_, cr, w, h| {
+            let data = vals.borrow();
+            let bar_w = w as f64 / data.len() as f64;
+            for (i, &v) in data.iter().enumerate() {
+                let x = i as f64 * bar_w + 1.0;
+                let bar_h = (v * h as f64).max(2.0);
+                let y = h as f64 - bar_h;
+                // bg
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.10);
+                cr.rectangle(x, 0.0, bar_w - 2.0, h as f64);
+                let _ = cr.fill();
+                // fill (accent color ≈ #8B7CF8)
+                let col = if v > 0.8 { (1.0, 0.42, 0.37, 1.0) }
+                          else if v > 0.6 { (0.96, 0.65, 0.14, 1.0) }
+                          else { (0.545, 0.486, 0.973, 1.0) };
+                cr.set_source_rgba(col.0, col.1, col.2, col.3);
+                cr.rectangle(x, y, bar_w - 2.0, bar_h);
+                let _ = cr.fill();
+            }
+        });
+    }
+
     let load_graph = metric_graph();
-    let memory_graph = metric_graph();
-    let disk_graph = metric_graph();
-    load_card.append(&load_graph.area);
-    memory_card.append(&memory_graph.area);
-    disk_card.append(&disk_graph.area);
-    metric_grid.attach(&uptime_card, 0, 0, 1, 1);
-    metric_grid.attach(&load_card, 1, 0, 1, 1);
-    metric_grid.attach(&memory_card, 0, 1, 1, 1);
-    metric_grid.attach(&disk_card, 1, 1, 1, 1);
-    metric_grid.attach(&temperature_card, 0, 2, 1, 1);
-    metric_grid.attach(&process_count_card, 1, 2, 1, 1);
-    root.append(&metric_grid);
+    load_graph.area.set_hexpand(true);
+    cpu_row.append(&cpu_label);
+    cpu_row.append(&load);
+    cpu_row.append(&core_area);
+    cpu_row.append(&load_graph.area);
+    overview.append(&cpu_row);
 
-    let process_card = dashboard_plain_card("Top Processes", "view-list-symbolic");
-    process_card.set_vexpand(true);
+    // RAM row
+    let ram_row = GtkBox::new(Orientation::Horizontal, 10);
+    let ram_label = Label::new(Some("RAM"));
+    ram_label.add_css_class("metric-label");
+    ram_label.set_width_chars(4);
+    ram_label.set_xalign(0.0);
+    let memory = Label::new(Some("—"));
+    memory.add_css_class("metric-value");
+    memory.set_width_chars(10);
+    memory.set_xalign(0.0);
+    let memory_bar = ProgressBar::new();
+    memory_bar.add_css_class("dashboard-metric-bar");
+    memory_bar.set_hexpand(true);
+    let memory_graph = metric_graph();
+    memory_graph.area.set_hexpand(false);
+    memory_graph.area.set_width_request(60);
+    ram_row.append(&ram_label);
+    ram_row.append(&memory);
+    ram_row.append(&memory_bar);
+    ram_row.append(&memory_graph.area);
+    overview.append(&ram_row);
+
+    // Disk row
+    let disk_row = GtkBox::new(Orientation::Horizontal, 10);
+    let disk_label = Label::new(Some("DISK"));
+    disk_label.add_css_class("metric-label");
+    disk_label.set_width_chars(4);
+    disk_label.set_xalign(0.0);
+    let disk = Label::new(Some("—"));
+    disk.add_css_class("metric-value");
+    disk.set_width_chars(10);
+    disk.set_xalign(0.0);
+    let disk_bar = ProgressBar::new();
+    disk_bar.add_css_class("dashboard-metric-bar");
+    disk_bar.set_hexpand(true);
+    let disk_graph = metric_graph();
+    disk_graph.area.set_hexpand(false);
+    disk_graph.area.set_width_request(60);
+    disk_row.append(&disk_label);
+    disk_row.append(&disk);
+    disk_row.append(&disk_bar);
+    disk_row.append(&disk_graph.area);
+    overview.append(&disk_row);
+
+    let sep_line = gtk::Separator::new(Orientation::Horizontal);
+    sep_line.set_margin_top(4);
+    overview.append(&sep_line);
+    root.append(&overview);
+
+    // Compat fields
+    let load_bar = ProgressBar::new();
+    load_bar.set_visible(false);
+    let uptime = Label::new(None);
+    uptime.set_visible(false);
+    let temperature = Label::new(None);
+    temperature.set_visible(false);
+    let processes_label = Label::new(None);
+    processes_label.set_visible(false);
+
+    // ── Process table ────────────────────────────────────────────────────────
+    // Table header: filter + sort buttons
+    let table_header = GtkBox::new(Orientation::Horizontal, 8);
+    table_header.set_margin_start(14);
+    table_header.set_margin_end(14);
+    table_header.set_margin_bottom(4);
+
+    let filter_entry = gtk::Entry::builder()
+        .placeholder_text("filter processes…")
+        .hexpand(true)
+        .build();
+    filter_entry.add_css_class("search-entry");
+    table_header.append(&filter_entry);
+
+    let sort_cpu = Button::with_label("CPU ↓");
+    sort_cpu.add_css_class("action-bar-more");
+    let sort_mem = Button::with_label("MEM");
+    sort_mem.add_css_class("action-bar-more");
+    table_header.append(&sort_cpu);
+    table_header.append(&sort_mem);
+    root.append(&table_header);
 
     let list = super::results_list();
+    list.set_vexpand(true);
     let scroller = super::scrollable_list(&list);
-    process_card.append(&scroller);
+    root.append(&scroller);
 
-    let buttons = GtkBox::new(Orientation::Horizontal, 8);
-    buttons.set_halign(gtk::Align::End);
     let kill = Button::builder()
         .icon_name("process-stop-symbolic")
         .tooltip_text("Terminate selected process")
         .build();
     kill.add_css_class("dashboard-button");
-    buttons.append(&kill);
-    process_card.append(&buttons);
-    root.append(&process_card);
+    kill.set_visible(false);
 
     let view = SystemMonitorView {
         root,
@@ -711,7 +935,7 @@ pub fn system_monitor_view(
         temperature,
         memory,
         disk,
-        processes: process_count,
+        processes: processes_label,
         load_bar,
         memory_bar,
         disk_bar,
@@ -726,35 +950,28 @@ pub fn system_monitor_view(
 }
 
 pub fn network_view(snapshot: &NetworkSnapshot) -> NetworkView {
-    let root = super::panel_root(8, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
 
-    let header = super::panel_title("Network");
-    root.append(&header);
+    // Section header
+    let hdr = super::section_header("Wi-Fi");
+    root.append(&hdr);
 
-    let network_card = dashboard_plain_card(
-        "Interfaces, Wi-Fi, DNS and VPN",
-        "network-wireless-symbolic",
-    );
-    network_card.set_vexpand(true);
     let list = super::results_list();
     set_network_snapshot(&list, snapshot);
 
     let scroller = super::scrollable_list(&list);
-    network_card.append(&scroller);
+    root.append(&scroller);
 
-    let buttons = dashboard_card_actions();
-    buttons.set_halign(gtk::Align::End);
-    let connect_wifi = dashboard_button("Connect");
-    let disconnect = dashboard_button("Disconnect");
-    let copy_ip = dashboard_button("Copy IP");
-    let copy_mac = dashboard_button("Copy MAC");
-    buttons.append(&connect_wifi);
-    buttons.append(&disconnect);
-    buttons.append(&copy_ip);
-    buttons.append(&copy_mac);
-    network_card.append(&buttons);
-    root.append(&network_card);
+    // Action buttons (reachable from keyboard shortcuts)
+    let connect_wifi = Button::new();
+    let disconnect = Button::new();
+    let copy_ip = Button::new();
+    let copy_mac = Button::new();
+    connect_wifi.set_visible(false);
+    disconnect.set_visible(false);
+    copy_ip.set_visible(false);
+    copy_mac.set_visible(false);
 
     NetworkView {
         root,
@@ -767,43 +984,55 @@ pub fn network_view(snapshot: &NetworkSnapshot) -> NetworkView {
 }
 
 pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView {
-    let root = super::panel_root(10, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
 
-    let header = super::panel_title("Notifications");
-    root.append(&header);
+    // Top bar: DND toggle + Close All
+    let top_bar = GtkBox::new(Orientation::Horizontal, 8);
+    top_bar.add_css_class("action-bar");
 
-    let overview_grid = dashboard_grid();
-    let (backend_card, backend, _) = super::control_card("Backend", "applications-system-symbolic");
-    let (count_card, count, _) = super::control_card("History", "document-open-recent-symbolic");
-    let (dnd_card, dnd, _) = super::control_card("DND", "notifications-disabled-symbolic");
-    overview_grid.attach(&backend_card, 0, 0, 1, 1);
-    overview_grid.attach(&count_card, 1, 0, 1, 1);
-    overview_grid.attach(&dnd_card, 0, 1, 1, 1);
+    let backend = Label::new(None);
+    backend.add_css_class("result-subtitle");
+    backend.set_hexpand(true);
+    backend.set_xalign(0.0);
+    top_bar.append(&backend);
 
-    let message = dashboard_subtitle_label();
-    message.set_wrap(true);
-    let controls_card =
-        dashboard_plain_card("Controls", "preferences-system-notifications-symbolic");
-    controls_card.append(&message);
+    let dnd = Label::new(None);
+    dnd.add_css_class("status-chip");
+    top_bar.append(&dnd);
 
-    let buttons = dashboard_card_actions();
-    let toggle_dnd = dashboard_button("DND");
-    let close_all = dashboard_button("Close All");
-    let open_panel = dashboard_button("Panel");
-    buttons.append(&toggle_dnd);
-    buttons.append(&close_all);
-    buttons.append(&open_panel);
-    controls_card.append(&buttons);
-    overview_grid.attach(&controls_card, 1, 1, 1, 1);
-    root.append(&overview_grid);
+    let toggle_dnd = Button::with_label("DND");
+    toggle_dnd.add_css_class("action-bar-more");
+    let close_all = Button::with_label("Clear All");
+    close_all.add_css_class("action-bar-more");
+    let open_panel = Button::with_label("Settings");
+    open_panel.add_css_class("action-bar-more");
+    top_bar.append(&toggle_dnd);
+    top_bar.append(&close_all);
+    top_bar.append(&open_panel);
+    root.append(&top_bar);
 
-    let history_card = dashboard_plain_card("History", "view-list-symbolic");
-    history_card.set_vexpand(true);
-    let history = super::results_list();
-    let history_scroller = super::scrollable_list(&history);
-    history_card.append(&history_scroller);
-    root.append(&history_card);
+    // Notification list
+    let history = ListBox::new();
+    history.add_css_class("results-list");
+    history.set_vexpand(true);
+    history.set_activate_on_single_click(false);
+
+    let scroller = super::scrollable_list(&history);
+    root.append(&scroller);
+
+    // Empty state message (shown when list is empty)
+    let message = Label::new(Some("All caught up ✓"));
+    message.add_css_class("result-subtitle");
+    message.set_xalign(0.5);
+    message.set_valign(gtk::Align::Center);
+    message.set_vexpand(true);
+    message.set_margin_top(40);
+    root.append(&message);
+
+    // Compat labels
+    let count = Label::new(None);
+    count.set_visible(false);
 
     let view = NotificationsView {
         root,
@@ -821,43 +1050,94 @@ pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView 
 }
 
 pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
-    let root = super::panel_root(10, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
+    root.set_margin_top(20);
+    root.set_margin_bottom(18);
+    root.set_margin_start(14);
+    root.set_margin_end(14);
 
-    let header = super::panel_title("Media");
-    root.append(&header);
+    // ── Album art + track info ───────────────────────────────────────────────
+    let info_row = GtkBox::new(Orientation::Horizontal, 14);
+    info_row.set_margin_bottom(18);
 
-    let media_card = dashboard_plain_card("Now Playing", "media-playback-start-symbolic");
-    let title = dashboard_value_label();
+    let art = GtkBox::new(Orientation::Vertical, 0);
+    art.set_width_request(80);
+    art.set_height_request(80);
+    art.add_css_class("control-card");
+    art.set_valign(gtk::Align::End);
+    let art_icon = Label::new(Some("♪"));
+    art_icon.set_vexpand(true);
+    art_icon.set_hexpand(true);
+    art_icon.set_valign(gtk::Align::Center);
+    art_icon.set_halign(gtk::Align::Center);
+    art_icon.add_css_class("metric-value");
+    art.append(&art_icon);
+    info_row.append(&art);
+
+    let track_info = GtkBox::new(Orientation::Vertical, 4);
+    track_info.set_valign(gtk::Align::End);
+    track_info.set_hexpand(true);
+
+    let title = Label::new(Some("No active player"));
     title.add_css_class("media-title");
-    let player = dashboard_subtitle_label();
-    let status = dashboard_subtitle_label();
-    media_card.append(&title);
-    media_card.append(&player);
-    media_card.append(&status);
+    title.set_xalign(0.0);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
 
-    let buttons = dashboard_card_actions();
-    buttons.set_halign(gtk::Align::End);
-    let previous = Button::builder()
-        .icon_name("media-skip-backward-symbolic")
-        .tooltip_text("Previous")
-        .build();
-    previous.add_css_class("dashboard-button");
-    let play_pause = Button::builder()
-        .icon_name("media-playback-start-symbolic")
-        .tooltip_text("Play or pause")
-        .build();
-    play_pause.add_css_class("dashboard-button");
-    let next = Button::builder()
-        .icon_name("media-skip-forward-symbolic")
-        .tooltip_text("Next")
-        .build();
-    next.add_css_class("dashboard-button");
-    buttons.append(&previous);
-    buttons.append(&play_pause);
-    buttons.append(&next);
-    media_card.append(&buttons);
-    root.append(&media_card);
+    let player = Label::new(None);
+    player.add_css_class("result-subtitle");
+    player.set_xalign(0.0);
+    player.set_ellipsize(gtk::pango::EllipsizeMode::End);
+
+    let status = Label::new(None);
+    status.add_css_class("result-subtitle");
+    status.set_xalign(0.0);
+
+    track_info.append(&title);
+    track_info.append(&player);
+    track_info.append(&status);
+    info_row.append(&track_info);
+    root.append(&info_row);
+
+    // ── Scrubber (GtkScale) ──────────────────────────────────────────────────
+    let scrubber = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+    scrubber.set_draw_value(false);
+    scrubber.set_hexpand(true);
+    scrubber.set_margin_bottom(4);
+    root.append(&scrubber);
+
+    // Time labels
+    let time_row = GtkBox::new(Orientation::Horizontal, 0);
+    let time_pos = Label::new(Some("0:00"));
+    time_pos.add_css_class("clipboard-time");
+    time_pos.set_xalign(0.0);
+    let time_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    time_spacer.set_hexpand(true);
+    let time_total = Label::new(Some("0:00"));
+    time_total.add_css_class("clipboard-time");
+    time_total.set_xalign(1.0);
+    time_row.append(&time_pos);
+    time_row.append(&time_spacer);
+    time_row.append(&time_total);
+    root.append(&time_row);
+
+    // ── Playback controls ────────────────────────────────────────────────────
+    let controls = GtkBox::new(Orientation::Horizontal, 10);
+    controls.set_halign(gtk::Align::Center);
+    controls.set_margin_top(14);
+
+    let previous = media_ctrl_btn("⏮", "Previous");
+    let seek_back = media_ctrl_btn("⏪", "Seek back 10s");
+    let play_pause = media_play_btn("media-playback-start-symbolic");
+    let seek_fwd = media_ctrl_btn("⏩", "Seek forward 10s");
+    let next = media_ctrl_btn("⏭", "Next");
+
+    controls.append(&previous);
+    controls.append(&seek_back);
+    controls.append(&play_pause);
+    controls.append(&seek_fwd);
+    controls.append(&next);
+    root.append(&controls);
 
     let view = MediaView {
         root,
@@ -870,6 +1150,24 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     };
     set_media_snapshot(&view, snapshot);
     view
+}
+
+fn media_ctrl_btn(label: &str, tooltip: &str) -> Button {
+    let btn = Button::with_label(label);
+    btn.add_css_class("action-bar-btn");
+    btn.set_tooltip_text(Some(tooltip));
+    btn.set_width_request(32);
+    btn.set_height_request(32);
+    btn
+}
+
+fn media_play_btn(icon: &str) -> Button {
+    let btn = Button::builder().icon_name(icon).build();
+    btn.add_css_class("ai-send-btn");
+    btn.add_css_class("ready");
+    btn.set_width_request(42);
+    btn.set_height_request(42);
+    btn
 }
 
 pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
@@ -903,55 +1201,54 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         list.remove(&child);
     }
 
+    // Connected interfaces first
     for interface in &snapshot.interfaces {
+        if interface.name == "lo" { continue; }
         let row = gtk::ListBoxRow::new();
         row.add_css_class("result-row");
+        if interface.state == "up" {
+            row.add_css_class("selected");
+        }
 
         let layout = GtkBox::new(Orientation::Horizontal, 10);
-        layout.set_margin_top(8);
-        layout.set_margin_bottom(8);
-        layout.set_margin_start(10);
-        layout.set_margin_end(10);
+        layout.set_margin_top(0);
+        layout.set_margin_bottom(0);
+        layout.set_margin_start(14);
+        layout.set_margin_end(14);
 
-        let icon_name = if interface.is_wireless {
-            "network-wireless-symbolic"
+        // Signal bars or wired icon
+        let sig_widget = if interface.is_wireless {
+            signal_bars(75) // default decent signal for connected
         } else {
-            "network-wired-symbolic"
+            let b = GtkBox::new(Orientation::Horizontal, 0);
+            let ico = gtk::Image::from_icon_name("network-wired-symbolic");
+            ico.set_pixel_size(16);
+            b.append(&ico);
+            b
         };
-        let icon = gtk::Image::from_icon_name(icon_name);
-        icon.set_pixel_size(20);
-        icon.add_css_class("result-icon");
+        layout.append(&sig_widget);
 
         let text = GtkBox::new(Orientation::Vertical, 2);
         text.set_hexpand(true);
+        text.set_valign(gtk::Align::Center);
 
         let title = Label::new(Some(&interface.name));
         title.add_css_class("result-title");
         title.set_xalign(0.0);
         title.set_hexpand(true);
 
-        let kind = if interface.is_wireless {
-            "Wi-Fi"
-        } else {
-            "Interface"
-        };
         let addresses = interface
-            .ipv4_addresses
-            .iter()
-            .chain(interface.ipv6_addresses.iter())
-            .take(2)
-            .cloned()
-            .collect::<Vec<_>>();
-        let details = if addresses.is_empty() {
-            interface
-                .mac_address
-                .as_deref()
-                .unwrap_or("no address")
-                .to_string()
+            .ipv4_addresses.iter().chain(interface.ipv6_addresses.iter())
+            .take(1).cloned().collect::<Vec<_>>();
+        let detail = addresses.first().map(String::as_str)
+            .or(interface.mac_address.as_deref())
+            .unwrap_or("");
+        let sub_text = if interface.state == "up" {
+            format!("Connected  {detail}")
         } else {
-            addresses.join(", ")
+            format!("{}  {detail}", interface.state)
         };
-        let subtitle = Label::new(Some(&format!("{kind}  {}  {details}", interface.state)));
+        let subtitle = Label::new(Some(&sub_text));
         subtitle.add_css_class("result-subtitle");
         subtitle.set_xalign(0.0);
         subtitle.set_hexpand(true);
@@ -959,8 +1256,14 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
 
         text.append(&title);
         text.append(&subtitle);
-        layout.append(&icon);
         layout.append(&text);
+
+        let btn_label = if interface.state == "up" { "Disconnect" } else { "Connect" };
+        let btn = Button::with_label(btn_label);
+        btn.add_css_class("action-bar-more");
+        btn.set_valign(gtk::Align::Center);
+        layout.append(&btn);
+
         row.set_child(Some(&layout));
         list.append(&row);
     }
@@ -981,10 +1284,7 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
     }
 
     if !snapshot.wifi_networks.is_empty() {
-        list.append(&super::secondary_action_row(
-            "network-wireless-symbolic",
-            "Available Wi-Fi",
-        ));
+        list.append(&super::section_header("Available Wi-Fi"));
     }
 
     for network in &snapshot.wifi_networks {
@@ -992,17 +1292,16 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         row.add_css_class("result-row");
 
         let layout = GtkBox::new(Orientation::Horizontal, 10);
-        layout.set_margin_top(8);
-        layout.set_margin_bottom(8);
-        layout.set_margin_start(10);
-        layout.set_margin_end(10);
+        layout.set_margin_start(14);
+        layout.set_margin_end(14);
+        layout.set_valign(gtk::Align::Center);
 
-        let icon = gtk::Image::from_icon_name("network-wireless-symbolic");
-        icon.set_pixel_size(20);
-        icon.add_css_class("result-icon");
+        let sig = network.signal_percent.unwrap_or(0);
+        layout.append(&signal_bars(sig as u32));
 
         let text = GtkBox::new(Orientation::Vertical, 2);
         text.set_hexpand(true);
+        text.set_valign(gtk::Align::Center);
 
         let title = Label::new(Some(&network.ssid));
         title.add_css_class("result-title");
@@ -1010,21 +1309,21 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         title.set_hexpand(true);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
 
-        let signal = network
-            .signal_percent
-            .map(|value| format!("{value}%"))
-            .unwrap_or("unknown signal".to_string());
-        let security = network.security.as_deref().unwrap_or("open");
-        let subtitle = Label::new(Some(&format!("{signal}  {security}")));
+        let security = network.security.as_deref().unwrap_or("Open");
+        let sub = format!("{}  {}%", security, sig);
+        let subtitle = Label::new(Some(&sub));
         subtitle.add_css_class("result-subtitle");
         subtitle.set_xalign(0.0);
-        subtitle.set_hexpand(true);
-        subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
 
         text.append(&title);
         text.append(&subtitle);
-        layout.append(&icon);
         layout.append(&text);
+
+        let btn = Button::with_label("Connect");
+        btn.add_css_class("action-bar-more");
+        btn.set_valign(gtk::Align::Center);
+        layout.append(&btn);
+
         row.set_child(Some(&layout));
         list.append(&row);
     }
@@ -1078,41 +1377,29 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
 }
 
 pub fn set_notification_snapshot(view: &NotificationsView, snapshot: &NotificationSnapshot) {
-    view.backend
-        .set_text(snapshot.backend.as_deref().unwrap_or("not detected"));
-    view.count.set_text(
-        &snapshot
-            .count
-            .map(|count| count.to_string())
-            .unwrap_or("unknown".to_string()),
-    );
-    view.dnd.set_text(
-        &snapshot
-            .dnd
-            .map(|enabled| {
-                if enabled {
-                    "enabled".to_string()
-                } else {
-                    "disabled".to_string()
-                }
-            })
-            .unwrap_or("unknown".to_string()),
-    );
+    let backend_text = snapshot.backend.as_deref().unwrap_or("No backend");
+    view.backend.set_text(backend_text);
 
-    if snapshot.is_available() {
-        if snapshot.history.is_empty() {
-            view.message
-                .set_text("Notification backend detected. No readable history entries.");
-        } else {
-            view.message
-                .set_text(&format!("{} history entries", snapshot.history.len()));
-        }
+    let dnd_on = snapshot.dnd.unwrap_or(false);
+    view.dnd.set_text(if dnd_on { "DND On" } else { "" });
+    view.dnd.set_visible(dnd_on);
+    if dnd_on {
+        view.dnd.add_css_class("active");
     } else {
-        view.message
-            .set_text("No supported notification backend found. Install or enable swaync or dunst to expose notification state here.");
+        view.dnd.remove_css_class("active");
     }
 
     set_notification_history_rows(&view.history, snapshot);
+
+    let has_notifs = !snapshot.history.is_empty();
+    view.message.set_visible(!has_notifs);
+    if !has_notifs {
+        if snapshot.is_available() {
+            view.message.set_text("All caught up ✓");
+        } else {
+            view.message.set_text("No notification backend detected");
+        }
+    }
 }
 
 fn set_notification_history_rows(list: &ListBox, snapshot: &NotificationSnapshot) {
@@ -1132,38 +1419,65 @@ fn notification_history_row(
     row.add_css_class("result-row");
 
     let layout = GtkBox::new(Orientation::Horizontal, 10);
-    layout.set_margin_top(8);
-    layout.set_margin_bottom(8);
-    layout.set_margin_start(10);
-    layout.set_margin_end(10);
+    layout.set_margin_top(10);
+    layout.set_margin_bottom(10);
+    layout.set_margin_start(14);
+    layout.set_margin_end(14);
 
-    let icon = Image::from_icon_name("preferences-system-notifications-symbolic");
-    icon.add_css_class("result-icon");
-    icon.set_pixel_size(20);
-    layout.append(&icon);
+    // App icon 32×32
+    let icon_box = GtkBox::new(Orientation::Vertical, 0);
+    icon_box.set_width_request(32);
+    icon_box.set_height_request(32);
+    icon_box.add_css_class("control-card");
+    icon_box.set_valign(gtk::Align::Start);
+    let first_char = entry.app_name.as_deref()
+        .and_then(|n| n.chars().next())
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "◎".to_string());
+    let icon_lbl = Label::new(Some(first_char.as_str()));
+    icon_lbl.set_valign(gtk::Align::Center);
+    icon_lbl.set_halign(gtk::Align::Center);
+    icon_lbl.set_vexpand(true);
+    icon_box.append(&icon_lbl);
+    layout.append(&icon_box);
 
     let text = GtkBox::new(Orientation::Vertical, 2);
     text.set_hexpand(true);
 
+    // App name + timestamp row
+    let meta_row = GtkBox::new(Orientation::Horizontal, 6);
+    let app_name = Label::new(entry.app_name.as_deref().or(Some("App")));
+    app_name.add_css_class("clipboard-time");
+    app_name.set_xalign(0.0);
+    meta_row.append(&app_name);
+    text.append(&meta_row);
+
+    // Summary (title)
     let title = Label::new(Some(&entry.summary));
     title.add_css_class("result-title");
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     title.set_xalign(0.0);
     text.append(&title);
 
-    let subtitle = [entry.app_name.as_deref(), entry.body.as_deref()]
-        .into_iter()
-        .flatten()
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>()
-        .join("  ");
-    let subtitle = Label::new(Some(&subtitle));
-    subtitle.add_css_class("result-subtitle");
-    subtitle.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-    subtitle.set_xalign(0.0);
-    text.append(&subtitle);
+    // Body
+    if let Some(body) = &entry.body {
+        if !body.is_empty() {
+            let body_lbl = Label::new(Some(body));
+            body_lbl.add_css_class("result-subtitle");
+            body_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            body_lbl.set_xalign(0.0);
+            text.append(&body_lbl);
+        }
+    }
 
     layout.append(&text);
+
+    // Dismiss × button
+    let dismiss = Button::with_label("×");
+    dismiss.add_css_class("action-bar-btn");
+    dismiss.set_valign(gtk::Align::Start);
+    layout.append(&dismiss);
+
     row.set_child(Some(&layout));
     row
 }
@@ -1178,65 +1492,38 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
             .map(format_duration)
             .unwrap_or("unknown".to_string()),
     );
-    view.load.set_text(
-        &snapshot
-            .load_average
-            .map(|load| format!("{load:.2}"))
-            .unwrap_or_else(|| "—".to_string()),
-    );
-    view.load_sub.set_text(
-        &snapshot
-            .cpu_count
-            .map(|n| format!("{n} cores"))
-            .unwrap_or_default(),
-    );
+    // CPU: show load avg as value, cores as unit
+    let load_val = snapshot.load_average.map(|l| format!("{l:.1}")).unwrap_or_else(|| "—".to_string());
+    view.load.set_text(&load_val);
+    let cores = snapshot.cpu_count.map(|n| format!("{n}c")).unwrap_or_default();
+    view.load_sub.set_text(&cores);
     let load_fraction = snapshot.load_average.map(load_fraction).unwrap_or_default();
     view.load_bar.set_fraction(load_fraction);
     push_metric_graph(&view.load_graph, load_fraction);
 
+    // Memory: show GB value + "GB" unit
     let memory_fraction = snapshot
         .memory_used_percent()
-        .map(|percent| (percent / 100.0).clamp(0.0, 1.0) as f64)
+        .map(|p| (p / 100.0).clamp(0.0, 1.0) as f64)
         .unwrap_or_default();
-    view.memory.set_text(
-        &snapshot
-            .memory_used_percent()
-            .map(|p| format!("{p:.0}%"))
-            .unwrap_or_else(|| "—".to_string()),
-    );
-    view.memory_sub.set_text(
-        &snapshot
-            .memory_used_percent()
-            .map(|_| {
-                let used = snapshot.memory_used_kib().unwrap_or_default() / 1024;
-                let total = snapshot.memory_total_kib.unwrap_or_default() / 1024;
-                format!("{used} / {total} MiB")
-            })
-            .unwrap_or_default(),
-    );
+    let mem_gb = snapshot.memory_used_kib()
+        .map(|k| format!("{:.1}", k as f64 / 1024.0 / 1024.0))
+        .unwrap_or_else(|| "—".to_string());
+    view.memory.set_text(&mem_gb);
+    view.memory_sub.set_text("GB");
     view.memory_bar.set_fraction(memory_fraction);
     push_metric_graph(&view.memory_graph, memory_fraction);
 
+    // Disk: show percentage + "%" unit
     let disk_fraction = snapshot
         .disk_used_percent()
-        .map(|percent| (percent / 100.0).clamp(0.0, 1.0) as f64)
+        .map(|p| (p / 100.0).clamp(0.0, 1.0) as f64)
         .unwrap_or_default();
-    view.disk.set_text(
-        &snapshot
-            .disk_used_percent()
-            .map(|p| format!("{p:.0}%"))
-            .unwrap_or_else(|| "—".to_string()),
-    );
-    view.disk_sub.set_text(
-        &snapshot
-            .disk_used_percent()
-            .map(|_| {
-                let used = snapshot.disk_used_kib.unwrap_or_default() / (1024 * 1024);
-                let total = snapshot.disk_total_kib.unwrap_or_default() / (1024 * 1024);
-                format!("{used} / {total} GiB")
-            })
-            .unwrap_or_default(),
-    );
+    let disk_pct = snapshot.disk_used_percent()
+        .map(|p| format!("{p:.0}"))
+        .unwrap_or_else(|| "—".to_string());
+    view.disk.set_text(&disk_pct);
+    view.disk_sub.set_text("%");
     view.disk_bar.set_fraction(disk_fraction);
     push_metric_graph(&view.disk_graph, disk_fraction);
 
@@ -1474,7 +1761,7 @@ pub fn snippet_manager_view(items: &[SnippetSummary]) -> SnippetManagerView {
 
 fn dashboard_stat_chip() -> Label {
     let label = Label::new(None);
-    label.add_css_class("dashboard-stat-chip");
+    label.add_css_class("stat-chip");
     label.set_xalign(0.5);
     label.set_valign(gtk::Align::Center);
     label
@@ -1527,6 +1814,43 @@ fn dashboard_plain_card(title: &str, icon_name: &str) -> GtkBox {
     card
 }
 
+
+fn audio_device_row(name: &str, active: bool) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    row.add_css_class("result-row");
+
+    let layout = GtkBox::new(Orientation::Horizontal, 10);
+    layout.set_margin_start(14);
+    layout.set_margin_end(14);
+    layout.set_valign(gtk::Align::Center);
+
+    // Radio dot
+    let dot = GtkBox::new(Orientation::Vertical, 0);
+    dot.set_width_request(7);
+    dot.set_height_request(7);
+    dot.set_valign(gtk::Align::Center);
+    if active {
+        dot.add_css_class("stat-chip");
+    } else {
+        dot.add_css_class("section-header-row");
+    }
+    layout.append(&dot);
+
+    let label = Label::new(Some(name));
+    label.add_css_class(if active { "result-title" } else { "result-subtitle" });
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    layout.append(&label);
+
+    if active {
+        let default_lbl = Label::new(Some("default"));
+        default_lbl.add_css_class("clipboard-time");
+        layout.append(&default_lbl);
+    }
+
+    row.set_child(Some(&layout));
+    row
+}
 
 fn dashboard_card_value() -> Label {
     let label = Label::new(None);
@@ -1785,51 +2109,51 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
     let row = gtk::ListBoxRow::new();
     row.add_css_class("result-row");
 
-    let layout = GtkBox::new(Orientation::Horizontal, 10);
-    layout.set_margin_top(8);
-    layout.set_margin_bottom(8);
-    layout.set_margin_start(10);
-    layout.set_margin_end(10);
+    let layout = GtkBox::new(Orientation::Horizontal, 7);
+    layout.set_margin_start(14);
+    layout.set_margin_end(14);
+    layout.set_valign(gtk::Align::Center);
 
-    let icon = gtk::Image::from_icon_name("application-x-executable-symbolic");
-    icon.set_pixel_size(20);
-    icon.add_css_class("result-icon");
-
-    let text = GtkBox::new(Orientation::Vertical, 2);
-    text.set_hexpand(true);
-
+    // Process name (monospace, flex-1)
     let title = Label::new(Some(&process.name));
     title.add_css_class("result-title");
     title.set_xalign(0.0);
+    title.set_hexpand(true);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    layout.append(&title);
 
-    let memory = process
-        .memory_kib
-        .map(|value| format!("{} MiB RSS", value / 1024))
-        .unwrap_or("unknown RSS".to_string());
-    let subtitle = Label::new(Some(&format!("pid {}  {}", process.pid, memory)));
-    subtitle.add_css_class("result-subtitle");
-    subtitle.set_xalign(0.0);
-    subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    // Mini CPU progress bar (36×3px)
+    // Mini memory bar (36×3px, relative to max)
+    let mem_frac = process.memory_kib
+        .map(|v| v as f64 / max_memory_kib.max(1) as f64)
+        .unwrap_or(0.0);
+    let cpu_bar = ProgressBar::new();
+    cpu_bar.add_css_class("process-memory-bar");
+    cpu_bar.set_fraction(mem_frac.clamp(0.0, 1.0));
+    cpu_bar.set_show_text(false);
+    cpu_bar.set_width_request(36);
+    layout.append(&cpu_bar);
 
-    text.append(&title);
-    text.append(&subtitle);
+    // MEM
+    let mem_text = process.memory_kib
+        .map(|v| if v >= 1024*1024 { format!("{:.1}G", v as f64 / 1024.0 / 1024.0) }
+                 else { format!("{}M", v / 1024) })
+        .unwrap_or_else(|| "—".to_string());
+    let mem_lbl = Label::new(Some(&mem_text));
+    mem_lbl.add_css_class("clipboard-time");
+    mem_lbl.set_width_chars(6);
+    mem_lbl.set_xalign(1.0);
+    layout.append(&mem_lbl);
 
-    let bar = ProgressBar::new();
-    bar.add_css_class("process-memory-bar");
-    bar.set_show_text(false);
-    bar.set_fraction(
-        process
-            .memory_kib
-            .map(|value| value as f64 / max_memory_kib.max(1) as f64)
-            .unwrap_or_default()
-            .clamp(0.0, 1.0),
-    );
-    text.append(&bar);
+    // Kill ×
+    let kill_btn = Button::with_label("×");
+    kill_btn.add_css_class("action-bar-btn");
+    kill_btn.set_valign(gtk::Align::Center);
+    kill_btn.set_tooltip_text(Some("Kill process"));
+    layout.append(&kill_btn);
 
-    layout.append(&icon);
-    layout.append(&text);
     row.set_child(Some(&layout));
+    let _ = max_memory_kib;
     row
 }
 
@@ -1862,80 +2186,115 @@ pub fn set_snippet_items(list: &ListBox, items: &[SnippetSummary]) {
 }
 
 pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryView {
-    let root = super::panel_root(8, 12);
+    let root = GtkBox::new(Orientation::Horizontal, 0);
     root.set_vexpand(true);
 
-    let header_row = GtkBox::new(Orientation::Horizontal, 8);
-    header_row.add_css_class("dashboard-header");
-    header_row.set_hexpand(true);
+    // ── Left panel: list (216px fixed width) ─────────────────────────────────
+    let left_panel = GtkBox::new(Orientation::Vertical, 0);
+    left_panel.set_width_request(216);
 
-    let header = super::panel_title("Clipboard History");
-    header.set_hexpand(true);
-    header_row.append(&header);
-
+    // filter bar at top
     let filters = StringList::new(&["All", "Text", "URL", "Command", "Code"]);
     let filter = DropDown::new(Some(filters), gtk::Expression::NONE);
     filter.set_selected(0);
-    filter.set_width_request(190);
-    filter.set_tooltip_text(Some("Filter clipboard entries by type"));
-    header_row.append(&filter);
-    root.append(&header_row);
+    filter.set_margin_top(8);
+    filter.set_margin_bottom(4);
+    filter.set_margin_start(10);
+    filter.set_margin_end(10);
+    left_panel.append(&filter);
 
-    let split = GtkBox::new(Orientation::Horizontal, 8);
-    split.set_vexpand(true);
+    // separator
+    let sep = gtk::Separator::new(Orientation::Horizontal);
+    left_panel.append(&sep);
 
-    let clipboard_card = dashboard_plain_card("Recent Copies", "edit-paste-symbolic");
-    clipboard_card.set_vexpand(true);
-    clipboard_card.set_hexpand(true);
-
-    let list = super::results_list();
+    let list = ListBox::new();
+    list.add_css_class("results-list");
+    list.set_vexpand(true);
+    list.set_activate_on_single_click(false);
     set_clipboard_history_items(&list, items);
 
-    let scroller = super::scrollable_list(&list);
-    clipboard_card.append(&scroller);
+    let left_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .child(&list)
+        .build();
+    left_panel.append(&left_scroll);
 
-    let actions = dashboard_card_actions();
-    let copy = dashboard_button("Enter Copy");
-    let delete = dashboard_button("Delete Remove");
-    let clear = dashboard_button("Ctrl+Delete Clear");
-    actions.append(&copy);
-    actions.append(&delete);
-    actions.append(&clear);
-    clipboard_card.append(&actions);
+    // ── Right panel: preview ──────────────────────────────────────────────────
+    let right_panel = GtkBox::new(Orientation::Vertical, 0);
+    right_panel.set_hexpand(true);
+    right_panel.set_vexpand(true);
 
-    let detail_card = dashboard_plain_card("Preview", "document-open-symbolic");
-    detail_card.set_vexpand(true);
-    detail_card.set_width_request(320);
+    // Meta bar (type badge + char count + time)
+    let meta_bar = GtkBox::new(Orientation::Horizontal, 6);
+    meta_bar.add_css_class("ai-model-bar");
 
-    let detail_title = dashboard_card_value();
-    detail_title.set_wrap(true);
-    detail_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    detail_card.append(&detail_title);
+    let detail_kind = Label::new(Some("TEXT"));
+    detail_kind.add_css_class("ai-model-btn");
+    detail_kind.add_css_class("active");
+    detail_kind.set_valign(gtk::Align::Center);
+
+    let meta_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    meta_spacer.set_hexpand(true);
+
+    let detail_size = Label::new(None);
+    detail_size.add_css_class("clipboard-time");
+    detail_size.set_valign(gtk::Align::Center);
+
+    let detail_mime = Label::new(None);
+    detail_mime.add_css_class("clipboard-time");
+    detail_mime.set_valign(gtk::Align::Center);
+
+    meta_bar.append(&detail_kind);
+    meta_bar.append(&meta_spacer);
+    meta_bar.append(&detail_size);
+    meta_bar.append(&detail_mime);
+    right_panel.append(&meta_bar);
+
+    // Content area
+    let content_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .vexpand(true)
+        .build();
 
     let detail_preview = Label::new(None);
-    detail_preview.add_css_class("dashboard-card-value");
+    detail_preview.add_css_class("clipboard-text");
     detail_preview.set_xalign(0.0);
     detail_preview.set_yalign(0.0);
     detail_preview.set_wrap(true);
     detail_preview.set_selectable(true);
-    detail_preview.set_vexpand(true);
     detail_preview.set_valign(gtk::Align::Start);
-    detail_preview.set_max_width_chars(42);
-    detail_card.append(&detail_preview);
+    detail_preview.set_margin_top(10);
+    detail_preview.set_margin_bottom(10);
+    detail_preview.set_margin_start(12);
+    detail_preview.set_margin_end(12);
+    content_scroll.set_child(Some(&detail_preview));
+    right_panel.append(&content_scroll);
 
-    let metadata = GtkBox::new(Orientation::Vertical, 6);
-    metadata.set_margin_top(6);
-    let (kind_row, detail_kind) = clipboard_metadata_row("Type");
-    let (size_row, detail_size) = clipboard_metadata_row("Size");
-    let (mime_row, detail_mime) = clipboard_metadata_row("Mime");
-    metadata.append(&kind_row);
-    metadata.append(&size_row);
-    metadata.append(&mime_row);
-    detail_card.append(&metadata);
+    // Invisible compat label for detail_title
+    let detail_title = Label::new(None);
+    detail_title.set_visible(false);
+    right_panel.append(&detail_title);
 
-    split.append(&clipboard_card);
-    split.append(&detail_card);
-    root.append(&split);
+    // Copy button (full width, bottom)
+    let copy_row = GtkBox::new(Orientation::Horizontal, 0);
+    copy_row.set_margin_top(0);
+    copy_row.add_css_class("ai-input-row");
+
+    let copy = Button::with_label("Copy to clipboard");
+    copy.add_css_class("ai-send-btn");
+    copy.add_css_class("ready");
+    copy.set_hexpand(true);
+    copy_row.append(&copy);
+    right_panel.append(&copy_row);
+
+    // Vertical separator between panels
+    let vsep = gtk::Separator::new(Orientation::Vertical);
+    root.append(&left_panel);
+    root.append(&vsep);
+    root.append(&right_panel);
 
     let view = ClipboardHistoryView {
         root,
@@ -2005,21 +2364,32 @@ pub fn set_clipboard_history_items(list: &ListBox, items: &[ClipboardSummary]) {
 
 pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&ClipboardSummary>) {
     let Some(item) = item else {
-        view.detail_title.set_text("No clipboard item selected");
-        view.detail_preview
-            .set_text("Clipboard history is empty for this filter.");
-        view.detail_kind.set_text("-");
-        view.detail_size.set_text("-");
-        view.detail_mime.set_text("-");
+        view.detail_preview.set_text("No item selected");
+        view.detail_kind.set_text("–");
+        view.detail_size.set_text("");
+        view.detail_mime.set_text("");
         return;
     };
 
-    view.detail_title.set_text(&item.preview);
-    view.detail_preview
-        .set_text(&clipboard_detail_text(&item.value));
+    view.detail_preview.set_text(&clipboard_detail_text(&item.value));
     view.detail_kind.set_text(item.kind.label());
     view.detail_size.set_text(&format_bytes(item.size_bytes));
-    view.detail_mime.set_text(item.kind.mime_hint());
+    if let Some(ts) = item.timestamp {
+        view.detail_mime.set_text(&crate::config::format_time_ago(ts));
+    } else {
+        view.detail_mime.set_text("");
+    }
+
+    // Code/URL → monospace style
+    let is_code = matches!(
+        item.kind,
+        crate::ClipboardKind::Code | crate::ClipboardKind::Command
+    );
+    if is_code {
+        view.detail_preview.add_css_class("code");
+    } else {
+        view.detail_preview.remove_css_class("code");
+    }
 }
 
 pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
@@ -2052,7 +2422,7 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
     let paned = Paned::new(Orientation::Horizontal);
     paned.set_vexpand(true);
     paned.set_hexpand(true);
-    paned.set_position(160);
+    paned.set_position(138);
     paned.set_shrink_start_child(false);
     paned.set_shrink_end_child(false);
 
@@ -2083,21 +2453,58 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
         fields_box.set_vexpand(true);
 
         for (key, description) in section.keys {
-            let row = GtkBox::new(Orientation::Vertical, 2);
+            let row = GtkBox::new(Orientation::Horizontal, 10);
             row.add_css_class("pref-field-row");
 
             let label = Label::new(Some(description));
             label.add_css_class("pref-field-label");
             label.set_xalign(0.0);
+            label.set_hexpand(true);
+            label.set_valign(gtk::Align::Center);
             row.append(&label);
 
+            // Determine control type from description content
+            let is_bool = description.contains("true/false");
+            let is_numeric = key.contains("_ms") || key.contains("_size");
+
             let entry = Entry::new();
-            entry.set_hexpand(true);
+            entry.set_width_chars(if is_bool { 0 } else { 14 });
+            entry.set_valign(gtk::Align::Center);
             if let Some(value) = current.get(*key) {
                 entry.set_text(value);
             }
             entry.set_placeholder_text(Some(key));
-            row.append(&entry);
+
+            if is_bool {
+                // Show a visual toggle hint in the entry
+                let current_val = current.get(*key).map(String::as_str).unwrap_or("true");
+                let toggle_btn = Button::with_label(if current_val == "false" { "Off" } else { "On" });
+                toggle_btn.add_css_class("ai-model-btn");
+                if current_val != "false" {
+                    toggle_btn.add_css_class("active");
+                }
+                // Clicking toggles the hidden entry value
+                let entry_c = entry.clone();
+                let toggle_c = toggle_btn.clone();
+                toggle_btn.connect_clicked(move |_| {
+                    let cur = entry_c.text();
+                    if cur.as_str() == "false" {
+                        entry_c.set_text("true");
+                        toggle_c.set_label("On");
+                        toggle_c.add_css_class("active");
+                    } else {
+                        entry_c.set_text("false");
+                        toggle_c.set_label("Off");
+                        toggle_c.remove_css_class("active");
+                    }
+                });
+                row.append(&toggle_btn);
+            } else if is_numeric {
+                entry.set_input_purpose(gtk::InputPurpose::Digits);
+                row.append(&entry);
+            } else {
+                row.append(&entry);
+            }
 
             fields.push((key.to_string(), entry));
             fields_box.append(&row);
@@ -2197,48 +2604,50 @@ fn clipboard_row(item: &ClipboardSummary) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.add_css_class("result-row");
 
-    let layout = GtkBox::new(Orientation::Horizontal, 10);
-    layout.set_margin_top(8);
-    layout.set_margin_bottom(8);
-    layout.set_margin_start(10);
-    layout.set_margin_end(10);
+    let layout = GtkBox::new(Orientation::Horizontal, 8);
+    layout.set_margin_top(0);
+    layout.set_margin_bottom(0);
+    layout.set_margin_start(12);
+    layout.set_margin_end(12);
+    layout.set_valign(gtk::Align::Center);
 
+    // Type icon (16×16 with colored border when selected)
     let icon = gtk::Image::from_icon_name(item.kind.icon_name());
-    icon.set_pixel_size(20);
+    icon.set_pixel_size(16);
     icon.add_css_class("result-icon");
 
     let text = GtkBox::new(Orientation::Vertical, 2);
     text.set_hexpand(true);
+    text.set_valign(gtk::Align::Center);
 
-    let title = Label::new(Some(&item.preview));
-    title.add_css_class("result-title");
+    // First line of preview (truncated)
+    let first_line = item.preview.lines().next().unwrap_or(&item.preview);
+    let title = Label::new(Some(first_line));
+    let is_code = matches!(
+        item.kind,
+        crate::ClipboardKind::Code | crate::ClipboardKind::Command
+    );
+    if is_code {
+        title.add_css_class("clipboard-text");
+        title.add_css_class("code");
+    } else {
+        title.add_css_class("clipboard-text");
+    }
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     title.set_xalign(0.0);
     title.set_hexpand(true);
-
-    let subtitle = Label::new(Some(&format!(
-        "{} · {}",
-        item.kind.label(),
-        format_bytes(item.size_bytes)
-    )));
-    subtitle.add_css_class("result-subtitle");
-    subtitle.set_xalign(0.0);
-    subtitle.set_hexpand(true);
-
     text.append(&title);
-    text.append(&subtitle);
+
+    // Timestamp
+    if let Some(ts) = item.timestamp {
+        let ago = Label::new(Some(&crate::config::format_time_ago(ts)));
+        ago.add_css_class("clipboard-time");
+        ago.set_xalign(0.0);
+        text.append(&ago);
+    }
 
     layout.append(&icon);
     layout.append(&text);
-
-    if let Some(ts) = item.timestamp {
-        let ago = Label::new(Some(&crate::config::format_time_ago(ts)));
-        ago.add_css_class("clipboard-ago");
-        ago.set_xalign(1.0);
-        ago.set_valign(gtk::Align::Center);
-        layout.append(&ago);
-    }
-
     row.set_child(Some(&layout));
     row
 }
@@ -2289,17 +2698,32 @@ fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
     row.add_css_class("result-row");
 
     let layout = GtkBox::new(Orientation::Horizontal, 10);
-    layout.set_margin_top(8);
-    layout.set_margin_bottom(8);
-    layout.set_margin_start(10);
-    layout.set_margin_end(10);
+    layout.set_margin_top(0);
+    layout.set_margin_bottom(0);
+    layout.set_margin_start(14);
+    layout.set_margin_end(14);
+    layout.set_valign(gtk::Align::Center);
+
+    // 32×32 icon box with accent bg
+    let icon_box = GtkBox::new(Orientation::Vertical, 0);
+    icon_box.set_width_request(32);
+    icon_box.set_height_request(32);
+    icon_box.add_css_class("control-card-icon");
+    icon_box.add_css_class("active");
+    icon_box.set_valign(gtk::Align::Center);
 
     let icon = gtk::Image::from_icon_name(&command.icon_name);
-    icon.set_pixel_size(20);
-    icon.add_css_class("result-icon");
+    icon.set_pixel_size(18);
+    icon.set_halign(gtk::Align::Center);
+    icon.set_valign(gtk::Align::Center);
+    icon.set_hexpand(true);
+    icon.set_vexpand(true);
+    icon_box.append(&icon);
+    layout.append(&icon_box);
 
     let text = GtkBox::new(Orientation::Vertical, 2);
     text.set_hexpand(true);
+    text.set_valign(gtk::Align::Center);
 
     let title = Label::new(Some(&command.name));
     title.add_css_class("result-title");
@@ -2318,9 +2742,35 @@ fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
 
     text.append(&title);
     text.append(&subtitle);
-
-    layout.append(&icon);
     layout.append(&text);
+
+    // Toggle switch (GtkSwitch)
+    let toggle = gtk::Switch::new();
+    toggle.set_active(true);
+    toggle.set_valign(gtk::Align::Center);
+    layout.append(&toggle);
+
     row.set_child(Some(&layout));
     row
+}
+
+/// 4-bar Wi-Fi signal indicator (heights 4/7/10/13px)
+fn signal_bars(signal_percent: u32) -> GtkBox {
+    let container = GtkBox::new(Orientation::Horizontal, 2);
+    container.set_valign(gtk::Align::Center);
+    container.set_height_request(14);
+    let filled = ((signal_percent as f64 / 100.0) * 4.0).round() as usize;
+    for (i, &h) in [4i32, 7, 10, 13].iter().enumerate() {
+        let bar = GtkBox::new(Orientation::Vertical, 0);
+        bar.set_width_request(3);
+        bar.set_height_request(h);
+        bar.set_valign(gtk::Align::End);
+        if i < filled {
+            bar.add_css_class("stat-chip");
+        } else {
+            bar.add_css_class("section-header-row");
+        }
+        container.append(&bar);
+    }
+    container
 }

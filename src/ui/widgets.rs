@@ -135,35 +135,36 @@ pub fn result_row(action: &Action) -> ListBoxRow {
     row
 }
 
-/// Compact reusable card with title, icon, value label, subtitle, and progress bar.
-/// Used in Dashboard and System Monitor for CPU/memory/disk/battery metrics.
-pub fn metric_card(
-    title: &str,
-    icon_name: &str,
-) -> (GtkBox, Label, Label, ProgressBar) {
-    let card = GtkBox::new(Orientation::Vertical, 4);
-    card.add_css_class("dashboard-card");
+/// Metric card: small uppercase label → large value + unit → progress bar.
+/// Layout matches design: CPU\n23 %\n[====...]
+pub fn metric_card(title: &str, _icon_name: &str) -> (GtkBox, Label, Label, ProgressBar) {
+    let card = GtkBox::new(Orientation::Vertical, 6);
+    card.add_css_class("metric-card");
     card.set_hexpand(true);
 
-    let header = GtkBox::new(Orientation::Horizontal, 6);
-    let icon = super::icons::fa_icon(icon_name, 16);
+    // Title row (uppercase label)
     let title_label = Label::new(Some(title));
-    title_label.add_css_class("dashboard-card-title");
-    title_label.set_hexpand(true);
+    title_label.add_css_class("metric-label");
     title_label.set_xalign(0.0);
-    let value_label = Label::new(None);
-    value_label.add_css_class("dashboard-card-value");
-    value_label.set_xalign(1.0);
-    header.append(&icon);
-    header.append(&title_label);
-    header.append(&value_label);
-    card.append(&header);
+    card.append(&title_label);
+
+    // Value row: big number + small unit
+    let value_row = GtkBox::new(Orientation::Horizontal, 3);
+    value_row.set_valign(gtk::Align::Baseline);
+
+    let value_label = Label::new(Some("—"));
+    value_label.add_css_class("metric-value");
+    value_label.set_xalign(0.0);
+    value_row.append(&value_label);
 
     let subtitle_label = Label::new(None);
-    subtitle_label.add_css_class("result-subtitle");
+    subtitle_label.add_css_class("metric-unit");
     subtitle_label.set_xalign(0.0);
-    subtitle_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    card.append(&subtitle_label);
+    subtitle_label.set_valign(gtk::Align::End);
+    subtitle_label.set_margin_bottom(2);
+    value_row.append(&subtitle_label);
+
+    card.append(&value_row);
 
     let bar = ProgressBar::new();
     bar.add_css_class("dashboard-metric-bar");
@@ -172,31 +173,46 @@ pub fn metric_card(
     (card, value_label, subtitle_label, bar)
 }
 
-/// Reusable card with title, icon, a status label, and optional action buttons row.
-/// Used in Dashboard for network/audio/media/notifications control surfaces.
+/// Control card: icon box + label header → value (bold) → sub text → action buttons.
+/// Layout matches: [icon] NETWORK / Connected / wlo1 · 94 Mbps
 pub fn control_card(title: &str, icon_name: &str) -> (GtkBox, Label, GtkBox) {
-    let card = GtkBox::new(Orientation::Vertical, 4);
-    card.add_css_class("dashboard-card");
+    let card = GtkBox::new(Orientation::Vertical, 6);
+    card.add_css_class("control-card");
     card.set_hexpand(true);
 
-    let header = GtkBox::new(Orientation::Horizontal, 6);
-    let icon = super::icons::fa_icon(icon_name, 16);
+    // Header: icon box + label
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+
+    let icon_box = GtkBox::new(Orientation::Vertical, 0);
+    icon_box.set_width_request(26);
+    icon_box.set_height_request(26);
+    icon_box.add_css_class("control-card-icon");
+    let icon = super::icons::fa_icon(icon_name, 14);
+    icon.set_halign(gtk::Align::Center);
+    icon.set_valign(gtk::Align::Center);
+    icon.set_hexpand(true);
+    icon.set_vexpand(true);
+    icon_box.append(&icon);
+
     let title_label = Label::new(Some(title));
-    title_label.add_css_class("dashboard-card-title");
-    title_label.set_hexpand(true);
+    title_label.add_css_class("control-card-heading");
     title_label.set_xalign(0.0);
-    header.append(&icon);
+    title_label.set_valign(gtk::Align::Center);
+
+    header.append(&icon_box);
     header.append(&title_label);
     card.append(&header);
 
+    // Value (bold, primary)
     let state_label = Label::new(None);
-    state_label.add_css_class("dashboard-card-value");
+    state_label.add_css_class("control-card-value");
     state_label.set_xalign(0.0);
     state_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     card.append(&state_label);
 
+    // Actions row (sub text or buttons)
     let actions_row = GtkBox::new(Orientation::Horizontal, 4);
-    actions_row.add_css_class("dashboard-card-actions");
+    actions_row.add_css_class("control-card-actions");
     card.append(&actions_row);
 
     (card, state_label, actions_row)

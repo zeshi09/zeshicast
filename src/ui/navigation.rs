@@ -41,12 +41,33 @@ impl LauncherView {
             Self::SystemMonitor => "system-monitor",
         }
     }
+
+    pub fn back_label(self) -> &'static str {
+        match self {
+            Self::Root | Self::Actions => "",
+            Self::AiChat => "AI Chat",
+            Self::Audio => "Audio",
+            Self::Clipboard => "Clipboard",
+            Self::Dashboard => "Dashboard",
+            Self::Extensions => "Extensions",
+            Self::Media => "Media",
+            Self::Network => "Network",
+            Self::Notifications => "Notifications",
+            Self::Preferences => "Preferences",
+            Self::ScriptOutput => "Output",
+            Self::Snippets => "Snippets",
+            Self::SystemMonitor => "System Monitor",
+        }
+    }
 }
+
+type ViewCallback = Box<dyn Fn(LauncherView)>;
 
 #[derive(Clone)]
 pub struct NavigationStack {
     stack: Stack,
     history: Rc<RefCell<Vec<LauncherView>>>,
+    callbacks: Rc<RefCell<Vec<ViewCallback>>>,
 }
 
 impl NavigationStack {
@@ -56,6 +77,7 @@ impl NavigationStack {
         Self {
             stack,
             history: Rc::new(RefCell::new(vec![LauncherView::Root])),
+            callbacks: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -80,6 +102,7 @@ impl NavigationStack {
             self.history.borrow_mut().push(view);
         }
         self.stack.set_visible_child_name(view.name());
+        self.notify(view);
     }
 
     pub fn pop(&self) -> Option<LauncherView> {
@@ -93,11 +116,25 @@ impl NavigationStack {
 
         let current = self.current();
         self.stack.set_visible_child_name(current.name());
+        self.notify(current);
         Some(current)
     }
 
     pub fn reset(&self) {
         *self.history.borrow_mut() = vec![LauncherView::Root];
         self.stack.set_visible_child_name(LauncherView::Root.name());
+        self.notify(LauncherView::Root);
+    }
+
+    /// Register a callback fired on every push/pop/reset with the new current view.
+    pub fn connect_view_changed(&self, cb: impl Fn(LauncherView) + 'static) {
+        self.callbacks.borrow_mut().push(Box::new(cb));
+    }
+
+    fn notify(&self, view: LauncherView) {
+        let cbs = self.callbacks.borrow();
+        for cb in cbs.iter() {
+            cb(view);
+        }
     }
 }

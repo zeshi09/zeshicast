@@ -19,28 +19,47 @@ pub struct StatusStrip {
 
 impl StatusStrip {
     pub fn new() -> Self {
-        let root = GtkBox::new(Orientation::Horizontal, 8);
+        let root = GtkBox::new(Orientation::Horizontal, 6);
         root.add_css_class("status-strip");
 
+        // Left side: clock + date
+        let left = GtkBox::new(Orientation::Horizontal, 6);
+        left.set_valign(gtk::Align::Center);
+
         let clock = Label::new(None);
-        clock.add_css_class("status-clock");
+        clock.add_css_class("status-time");
         clock.set_xalign(0.0);
+        clock.set_valign(gtk::Align::Center);
 
         let date = Label::new(None);
         date.add_css_class("status-date");
         date.set_xalign(0.0);
+        date.set_valign(gtk::Align::Center);
 
-        let network = status_label();
-        let battery = status_label();
-        let audio = status_label();
-        let media = status_label();
+        left.append(&clock);
+        left.append(&date);
 
-        root.append(&clock);
-        root.append(&date);
-        root.append(&network);
-        root.append(&battery);
-        root.append(&audio);
-        root.append(&media);
+        // Spacer
+        let spacer = GtkBox::new(Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+
+        // Right side: status chips
+        let right = GtkBox::new(Orientation::Horizontal, 4);
+        right.set_valign(gtk::Align::Center);
+
+        let network = status_chip();
+        let battery = status_chip();
+        let audio = status_chip();
+        let media = status_chip();
+
+        right.append(&network);
+        right.append(&battery);
+        right.append(&audio);
+        right.append(&media);
+
+        root.append(&left);
+        root.append(&spacer);
+        root.append(&right);
 
         let strip = Self {
             root,
@@ -72,8 +91,8 @@ impl StatusStrip {
 
     fn refresh(&self) {
         let now = Local::now();
-        self.clock.set_text(&now.format("%H:%M:%S").to_string());
-        self.date.set_text(&now.format("%a, %d %b").to_string());
+        self.clock.set_text(&now.format("%H:%M").to_string());
+        self.date.set_text(&now.format("%a %d %b").to_string());
     }
 
     fn start_clock(&self) {
@@ -85,51 +104,61 @@ impl StatusStrip {
     }
 
     pub fn set_network_snapshot(&self, snapshot: &NetworkSnapshot) {
-        let summary = snapshot
+        let text = snapshot
             .interfaces
             .iter()
-            .find(|interface| interface.name != "lo" && interface.state == "up")
-            .or_else(|| {
-                snapshot
-                    .interfaces
-                    .iter()
-                    .find(|interface| interface.name != "lo")
+            .find(|i| i.name != "lo" && i.state == "up")
+            .or_else(|| snapshot.interfaces.iter().find(|i| i.name != "lo"))
+            .map(|i| {
+                if i.is_wireless { format!("Wi-Fi") } else { "Ethernet".to_string() }
             })
-            .map(|interface| {
-                let icon = if interface.is_wireless {
-                    "Wi-Fi"
-                } else {
-                    "Net"
-                };
-                format!("{icon} {}", interface.state)
-            })
-            .unwrap_or("Net unavailable".to_string());
-        self.network.set_text(&summary);
+            .unwrap_or_default();
+        let connected = !text.is_empty();
+        self.network.set_text(&text);
+        self.network.set_visible(!text.is_empty());
+        if connected {
+            self.network.add_css_class("active");
+        } else {
+            self.network.remove_css_class("active");
+        }
     }
 
     pub fn set_battery_snapshot(&self, snapshot: &BatterySnapshot) {
         let Some(battery) = snapshot.primary() else {
-            self.battery.set_text("");
+            self.battery.set_visible(false);
             return;
         };
-
         let capacity = battery
             .capacity_percent
-            .map(|value| format!("{value}%"))
-            .unwrap_or("Battery".to_string());
-        let status = battery.status.as_deref().unwrap_or("");
-        self.battery
-            .set_text(&format!("Battery {capacity} {status}").trim().to_string());
+            .map(|v| format!("{v}%"))
+            .unwrap_or_else(|| "Bat".to_string());
+        let charging = battery.status.as_deref() == Some("Charging");
+        let text = if charging {
+            format!("⚡ {capacity}")
+        } else {
+            format!("🔋 {capacity}")
+        };
+        self.battery.set_text(&text);
+        self.battery.set_visible(true);
     }
 
     pub fn set_audio_snapshot(&self, snapshot: &AudioSnapshot) {
         let Some(output) = &snapshot.output else {
-            self.audio.set_text("");
+            self.audio.set_visible(false);
             return;
         };
-        let mute = if output.muted { " muted" } else { "" };
-        self.audio
-            .set_text(&format!("Vol {}%{mute}", output.volume_percent));
+        let text = if output.muted {
+            "🔇 Muted".to_string()
+        } else {
+            format!("🔊 {}%", output.volume_percent)
+        };
+        self.audio.set_text(&text);
+        self.audio.set_visible(true);
+        if !output.muted {
+            self.audio.add_css_class("active");
+        } else {
+            self.audio.remove_css_class("active");
+        }
     }
 
     pub fn set_media_snapshot(&self, snapshot: &MediaSnapshot) {
@@ -139,17 +168,30 @@ impl StatusStrip {
                 .as_deref()
                 .or(snapshot.artist.as_deref())
                 .unwrap_or("Media");
-            let status = snapshot.status.as_deref().unwrap_or("Playing");
-            self.media.set_text(&format!("{status} {title}"));
+            let playing = snapshot.status.as_deref() == Some("Playing");
+            let icon = if playing { "▶" } else { "⏸" };
+            let short_title = if title.len() > 20 {
+                format!("{}…", &title[..18])
+            } else {
+                title.to_string()
+            };
+            self.media.set_text(&format!("{icon} {short_title}"));
+            self.media.set_visible(true);
+            if playing {
+                self.media.add_css_class("active");
+            } else {
+                self.media.remove_css_class("active");
+            }
         } else {
-            self.media.set_text("");
+            self.media.set_visible(false);
         }
     }
 }
 
-fn status_label() -> Label {
+fn status_chip() -> Label {
     let label = Label::new(None);
-    label.add_css_class("status-date");
-    label.set_xalign(0.0);
+    label.add_css_class("status-chip");
+    label.set_valign(gtk::Align::Center);
+    label.set_visible(false);
     label
 }

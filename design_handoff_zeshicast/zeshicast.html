@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>zeshicast — Launcher Design</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{min-height:100%}
+    body{font-family:'Outfit','Inter',system-ui,sans-serif;min-height:100vh;display:flex;
+      align-items:flex-start;justify-content:center;padding:clamp(50px,9vh,120px) 20px 80px;
+      background:radial-gradient(ellipse 70% 55% at 16% 72%,rgba(60,40,120,.09) 0%,transparent 56%),
+                 radial-gradient(ellipse 55% 65% at 84% 14%,rgba(22,48,104,.07) 0%,transparent 50%),#0A0A11}
+    #root{width:680px;max-width:100%}
+    .lw{width:100%;background:#13131C;border-radius:14px;overflow:hidden;position:relative;
+      box-shadow:0 0 0 1px rgba(255,255,255,.09),inset 0 1px 0 rgba(255,255,255,.06),
+                 0 4px 12px rgba(0,0,0,.28),0 18px 52px rgba(0,0,0,.42),0 44px 100px rgba(0,0,0,.54);
+      animation:lopen 130ms cubic-bezier(.34,1.56,.64,1) both}
+    @keyframes lopen{from{opacity:0;transform:scale(.96) translateY(-5px)}to{opacity:1;transform:scale(1) translateY(0)}}
+    @keyframes renter{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes panin{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}
+    @keyframes din{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+    .rrow{animation:renter 130ms ease both}.rrow:hover{background:rgba(255,255,255,.04)!important}
+    .arow:hover{background:rgba(255,255,255,.05)!important}
+    .schip:hover{background:rgba(255,255,255,.08)!important}
+    .dcard{animation:din 200ms ease both;background:rgba(255,255,255,.038);border:1px solid rgba(255,255,255,.07);
+      border-radius:10px;transition:background 140ms,border-color 140ms,transform 140ms}
+    .dcard:hover{background:rgba(255,255,255,.065);border-color:rgba(255,255,255,.11);transform:translateY(-1px)}
+    .panwrap{animation:panin 120ms cubic-bezier(.25,.46,.45,.94) both}
+    .sinput{background:transparent;border:none;outline:none;width:100%;color:rgba(255,255,255,.94);
+      font-family:inherit;font-size:17px;font-weight:400;letter-spacing:-.02em;caret-color:var(--ac,#8B7CF8)}
+    .sinput::placeholder{color:rgba(255,255,255,.24)}
+    .aiinput{background:transparent;border:none;outline:none;width:100%;color:rgba(255,255,255,.9);
+      font-family:inherit;font-size:14px;resize:none;line-height:1.5}
+    .aiinput::placeholder{color:rgba(255,255,255,.22)}
+    .scr::-webkit-scrollbar{width:3px}.scr::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+    .scr::-webkit-scrollbar-track{background:transparent}
+    .aibub-u{background:rgba(139,124,248,.11);border:1px solid rgba(139,124,248,.20);border-radius:10px 10px 3px 10px}
+    .aibub-a{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:10px 10px 10px 3px}
+    .tpanel{position:fixed;bottom:24px;right:24px;z-index:200;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+    .tbox{background:#1A1A26;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:14px 16px;
+      display:flex;flex-direction:column;gap:12px;min-width:190px;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+    .tlabel{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:2px}
+    .tbtn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:3px 9px;
+      font-size:11px;color:rgba(255,255,255,.5);cursor:default;font-family:inherit;transition:background 100ms,color 100ms}
+    .tbtn.on{background:rgba(139,124,248,.18);border-color:rgba(139,124,248,.4);color:#8B7CF8}
+    .tswatch{width:18px;height:18px;border-radius:50%;cursor:default;border:2px solid transparent;transition:transform 100ms,border-color 100ms}
+    .tswatch.on{border-color:rgba(255,255,255,.65);transform:scale(1.18)}
+    .ttoggle{padding:5px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;
+      font-size:11px;color:rgba(255,255,255,.4);cursor:default;font-family:inherit}
+    input[type=range]{cursor:default}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useMemo}=React;
+
+// ── DATA ──────────────────────────────────────────────────────
+const ITEMS=[
+  {id:1, g:'Favourites',    t:'app',    title:'Terminal',           sub:'System application',     bg:'#0B1219',accent:'#3DDB6E',L:'T'},
+  {id:2, g:'Favourites',    t:'app',    title:'Visual Studio Code', sub:'Code editor',            bg:'#1B3A6B',accent:'#4FC3F7',L:'V'},
+  {id:3, g:'Favourites',    t:'app',    title:'Firefox',            sub:'Web browser',            bg:'#3F1500',accent:'#FF9500',L:'F'},
+  {id:4, g:'Recent',        t:'app',    title:'Spotify',            sub:'Music & podcasts',       bg:'#061A09',accent:'#1DB954',L:'S'},
+  {id:5, g:'Recent',        t:'app',    title:'Notion',             sub:'All-in-one workspace',   bg:'#191919',accent:'#E8E8E8',L:'N'},
+  {id:6, g:'Recent',        t:'app',    title:'Slack',              sub:'Team communication',     bg:'#3E0D3F',accent:'#ECB22E',L:'S'},
+  {id:7, g:'Command Center',t:'command',title:'Dashboard',          sub:'System overview',        icon:'▦', nav:'dashboard'},
+  {id:8, g:'Command Center',t:'command',title:'AI Chat',            sub:'Chat with Ollama',       icon:'◈', nav:'ai'},
+  {id:9, g:'Command Center',t:'command',title:'Clipboard History',  sub:'Recent clipboard items', icon:'◫', nav:'clipboard'},
+  {id:10,g:'Command Center',t:'command',title:'Emoji Picker',       sub:'Search and copy emoji',  icon:'◉', nav:'emoji'},
+  {id:11,g:'Command Center',t:'command',title:'Font Browser',       sub:'Preview installed fonts',icon:'⊠', nav:'fonts'},
+  {id:12,g:'Command Center',t:'command',title:'Network',            sub:'WiFi and connections',   icon:'⌁', nav:'network'},
+  {id:13,g:'Command Center',t:'command',title:'Audio',              sub:'Devices and volume',     icon:'♩', nav:'audio'},
+  {id:14,g:'Command Center',t:'command',title:'Media',              sub:'Now playing',            icon:'▶', nav:'media'},
+  {id:15,g:'Command Center',t:'command',title:'Notifications',      sub:'Recent alerts',          icon:'◎', nav:'notifs'},
+  {id:16,g:'Command Center',t:'command',title:'System Monitor',     sub:'Processes and resources',icon:'⊞', nav:'sysmon'},
+  {id:17,g:'Command Center',t:'command',title:'Preferences',        sub:'zeshicast settings',     icon:'⚙', nav:'prefs'},
+  {id:18,g:'Command Center',t:'command',title:'Extensions',         sub:'Built-in extensions',    icon:'◌', nav:'exts'},
+  {id:19,g:'Command Center',t:'command',title:'Toggle Dark Mode',   sub:'Switch system theme',    icon:'◑'},
+  {id:20,g:'Applications',  t:'app',    title:'Files',              sub:'File manager',           bg:'#1A2E50',accent:'#5B9BD5',L:'F'},
+  {id:21,g:'Applications',  t:'app',    title:'System Settings',    sub:'Preferences',            bg:'#1E1E1E',accent:'#909090',L:'S'},
+  {id:22,g:'Applications',  t:'app',    title:'Calendar',           sub:'Events & schedule',      bg:'#3B0000',accent:'#FF6B6B',L:'C'},
+  {id:23,g:'Applications',  t:'app',    title:'Thunderbird',        sub:'Email client',           bg:'#1A2D40',accent:'#56B4FC',L:'T'},
+  {id:24,g:'Applications',  t:'app',    title:'OBS Studio',         sub:'Screen recording',       bg:'#1A0A2E',accent:'#A88BEB',L:'O'},
+];
+const GORDER=['Favourites','Recent','Command Center','Applications'];
+const CLIP=[
+  {id:'c1',text:'npm install --save-dev @types/react',time:'just now',k:'code'},
+  {id:'c2',text:'git commit -m "feat: add clipboard preview panel with split layout"',time:'2m ago',k:'code'},
+  {id:'c3',text:'https://github.com/niri-lol/niri/blob/main/niri-config/src/lib.rs',time:'5m ago',k:'url'},
+  {id:'c4',text:'border-radius: 14px;\nbox-shadow: 0 24px 80px rgba(0,0,0,.6),\n            0 0 0 1px rgba(255,255,255,.09);',time:'14m ago',k:'code'},
+  {id:'c5',text:'The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.',time:'1h ago',k:'text'},
+  {id:'c6',text:'fn main() {\n    let launcher = ZeshiCast::new();\n    launcher.run().expect("failed to start");\n}',time:'2h ago',k:'code'},
+  {id:'c7',text:'зешикаст это приложение-лаунчер для Linux на базе GTK4 и Rust, вдохновлённое Raycast',time:'3h ago',k:'text'},
+];
+const ACTS={
+  Primary:[{label:'Open',key:'↵'},{label:'Open in Terminal',key:'⌃T'},{label:'Copy Name',key:'⌃C'},{label:'Show in Files',key:'⌃⇧F'}],
+  Manage: [{label:'Set Alias…',key:''},{label:'Pin to Favourites',key:'⌃P'},{label:'Set to Slot 1',key:'⌃1'}],
+  Danger: [{label:'Remove from Recent',key:''}],
+};
+const EMOJI_DATA={
+  '😀 Smileys':['😀','😁','😂','🤣','😃','😄','😅','😆','😉','😊','😋','😎','😍','🥰','😘','🙂','🤗','🤔','🤨','😐','🙄','😏','😒','😔','😟','🙃','😫','😢','😭','😤','😠','😡','🤬','😈','💀','🤡'],
+  '🐶 Animals':['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🦆','🦅','🦉','🐺','🐴','🦄','🐝','🦋','🐢','🦎','🐠','🐙'],
+  '🍎 Food':   ['🍎','🍊','🍋','🍌','🍉','🍇','🍓','🍑','🥭','🍍','🥑','🥦','🌽','🥕','🥐','🍞','🧀','🍕','🍔','🌮','🍜','🍣','🍦','🍰','🎂','☕','🍵','🍺','🧃'],
+  '💻 Objects':['💻','🖥','📱','⌚','🖱','⌨️','📷','📺','📻','🔋','🔌','💡','🔦','📚','📝','✏️','📌','📎','🔑','💰','💳','🎸','🎵','🎮','🎲','⚽','🏆','🎯','🔭'],
+};
+const FONTS=['Outfit','JetBrains Mono','DejaVu Sans','Liberation Sans','Noto Sans','Ubuntu','Cantarell','Source Code Pro','Fira Code','Roboto','Open Sans','Lato','Montserrat','Raleway','PT Sans','Merriweather','IBM Plex Mono','Work Sans'];
+const WIFI=[
+  {ssid:'HomeNetwork_5G',  sig:92,on:true, sec:true},
+  {ssid:'CoffeeShop_Guest',sig:71,on:false,sec:false},
+  {ssid:'iPhone of Zeshi', sig:55,on:false,sec:true},
+  {ssid:'Neighbors_2.4G',  sig:38,on:false,sec:true},
+  {ssid:'NETGEAR_EXT',     sig:22,on:false,sec:true},
+];
+const NOTIFS=[
+  {app:'Firefox',   ico:'🦊',title:'Download complete',     body:'design-reference.pdf (2.3 MB)',    time:'just now'},
+  {app:'Calendar',  ico:'📅',title:'Meeting in 15 minutes', body:'Weekly design review — Google Meet',time:'12m ago'},
+  {app:'Slack',     ico:'💬',title:'New message from kai',  body:'can you check the PR when free?',  time:'34m ago'},
+  {app:'System',    ico:'⚙️',title:'Update available',      body:'zeshicast 0.4.1 — security patch', time:'1h ago'},
+  {app:'Thunderbird',ico:'✉️',title:'3 new emails',         body:'GitHub · Rust Weekly · DS News',   time:'2h ago'},
+];
+const PROCS=[
+  {name:'rust-analyzer',pid:12847,cpu:18.4,mem:512},{name:'firefox',pid:1124,cpu:8.2,mem:892},
+  {name:'code',pid:3401,cpu:4.1,mem:340},{name:'ollama',pid:5520,cpu:3.8,mem:2048},
+  {name:'spotify',pid:2310,cpu:2.1,mem:178},{name:'niri',pid:812,cpu:1.4,mem:48},
+  {name:'pipewire',pid:935,cpu:0.8,mem:22},{name:'zeshicast',pid:4421,cpu:0.4,mem:64},
+  {name:'gnome-shell',pid:1001,cpu:0.3,mem:210},{name:'systemd',pid:1,cpu:0.1,mem:12},
+];
+const EXTS=[
+  {name:'Calculator',       desc:'Math expressions in search',     icon:'=', on:true},
+  {name:'File Search',      desc:'Search with fd and ripgrep',     icon:'/', on:true},
+  {name:'Emoji Picker',     desc:'Search and copy emoji',          icon:'◉', on:true},
+  {name:'Clipboard History',desc:'Recent clipboard entries',       icon:'◫', on:true},
+  {name:'SSH Hosts',        desc:'Quick connect to SSH hosts',     icon:'⊕', on:false},
+  {name:'Font Browser',     desc:'Preview system fonts',           icon:'⊠', on:true},
+  {name:'Snippets',         desc:'Insert reusable text snippets',  icon:'⊟', on:false},
+  {name:'Script Commands',  desc:'Run custom shell scripts',       icon:'◇', on:true},
+  {name:'Window Manager',   desc:'Niri workspace control',         icon:'▦', on:true},
+];
+
+// ── ATOMS ─────────────────────────────────────────────────────
+function AppIcon({item,size=18}){
+  const r=Math.round(size*.26);
+  if(item.t==='command') return <div style={{width:size,height:size,flexShrink:0,borderRadius:'50%',background:'rgba(255,255,255,.055)',border:'1px solid rgba(255,255,255,.085)',display:'flex',alignItems:'center',justifyContent:'center',color:'rgba(255,255,255,.4)',fontSize:Math.round(size*.52),lineHeight:1,userSelect:'none'}}>{item.icon}</div>;
+  return <div style={{width:size,height:size,flexShrink:0,borderRadius:r,background:item.bg||'#1A1A22',border:'1px solid rgba(255,255,255,.055)',display:'flex',alignItems:'center',justifyContent:'center',color:item.accent||'rgba(255,255,255,.85)',fontSize:Math.round(size*.52),fontWeight:700,letterSpacing:'-.02em',lineHeight:1,userSelect:'none'}}>{item.L}</div>;
+}
+function KBadge({children}){return <span style={{display:'inline-flex',alignItems:'center',padding:'2px 5px',background:'rgba(255,255,255,.055)',border:'1px solid rgba(255,255,255,.10)',borderRadius:5,fontSize:11,fontFamily:"'JetBrains Mono',monospace",color:'rgba(255,255,255,.38)',letterSpacing:'.01em',lineHeight:1.45,whiteSpace:'nowrap'}}>{children}</span>}
+function SecHdr({label}){return <div style={{padding:'10px 14px 3px',fontSize:11,fontWeight:600,letterSpacing:'.075em',textTransform:'uppercase',color:'rgba(255,255,255,.28)',userSelect:'none'}}>{label}</div>}
+function Pill({label}){return <span style={{padding:'2px 7px',background:'rgba(255,255,255,.055)',borderRadius:6,fontSize:11,fontWeight:500,color:'rgba(255,255,255,.28)',letterSpacing:'.01em',flexShrink:0}}>{label}</span>}
+function SignalBars({val}){const b=4,a=Math.round((val/100)*b);return <div style={{display:'flex',gap:2,alignItems:'flex-end',height:14,flexShrink:0}}>{[...Array(b)].map((_,i)=><div key={i} style={{width:3,borderRadius:1,height:4+i*3,background:i<a?'rgba(255,255,255,.72)':'rgba(255,255,255,.14)'}}/>)}</div>}
+function Toggle({on,onClick,accent}){return <div onClick={onClick} style={{width:34,height:18,borderRadius:9,cursor:'default',flexShrink:0,background:on?accent:'rgba(255,255,255,.1)',position:'relative',transition:'background 150ms'}}><div style={{position:'absolute',top:2,left:on?16:2,width:14,height:14,borderRadius:'50%',background:'#fff',transition:'left 150ms'}}/></div>}
+
+// ── RESULT ROW ────────────────────────────────────────────────
+function RRow({item,sel,rh,ai,onSel,accent}){
+  return <div className="rrow" onClick={()=>onSel(item)} style={{height:rh,padding:'0 14px',display:'flex',alignItems:'center',gap:10,cursor:'default',userSelect:'none',background:sel?'rgba(255,255,255,.08)':'transparent',boxShadow:sel?`inset 3px 0 0 ${accent}`:'none',animationDelay:`${Math.min(ai,5)*9}ms`}}>
+    <AppIcon item={item} size={18}/>
+    <div style={{flex:1,minWidth:0}}>
+      <div style={{fontSize:15,fontWeight:500,color:'rgba(255,255,255,.93)',letterSpacing:'-.012em',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.title}</div>
+      {item.sub&&<div style={{fontSize:12,marginTop:1,color:'rgba(255,255,255,.4)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.sub}</div>}
+    </div>
+    {sel&&<Pill label={item.t==='app'?'Application':'Command'}/>}
+  </div>;
+}
+
+// ── SEARCH VIEW ───────────────────────────────────────────────
+function SearchView({query,selIdx,onSel,rh,accent}){
+  const isCalc=query.startsWith('=');
+  const filtered=useMemo(()=>{
+    if(isCalc||!query)return isCalc?[]:ITEMS;
+    const q=query.toLowerCase();
+    return ITEMS.filter(i=>i.title.toLowerCase().includes(q)||(i.sub&&i.sub.toLowerCase().includes(q)));
+  },[query,isCalc]);
+  const groups=useMemo(()=>{const m={};filtered.forEach(i=>{if(!m[i.g])m[i.g]=[];m[i.g].push(i);});return m;},[filtered]);
+  if(isCalc){
+    const expr=query.slice(1).trim();let res='0';
+    try{if(expr)res=String(Function('"use strict";return('+expr+')')())}catch(e){res='—'}
+    return <div style={{padding:'0 14px'}}><div style={{display:'flex',alignItems:'center',gap:10,height:56}}>
+      <div style={{width:18,height:18,flexShrink:0,borderRadius:5,background:`${accent}22`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,color:accent,fontWeight:700}}>=</div>
+      <div style={{flex:1}}><div style={{fontSize:12,color:'rgba(255,255,255,.36)',fontFamily:"'JetBrains Mono',monospace"}}>{expr||'Enter expression…'}</div><div style={{fontSize:24,fontWeight:700,letterSpacing:'-.02em',color:expr?'rgba(255,255,255,.93)':'rgba(255,255,255,.2)',fontFamily:"'JetBrains Mono',monospace"}}>{res}</div></div>
+      <KBadge>⌃C</KBadge>
+    </div></div>;
+  }
+  if(!filtered.length)return <div style={{padding:'28px 16px',textAlign:'center',color:'rgba(255,255,255,.26)',fontSize:13}}>No results for <span style={{color:'rgba(255,255,255,.48)'}}>&ldquo;{query}&rdquo;</span></div>;
+  let fi=0,ai=0;
+  return <div>{GORDER.filter(g=>groups[g]).map(gn=><div key={gn}>{!query&&<SecHdr label={gn}/>}{groups[gn].map(item=>{const f=fi++,a=ai++;return <RRow key={item.id} item={item} sel={f===selIdx} rh={rh} ai={a} onSel={onSel} accent={accent}/>;})}</div>)}</div>;
+}
+
+// ── CLIPBOARD ─────────────────────────────────────────────────
+const TYPE_ICON={code:'⊟',url:'⊞',text:'≡'};
+const TYPE_LABEL={code:'Code',url:'URL',text:'Text'};
+function ClipView({accent}){
+  const [sel,setSel]=useState(0);
+  const [copied,setCopied]=useState(false);
+  const item=CLIP[sel];
+  function copy(){navigator.clipboard?.writeText(item.text);setCopied(true);setTimeout(()=>setCopied(false),1400);}
+  const isMono=item.k!=='text';
+  const wc=item.text.trim().split(/\s+/).length;
+  return (
+    <div style={{display:'flex',height:344}}>
+      {/* List */}
+      <div className="scr" style={{width:216,flexShrink:0,borderRight:'1px solid rgba(255,255,255,.06)',overflowY:'auto'}}>
+        {CLIP.map((c,i)=>(
+          <div key={c.id} className="rrow" onClick={()=>{setSel(i);setCopied(false);}}
+            style={{height:52,padding:'0 12px',display:'flex',alignItems:'center',gap:8,cursor:'default',
+              background:i===sel?'rgba(255,255,255,.08)':'transparent',
+              boxShadow:i===sel?`inset 3px 0 0 ${accent}`:'none',
+              animationDelay:`${i*9}ms`}}>
+            <div style={{width:16,height:16,flexShrink:0,borderRadius:4,
+              background:i===sel?`${accent}1A`:'rgba(255,255,255,.05)',
+              border:`1px solid ${i===sel?accent+'35':'rgba(255,255,255,.08)'}`,
+              display:'flex',alignItems:'center',justifyContent:'center',
+              fontSize:8,color:i===sel?accent:'rgba(255,255,255,.3)'}}>
+              {TYPE_ICON[c.k]}
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,color:i===sel?'rgba(255,255,255,.88)':'rgba(255,255,255,.58)',
+                fontFamily:c.k!=='text'?"'JetBrains Mono',monospace":'inherit',
+                overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                letterSpacing:c.k==='code'?'-.01em':'normal',lineHeight:1.4,marginBottom:2}}>
+                {c.text.split('\n')[0]}
+              </div>
+              <div style={{fontSize:10,color:'rgba(255,255,255,.24)'}}>{c.time}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Preview */}
+      {item&&(
+        <div style={{flex:1,minWidth:0,display:'flex',flexDirection:'column'}}>
+          {/* Meta bar */}
+          <div style={{padding:'7px 12px',borderBottom:'1px solid rgba(255,255,255,.06)',
+            display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+            <span style={{padding:'1px 6px',background:`${accent}18`,
+              border:`1px solid ${accent}35`,borderRadius:4,
+              fontSize:10,fontWeight:600,letterSpacing:'.05em',
+              color:accent,textTransform:'uppercase'}}>
+              {TYPE_LABEL[item.k]}
+            </span>
+            <span style={{flex:1}}/>
+            <span style={{fontSize:10,color:'rgba(255,255,255,.26)',fontVariantNumeric:'tabular-nums'}}>
+              {item.text.length} ch
+            </span>
+            {item.k==='text'&&(
+              <><span style={{fontSize:10,color:'rgba(255,255,255,.16)'}}>·</span>
+              <span style={{fontSize:10,color:'rgba(255,255,255,.26)',fontVariantNumeric:'tabular-nums'}}>{wc} w</span></>
+            )}
+            <span style={{fontSize:10,color:'rgba(255,255,255,.16)'}}>·</span>
+            <span style={{fontSize:10,color:'rgba(255,255,255,.26)'}}>{item.time}</span>
+          </div>
+
+          {/* Content */}
+          <div className="scr" style={{flex:1,overflowY:'auto',padding:'10px 12px',
+            background:'rgba(0,0,0,.12)'}}>
+            <pre style={{
+              margin:0,
+              fontSize:isMono?12:13,
+              lineHeight:1.65,
+              color:'rgba(255,255,255,.82)',
+              fontFamily:isMono?"'JetBrains Mono',monospace":'inherit',
+              letterSpacing:isMono?'-.01em':'normal',
+              wordBreak:'break-all',
+              whiteSpace:'pre-wrap',
+              textWrap:'wrap',
+            }}>{item.text}</pre>
+          </div>
+
+          {/* Copy button */}
+          <div style={{padding:'8px 12px',borderTop:'1px solid rgba(255,255,255,.06)',flexShrink:0}}>
+            <button onClick={copy} style={{
+              width:'100%',padding:'7px',borderRadius:7,border:'none',cursor:'default',
+              background:copied?'rgba(77,217,138,.2)':accent,
+              color:copied?'#4BD98A':'#fff',
+              fontSize:12,fontWeight:600,fontFamily:'inherit',letterSpacing:'-.01em',
+              transition:'background 200ms,color 200ms',
+              display:'flex',alignItems:'center',justifyContent:'center',gap:5,
+            }}>
+              {copied?<>✓ Copied!</>:<>Copy to clipboard</>}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────
+function PBar({val,accent,delay=0}){
+  const [w,setW]=useState(0);
+  useEffect(()=>{const t=setTimeout(()=>setW(val),60+delay);return()=>clearTimeout(t);},[val]);
+  const col=val>85?'#FF6B5F':val>65?'#F5A623':accent;
+  return <div style={{height:3,background:'rgba(255,255,255,.07)',borderRadius:2,overflow:'hidden',marginTop:8}}><div style={{height:'100%',borderRadius:2,background:col,width:w+'%',transition:'width 600ms cubic-bezier(.34,1.1,.64,1)'}}/></div>;
+}
+function MCard({label,val,unit,pct,accent,delay}){return <div className="dcard" style={{padding:'13px 14px',animationDelay:delay+'ms'}}><div style={{fontSize:11,fontWeight:600,letterSpacing:'.065em',textTransform:'uppercase',color:'rgba(255,255,255,.28)',marginBottom:6}}>{label}</div><div style={{display:'flex',alignItems:'baseline',gap:3}}><span style={{fontSize:26,fontWeight:700,letterSpacing:'-.025em',color:'rgba(255,255,255,.93)',fontVariantNumeric:'tabular-nums'}}>{val}</span><span style={{fontSize:12,color:'rgba(255,255,255,.34)',fontWeight:500}}>{unit}</span></div><PBar val={pct} accent={accent} delay={delay}/></div>}
+function CCard({icon,label,val,sub,accent,delay,active}){return <div className="dcard" style={{padding:'12px 14px',animationDelay:delay+'ms',display:'flex',flexDirection:'column',gap:6}}><div style={{display:'flex',alignItems:'center',gap:8}}><div style={{width:26,height:26,borderRadius:7,background:active?`${accent}22`:'rgba(255,255,255,.055)',border:`1px solid ${active?accent+'40':'rgba(255,255,255,.08)'}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:active?accent:'rgba(255,255,255,.42)'}}>{icon}</div><span style={{fontSize:11,fontWeight:600,color:'rgba(255,255,255,.45)',letterSpacing:'.01em'}}>{label}</span></div><div style={{fontSize:14,fontWeight:600,color:'rgba(255,255,255,.88)',letterSpacing:'-.01em',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{val}</div>{sub&&<div style={{fontSize:11,color:'rgba(255,255,255,.34)'}}>{sub}</div>}</div>}
+function DashView({accent}){
+  const [now,setNow]=useState(new Date());
+  useEffect(()=>{const id=setInterval(()=>setNow(new Date()),1000);return()=>clearInterval(id);},[]);
+  const hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');
+  return <div className="scr" style={{padding:'16px 14px 14px',overflowY:'auto',maxHeight:376}}>
+    <div style={{marginBottom:14,animation:'din 180ms ease both'}}>
+      <div style={{fontSize:44,fontWeight:700,letterSpacing:'-.035em',color:'rgba(255,255,255,.95)',fontVariantNumeric:'tabular-nums',lineHeight:1}}>{hh}<span style={{opacity:.3,animation:'blink 1s step-end infinite'}}>:</span>{mm}</div>
+      <div style={{fontSize:13,marginTop:4,color:'rgba(255,255,255,.36)',letterSpacing:'.01em'}}>{now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</div>
+    </div>
+    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:14,animation:'din 220ms ease both'}}>
+      {[['Uptime','3d 14h'],['Battery','84%'],['Procs','312'],['Workspace','2']].map(([l,v])=><div key={l} className="schip" style={{padding:'4px 9px',background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.08)',borderRadius:7,display:'flex',alignItems:'center',gap:5,cursor:'default'}}><span style={{fontSize:11,color:'rgba(255,255,255,.34)',fontWeight:500}}>{l}</span><span style={{fontSize:12,color:'rgba(255,255,255,.76)',fontWeight:600,letterSpacing:'-.01em'}}>{v}</span></div>)}
+    </div>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7,marginBottom:8}}>
+      <MCard label="CPU" val="23" unit="%" pct={23} accent={accent} delay={0}/><MCard label="Memory" val="8.2" unit="GB" pct={68} accent={accent} delay={50}/><MCard label="Disk" val="67" unit="%" pct={67} accent={accent} delay={100}/><MCard label="Temp" val="42" unit="°C" pct={35} accent={accent} delay={150}/>
+    </div>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:7}}>
+      <CCard icon="⌘" label="Network" val="Connected" sub="wlo1 · 94 Mbps" accent={accent} delay={180} active/><CCard icon="♪" label="Audio" val="65%" sub="Built-in Output" accent={accent} delay={220}/><CCard icon="▶" label="Media" val="Blinding Lights" sub="The Weeknd · Spotify" accent={accent} delay={260} active/>
+    </div>
+  </div>;
+}
+
+// ── AI CHAT ───────────────────────────────────────────────────
+const SEED=[{role:'assistant',text:"Hi! Running on Ollama (llama3.2). Ask me anything."},{role:'user',text:"What's my CPU usage?"},{role:'assistant',text:"CPU is at 23% across 16 cores. Heaviest: Rust compilation at ~18% on core 4."}];
+function AIView({accent,initQ}){
+  const [msgs,setMsgs]=useState(initQ?[...SEED,{role:'user',text:initQ}]:SEED);
+  const [input,setInput]=useState('');const [stream,setStream]=useState(!!initQ);const [stxt,setStxt]=useState('');
+  const [model,setModel]=useState('llama3.2:3b');const bottomRef=useRef(null);
+  const MODELS=['llama3.2:3b','mistral:7b','phi3:mini'];
+  function doStream(text){setStream(true);setStxt('');let i=0;const id=setInterval(()=>{setStxt(p=>p+text[i]);i++;if(i>=text.length){clearInterval(id);setStream(false);}},18);}
+  useEffect(()=>{if(initQ)doStream('Let me check that for you…');},[]);
+  useEffect(()=>{if(bottomRef.current)bottomRef.current.parentElement.scrollTop=9999;},[msgs,stxt]);
+  function send(){if(!input.trim())return;const u=input.trim();setInput('');setMsgs(m=>[...m,{role:'user',text:u}]);const rs=['System state looks nominal.','Niri workspace 2 has 3 active windows.','Let me reason through that step by step.'];setTimeout(()=>{setMsgs(m=>[...m,{role:'assistant',text:''}]);doStream(rs[Math.floor(Math.random()*rs.length)]);},200);}
+  return <div style={{display:'flex',flexDirection:'column',maxHeight:376}}>
+    <div style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+      <span style={{fontSize:10,fontWeight:600,letterSpacing:'.07em',textTransform:'uppercase',color:'rgba(255,255,255,.28)',flexShrink:0}}>Model</span>
+      <div style={{display:'flex',gap:4}}>{MODELS.map(m=><button key={m} onClick={()=>setModel(m)} style={{padding:'2px 8px',background:m===model?`${accent}22`:'rgba(255,255,255,.04)',border:`1px solid ${m===model?accent+'50':'rgba(255,255,255,.07)'}`,borderRadius:5,fontSize:11,fontFamily:"'JetBrains Mono',monospace",color:m===model?accent:'rgba(255,255,255,.36)',cursor:'default',fontWeight:m===model?500:400}}>{m}</button>)}</div>
+    </div>
+    <div className="scr" style={{flex:1,overflowY:'auto',padding:'10px 14px',display:'flex',flexDirection:'column',gap:8}}>
+      {msgs.map((msg,i)=><div key={i} className={msg.role==='user'?'aibub-u':'aibub-a'} style={{padding:'8px 12px',alignSelf:msg.role==='user'?'flex-end':'flex-start',maxWidth:'88%',fontSize:13,lineHeight:1.55,animation:'din 180ms ease both',color:msg.role==='user'?'rgba(255,255,255,.9)':'rgba(255,255,255,.82)'}}>{msg.text||(stream&&i===msgs.length-1?<span>{stxt}<span style={{display:'inline-block',width:2,height:13,background:accent,marginLeft:2,verticalAlign:'text-bottom',animation:'blink .6s step-end infinite'}}/></span>:'…')}</div>)}
+      <div ref={bottomRef}/>
+    </div>
+    <div style={{borderTop:'1px solid rgba(255,255,255,.06)',padding:'8px 14px',display:'flex',alignItems:'center',gap:8}}>
+      <textarea className="aiinput" rows={1} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}} placeholder="Ask anything…" style={{height:28,paddingTop:4}}/>
+      <button onClick={send} style={{flexShrink:0,width:26,height:26,borderRadius:7,border:'none',background:input.trim()?accent:'rgba(255,255,255,.07)',color:input.trim()?'#fff':'rgba(255,255,255,.25)',fontSize:12,cursor:'default',display:'flex',alignItems:'center',justifyContent:'center',transition:'background 140ms,color 140ms'}}>↑</button>
+    </div>
+  </div>;
+}
+
+// ── EMOJI PICKER ──────────────────────────────────────────────
+function EmojiView({accent}){
+  const [q,setQ]=useState('');const [cat,setCat]=useState(Object.keys(EMOJI_DATA)[0]);const [done,setDone]=useState('');
+  const cats=Object.keys(EMOJI_DATA);
+  const shown=q?cats.flatMap(c=>EMOJI_DATA[c]).filter(e=>e.includes(q)):EMOJI_DATA[cat]||[];
+  function pick(e){navigator.clipboard?.writeText(e);setDone(e);setTimeout(()=>setDone(''),1200);}
+  return <div style={{display:'flex',flexDirection:'column',maxHeight:376}}>
+    <div style={{padding:'8px 14px',borderBottom:'1px solid rgba(255,255,255,.06)'}}><input className="sinput" style={{fontSize:14}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search emoji…"/></div>
+    {!q&&<div style={{display:'flex',gap:3,padding:'6px 14px',borderBottom:'1px solid rgba(255,255,255,.06)',overflowX:'auto'}}>
+      {cats.map(c=><button key={c} onClick={()=>setCat(c)} style={{padding:'3px 8px',borderRadius:6,border:'1px solid transparent',cursor:'default',background:cat===c?`${accent}22`:'transparent',borderColor:cat===c?`${accent}50`:'transparent',color:cat===c?accent:'rgba(255,255,255,.38)',fontSize:12,fontFamily:'inherit',whiteSpace:'nowrap',transition:'background 100ms'}}>{c}</button>)}
+    </div>}
+    <div className="scr" style={{flex:1,overflowY:'auto',padding:'8px 14px',display:'flex',flexWrap:'wrap',gap:2,alignContent:'flex-start'}}>
+      {shown.map((e,i)=><button key={i} onClick={()=>pick(e)} style={{width:36,height:36,fontSize:22,background:done===e?`${accent}22`:'transparent',border:`1px solid ${done===e?accent+'50':'transparent'}`,borderRadius:8,cursor:'default',transition:'background 100ms,border-color 100ms'}}>{e}</button>)}
+    </div>
+    {done&&<div style={{padding:'6px 14px',borderTop:'1px solid rgba(255,255,255,.06)',fontSize:12,color:'rgba(255,255,255,.45)'}}>{done} copied to clipboard</div>}
+  </div>;
+}
+
+// ── FONT BROWSER ──────────────────────────────────────────────
+function FontView({accent}){
+  const [q,setQ]=useState('');const [prev,setPrev]=useState('The quick brown fox');
+  const shown=q?FONTS.filter(f=>f.toLowerCase().includes(q.toLowerCase())):FONTS;
+  return <div style={{display:'flex',flexDirection:'column',maxHeight:376}}>
+    <div style={{padding:'8px 14px',borderBottom:'1px solid rgba(255,255,255,.06)',display:'flex',gap:8}}>
+      <input className="sinput" style={{fontSize:14,flex:1}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search fonts…"/>
+      <input style={{background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:6,padding:'4px 8px',color:'rgba(255,255,255,.65)',fontFamily:'inherit',fontSize:12,outline:'none',width:150}} value={prev} onChange={e=>setPrev(e.target.value)} placeholder="Preview text…"/>
+    </div>
+    <div className="scr" style={{flex:1,overflowY:'auto'}}>
+      {shown.map((f,i)=><div key={f} className="rrow" style={{height:52,padding:'0 14px',display:'flex',flexDirection:'column',justifyContent:'center',gap:2,borderBottom:'1px solid rgba(255,255,255,.04)',cursor:'default',animationDelay:`${i*12}ms`}}>
+        <div style={{fontSize:10,color:'rgba(255,255,255,.32)',fontWeight:600,letterSpacing:'.05em',textTransform:'uppercase'}}>{f}</div>
+        <div style={{fontSize:16,color:'rgba(255,255,255,.82)',fontFamily:f,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>{prev||f}</div>
+      </div>)}
+    </div>
+  </div>;
+}
+
+// ── NETWORK ───────────────────────────────────────────────────
+function NetworkView({accent}){
+  const [nets,setNets]=useState(WIFI);
+  function toggle(ssid){setNets(ns=>ns.map(n=>({...n,on:n.ssid===ssid?!n.on:false})));}
+  return <div className="scr" style={{maxHeight:376,overflowY:'auto'}}>
+    <SecHdr label="Wi-Fi"/>
+    {nets.map((n,i)=><div key={n.ssid} className="rrow" style={{height:48,padding:'0 14px',display:'flex',alignItems:'center',gap:10,cursor:'default',animationDelay:`${i*25}ms`,background:n.on?`${accent}0A`:'transparent',boxShadow:n.on?`inset 3px 0 0 ${accent}`:'none'}}>
+      <SignalBars val={n.sig}/>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:14,fontWeight:n.on?600:400,color:n.on?'rgba(255,255,255,.93)':'rgba(255,255,255,.72)',letterSpacing:'-.01em',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.ssid}</div>
+        <div style={{fontSize:11,marginTop:1,color:n.on?accent:'rgba(255,255,255,.32)'}}>{n.on?'Connected':n.sec?'Secured':'Open'} · {n.sig}%</div>
+      </div>
+      <button onClick={()=>toggle(n.ssid)} style={{padding:'3px 10px',borderRadius:6,cursor:'default',fontFamily:'inherit',fontSize:11,fontWeight:500,background:n.on?'rgba(255,255,255,.07)':'transparent',border:`1px solid ${n.on?'rgba(255,255,255,.12)':accent+'60'}`,color:n.on?'rgba(255,255,255,.45)':accent}}>{n.on?'Disconnect':'Connect'}</button>
+    </div>)}
+  </div>;
+}
+
+// ── AUDIO ─────────────────────────────────────────────────────
+function AudioView({accent}){
+  const [vol,setVol]=useState(65);const [muted,setMuted]=useState(false);const [outDev,setOutDev]=useState(0);const [inVol,setInVol]=useState(80);
+  const outDevs=['Built-in Speakers','HDMI Output (LG Monitor)','Bluetooth Headphones'];
+  return <div className="scr" style={{maxHeight:376,overflowY:'auto'}}>
+    <SecHdr label="Output"/>
+    {outDevs.map((d,i)=><div key={d} className="rrow" onClick={()=>setOutDev(i)} style={{height:42,padding:'0 14px',display:'flex',alignItems:'center',gap:10,cursor:'default',background:outDev===i?'rgba(255,255,255,.07)':'transparent',boxShadow:outDev===i?`inset 3px 0 0 ${accent}`:'none'}}>
+      <div style={{width:7,height:7,borderRadius:'50%',flexShrink:0,background:outDev===i?accent:'rgba(255,255,255,.18)'}}/>
+      <span style={{fontSize:13,color:outDev===i?'rgba(255,255,255,.9)':'rgba(255,255,255,.58)',fontWeight:outDev===i?500:400}}>{d}</span>
+    </div>)}
+    <div style={{padding:'10px 14px',display:'flex',alignItems:'center',gap:10}}>
+      <button onClick={()=>setMuted(m=>!m)} style={{width:28,height:28,borderRadius:7,border:'none',cursor:'default',background:muted?'rgba(255,80,80,.18)':'rgba(255,255,255,.06)',color:muted?'#FF6B5F':'rgba(255,255,255,.5)',fontSize:15,display:'flex',alignItems:'center',justifyContent:'center'}}>{muted?'🔇':'🔊'}</button>
+      <input type="range" min={0} max={100} value={muted?0:vol} onChange={e=>setVol(+e.target.value)} style={{flex:1,accentColor:accent}}/>
+      <span style={{fontSize:12,color:'rgba(255,255,255,.36)',width:32,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{muted?0:vol}%</span>
+    </div>
+    <SecHdr label="Input"/>
+    {['Built-in Microphone','USB Microphone'].map((d,i)=><div key={d} className="rrow" style={{height:42,padding:'0 14px',display:'flex',alignItems:'center',gap:10,cursor:'default'}}>
+      <div style={{width:7,height:7,borderRadius:'50%',flexShrink:0,background:i===0?'rgba(255,255,255,.45)':'rgba(255,255,255,.14)'}}/>
+      <span style={{fontSize:13,color:'rgba(255,255,255,.6)'}}>{d}</span>
+      {i===0&&<span style={{marginLeft:'auto',fontSize:11,color:'rgba(255,255,255,.28)'}}>default</span>}
+    </div>)}
+    <div style={{padding:'10px 14px 14px',display:'flex',alignItems:'center',gap:10}}>
+      <div style={{width:28,height:28,borderRadius:7,background:'rgba(255,255,255,.06)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:15}}>🎙</div>
+      <input type="range" min={0} max={100} value={inVol} onChange={e=>setInVol(+e.target.value)} style={{flex:1,accentColor:accent}}/>
+      <span style={{fontSize:12,color:'rgba(255,255,255,.36)',width:32,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{inVol}%</span>
+    </div>
+  </div>;
+}
+
+// ── MEDIA ─────────────────────────────────────────────────────
+function MediaView({accent}){
+  const [playing,setPlaying]=useState(true);const [pos,setPos]=useState(67);const total=214;
+  const fmt=s=>`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+  useEffect(()=>{if(!playing)return;const id=setInterval(()=>setPos(p=>Math.min(p+1,total)),1000);return()=>clearInterval(id);},[playing]);
+  const CtrlBtn=({icon,big,onClick})=><button onClick={onClick} style={{width:big?42:32,height:big?42:32,borderRadius:'50%',border:'none',cursor:'default',background:big?accent:'rgba(255,255,255,.07)',color:big?'#fff':'rgba(255,255,255,.55)',fontSize:big?17:14,display:'flex',alignItems:'center',justifyContent:'center',transition:'background 140ms'}}>{icon}</button>;
+  return <div style={{padding:'20px 14px 18px',display:'flex',flexDirection:'column',gap:18}}>
+    <div style={{display:'flex',gap:14,alignItems:'flex-end'}}>
+      <div style={{width:80,height:80,borderRadius:11,flexShrink:0,background:`linear-gradient(135deg,${accent}45,${accent}18)`,border:'1px solid rgba(255,255,255,.08)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:30}}>♪</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:17,fontWeight:600,color:'rgba(255,255,255,.93)',letterSpacing:'-.015em',marginBottom:3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>Blinding Lights</div>
+        <div style={{fontSize:13,color:'rgba(255,255,255,.48)'}}>The Weeknd</div>
+        <div style={{fontSize:11,color:'rgba(255,255,255,.3)',marginTop:2}}>After Hours · Spotify</div>
+      </div>
+    </div>
+    <div>
+      <input type="range" min={0} max={total} value={pos} onChange={e=>setPos(+e.target.value)} style={{width:'100%',accentColor:accent}}/>
+      <div style={{display:'flex',justifyContent:'space-between',marginTop:4}}>
+        <span style={{fontSize:11,color:'rgba(255,255,255,.3)',fontFamily:"'JetBrains Mono',monospace"}}>{fmt(pos)}</span>
+        <span style={{fontSize:11,color:'rgba(255,255,255,.3)',fontFamily:"'JetBrains Mono',monospace"}}>{fmt(total)}</span>
+      </div>
+    </div>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10}}>
+      <CtrlBtn icon="⏮" onClick={()=>setPos(0)}/><CtrlBtn icon="⏪" onClick={()=>setPos(p=>Math.max(0,p-10))}/><CtrlBtn icon={playing?'⏸':'▶'} big onClick={()=>setPlaying(p=>!p)}/><CtrlBtn icon="⏩" onClick={()=>setPos(p=>Math.min(total,p+10))}/><CtrlBtn icon="⏭" onClick={()=>setPos(total)}/>
+    </div>
+  </div>;
+}
+
+// ── NOTIFICATIONS ─────────────────────────────────────────────
+function NotifView(){
+  const [dismissed,setDismissed]=useState([]);
+  const shown=NOTIFS.filter(n=>!dismissed.includes(n.time));
+  return <div className="scr" style={{maxHeight:376,overflowY:'auto'}}>
+    {!shown.length&&<div style={{padding:'36px 16px',textAlign:'center',color:'rgba(255,255,255,.24)',fontSize:13}}>All caught up ✓</div>}
+    {shown.map((n,i)=><div key={n.time} className="rrow" style={{minHeight:56,padding:'10px 14px',display:'flex',gap:10,cursor:'default',borderBottom:'1px solid rgba(255,255,255,.04)',animationDelay:`${i*25}ms`}}>
+      <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:'rgba(255,255,255,.055)',border:'1px solid rgba(255,255,255,.08)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>{n.ico}</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:2}}><span style={{fontSize:11,color:'rgba(255,255,255,.38)',fontWeight:500}}>{n.app}</span><span style={{fontSize:10,color:'rgba(255,255,255,.22)'}}>{n.time}</span></div>
+        <div style={{fontSize:13,fontWeight:500,color:'rgba(255,255,255,.85)',marginBottom:1}}>{n.title}</div>
+        <div style={{fontSize:12,color:'rgba(255,255,255,.42)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.body}</div>
+      </div>
+      <button onClick={()=>setDismissed(d=>[...d,n.time])} style={{flexShrink:0,width:18,height:18,borderRadius:5,border:'none',background:'rgba(255,255,255,.05)',cursor:'default',color:'rgba(255,255,255,.24)',fontSize:11,display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
+    </div>)}
+  </div>;
+}
+
+// ── SYSTEM MONITOR ────────────────────────────────────────────
+function SysMonView({accent}){
+  const [cpu,setCpu]=useState(23);
+  const [hist,setHist]=useState(()=>Array(22).fill(0).map(()=>Math.round(Math.random()*22+8)));
+  const [cores,setCores]=useState(()=>Array(8).fill(0).map(()=>Math.round(Math.random()*38+4)));
+  const [netD,setNetD]=useState(8.4); const [netU,setNetU]=useState(0.12);
+  const [sort,setSort]=useState('mem'); const [filter,setFilter]=useState('');
+  const [hover,setHover]=useState(null);
+  const [procs,setProcs]=useState(PROCS);
+
+  useEffect(()=>{
+    const id=setInterval(()=>{
+      setCpu(v=>{const n=Math.round(Math.max(4,Math.min(90,v+(Math.random()-.5)*10)));setHist(h=>[...h.slice(1),n]);return n;});
+      setCores(cs=>cs.map(c=>Math.round(Math.max(0,Math.min(100,c+(Math.random()-.5)*18)))));
+      setNetD(v=>Math.max(.1,+(v+(Math.random()-.5)*2.5).toFixed(1)));
+      setNetU(v=>Math.max(0,+(v+(Math.random()-.5)*.09).toFixed(2)));
+      setProcs(ps=>ps.map(p=>({...p,cpu:+Math.max(0,Math.min(98,p.cpu+(Math.random()-.5)*2.2)).toFixed(1)})));
+    },1800);
+    return()=>clearInterval(id);
+  },[]);
+
+  // Sparkline SVG
+  const SW=114,SH=28,maxH=Math.max(...hist,1);
+  const pts=hist.map((v,i)=>`${i*(SW/(hist.length-1))},${SH-1-(v/maxH)*(SH-3)}`).join(' ');
+
+  const filtered=procs.filter(p=>!filter||p.name.includes(filter.toLowerCase()));
+  const sorted=[...filtered].sort((a,b)=>b[sort]-a[sort]);
+  const fmt=v=>v>=1024?(v/1024).toFixed(1)+'G':v+'M';
+  const cpuCol=cpu>80?'#FF6B5F':cpu>60?'#F5A623':accent;
+
+  return <div style={{display:'flex',flexDirection:'column',maxHeight:376}}>
+    {/* ── Resource overview ── */}
+    <div style={{padding:'10px 14px 8px',borderBottom:'1px solid rgba(255,255,255,.06)',display:'flex',flexDirection:'column',gap:8}}>
+
+      {/* CPU: value + cores + sparkline */}
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <span style={{fontSize:10,fontWeight:600,letterSpacing:'.06em',textTransform:'uppercase',color:'rgba(255,255,255,.3)',width:30}}>CPU</span>
+        <span style={{fontSize:14,fontWeight:700,color:cpuCol,fontVariantNumeric:'tabular-nums',width:38,transition:'color 400ms'}}>{cpu}%</span>
+        <div style={{display:'flex',gap:2,alignItems:'flex-end',height:20}}>
+          {cores.map((c,i)=><div key={i} style={{width:6,height:20,borderRadius:2,background:'rgba(255,255,255,.06)',overflow:'hidden',position:'relative'}}>
+            <div style={{position:'absolute',bottom:0,left:0,right:0,background:c>80?'#FF6B5F':c>60?'#F5A623':accent,height:c+'%',transition:'height 500ms ease',borderRadius:2}}/>
+          </div>)}
+        </div>
+        <div style={{flex:1}}/>
+        <svg width={SW} height={SH}>
+          <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={accent} stopOpacity=".22"/><stop offset="100%" stopColor={accent} stopOpacity="0"/></linearGradient></defs>
+          <polygon points={`0,${SH} ${pts} ${SW},${SH}`} fill="url(#sg)"/>
+          <polyline points={pts} fill="none" stroke={accent} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+
+      {/* Memory: segmented bar */}
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <span style={{fontSize:10,fontWeight:600,letterSpacing:'.06em',textTransform:'uppercase',color:'rgba(255,255,255,.3)',width:30}}>RAM</span>
+        <div style={{flex:1,height:5,borderRadius:3,background:'rgba(255,255,255,.06)',overflow:'hidden',display:'flex'}}>
+          <div style={{width:'51.25%',background:'#FF6B5F',transition:'width 600ms'}}/>
+          <div style={{width:'13.1%',background:accent+'80',transition:'width 600ms'}}/>
+        </div>
+        <span style={{fontSize:11,color:'rgba(255,255,255,.5)',fontVariantNumeric:'tabular-nums',whiteSpace:'nowrap'}}>8.2 <span style={{color:'rgba(255,255,255,.24)'}}>/</span> 16 GB</span>
+        <div style={{display:'flex',gap:6}}>
+          {[['Used','#FF6B5F'],['Cached',accent+'99']].map(([l,c])=><span key={l} style={{fontSize:10,color:'rgba(255,255,255,.28)',display:'flex',alignItems:'center',gap:3}}><span style={{width:6,height:6,borderRadius:2,background:c,display:'inline-block',flexShrink:0}}/>{l}</span>)}
+        </div>
+      </div>
+
+      {/* Network */}
+      <div style={{display:'flex',alignItems:'center',gap:6}}>
+        <span style={{fontSize:10,fontWeight:600,letterSpacing:'.06em',textTransform:'uppercase',color:'rgba(255,255,255,.3)',width:30}}>NET</span>
+        {[['↓',netD,'MB/s'],['↑',netU,'MB/s']].map(([ic,v,u])=><div key={ic} style={{display:'flex',alignItems:'center',gap:3,padding:'2px 7px',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.07)',borderRadius:5}}>
+          <span style={{fontSize:10,color:'rgba(255,255,255,.32)'}}>{ic}</span>
+          <span style={{fontSize:11,fontFamily:"'JetBrains Mono',monospace",fontVariantNumeric:'tabular-nums',color:'rgba(255,255,255,.62)'}}>{v}</span>
+          <span style={{fontSize:9,color:'rgba(255,255,255,.26)'}}>{u}</span>
+        </div>)}
+        <div style={{flex:1}}/>
+        <span style={{fontSize:10,color:'rgba(255,255,255,.22)',fontFamily:"'JetBrains Mono',monospace"}}>DISK ↓ 12.3 MB/s</span>
+      </div>
+    </div>
+
+    {/* ── Table header + filter ── */}
+    <div style={{display:'flex',alignItems:'center',padding:'4px 14px',borderBottom:'1px solid rgba(255,255,255,.05)',gap:8}}>
+      <span style={{fontSize:10,color:'rgba(255,255,255,.22)',width:14}}>⊟</span>
+      <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="filter processes…"
+        style={{flex:1,background:'transparent',border:'none',outline:'none',fontSize:11,
+          color:'rgba(255,255,255,.6)',fontFamily:"'JetBrains Mono',monospace"}} spellCheck={false}/>
+      {[['cpu','CPU'],['mem','MEM']].map(([k,l])=><button key={k} onClick={()=>setSort(k)} style={{width:46,border:'none',background:'transparent',cursor:'default',textAlign:'right',fontSize:10,fontWeight:600,letterSpacing:'.06em',textTransform:'uppercase',color:sort===k?accent:'rgba(255,255,255,.2)',fontFamily:'inherit'}}>{l}{sort===k?' ↓':''}</button>)}
+      <div style={{width:18}}/>
+    </div>
+
+    {/* ── Process list ── */}
+    <div className="scr" style={{flex:1,overflowY:'auto'}}>
+      {sorted.map((p,i)=><div key={p.pid} className="rrow"
+        onMouseEnter={()=>setHover(p.pid)} onMouseLeave={()=>setHover(null)}
+        style={{height:34,padding:'0 14px',display:'flex',alignItems:'center',gap:7,cursor:'default',animationDelay:`${i*10}ms`}}>
+        <span style={{flex:1,fontSize:12,color:'rgba(255,255,255,.72)',fontFamily:"'JetBrains Mono',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</span>
+        <div style={{width:36,height:3,borderRadius:2,background:'rgba(255,255,255,.06)',overflow:'hidden',flexShrink:0}}>
+          <div style={{height:'100%',width:Math.min(100,p.cpu/25*100)+'%',background:p.cpu>12?'#F5A623':accent,borderRadius:2,transition:'width 700ms ease'}}/>
+        </div>
+        <span style={{width:40,textAlign:'right',fontSize:11,fontFamily:"'JetBrains Mono',monospace",fontVariantNumeric:'tabular-nums',color:p.cpu>8?accent:'rgba(255,255,255,.36)',flexShrink:0}}>{p.cpu}%</span>
+        <span style={{width:44,textAlign:'right',fontSize:11,fontFamily:"'JetBrains Mono',monospace",fontVariantNumeric:'tabular-nums',color:p.mem>500?accent:'rgba(255,255,255,.34)',flexShrink:0}}>{fmt(p.mem)}</span>
+        <button style={{width:16,height:16,borderRadius:4,border:'none',flexShrink:0,
+          background:hover===p.pid?'rgba(255,70,70,.2)':'transparent',
+          color:hover===p.pid?'#FF6B5F':'transparent',
+          fontSize:12,cursor:'default',display:'flex',alignItems:'center',justifyContent:'center',
+          transition:'background 120ms,color 120ms'}}>×</button>
+      </div>)}
+      {!sorted.length&&<div style={{padding:'20px 14px',fontSize:12,color:'rgba(255,255,255,.24)',fontFamily:"'JetBrains Mono',monospace"}}>no match for "{filter}"</div>}
+    </div>
+  </div>;
+}
+
+// ── PREFERENCES ───────────────────────────────────────────────
+const PREF_NAV=['General','Appearance','Keyboard','Extensions','Privacy','About'];
+const PREF_FIELDS={
+  General:[{l:'Launch on startup',t:'toggle',v:true},{l:'Show in menu bar',t:'toggle',v:false},{l:'Font size',t:'range',v:15,min:12,max:22},{l:'Max results',t:'num',v:8},{l:'Result row height',t:'radio',opts:['Compact','Comfortable'],v:'Compact'}],
+  Appearance:[{l:'Theme',t:'radio',opts:['System','Dark','Light'],v:'System'},{l:'Window width',t:'range',v:680,min:560,max:900},{l:'Border radius',t:'range',v:14,min:0,max:20},{l:'Font family',t:'txt',v:'Outfit, Inter, Noto Sans'},{l:'Reduce motion',t:'toggle',v:false}],
+  Keyboard:[{l:'Global hotkey',t:'txt',v:'Super+Space'},{l:'Action panel',t:'txt',v:'Ctrl+K'},{l:'Quick AI',t:'txt',v:'Tab'},{l:'Close launcher',t:'txt',v:'Escape'}],
+  About:[{l:'Version',t:'info',v:'zeshicast 0.4.0'},{l:'Built with',t:'info',v:'Rust + GTK4'},{l:'Compositor',t:'info',v:'Niri / Wayland'},{l:'License',t:'info',v:'MIT'}],
+};
+function PrefsView({accent}){
+  const [sec,setSec]=useState('General');
+  const fields=PREF_FIELDS[sec]||[{l:'Coming soon',t:'info',v:''}];
+  return <div style={{display:'flex',maxHeight:376}}>
+    <div style={{width:138,flexShrink:0,borderRight:'1px solid rgba(255,255,255,.06)',padding:'6px 0',overflowY:'auto'}}>
+      {PREF_NAV.map(s=><div key={s} className="rrow" onClick={()=>setSec(s)} style={{height:34,padding:'0 12px',display:'flex',alignItems:'center',cursor:'default',background:sec===s?'rgba(255,255,255,.07)':'transparent',boxShadow:sec===s?`inset 3px 0 0 ${accent}`:'none'}}>
+        <span style={{fontSize:13,color:sec===s?'rgba(255,255,255,.88)':'rgba(255,255,255,.48)',fontWeight:sec===s?500:400}}>{s}</span>
+      </div>)}
+    </div>
+    <div className="scr" style={{flex:1,overflowY:'auto',padding:'8px 0'}}>
+      {fields.map(f=><div key={f.l} style={{padding:'7px 14px',display:'flex',alignItems:'center',gap:10,minHeight:36,borderBottom:'1px solid rgba(255,255,255,.04)'}}>
+        <span style={{flex:1,fontSize:13,color:'rgba(255,255,255,.68)',letterSpacing:'-.01em',minWidth:0}}>{f.l}</span>
+        {f.t==='toggle'&&<Toggle on={f.v} onClick={()=>{}} accent={accent}/>}
+        {f.t==='range'&&<input type="range" min={f.min} max={f.max} defaultValue={f.v} style={{width:90,accentColor:accent}}/>}
+        {f.t==='txt'&&<span style={{fontSize:11,color:'rgba(255,255,255,.38)',fontFamily:"'JetBrains Mono',monospace",maxWidth:170,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.v}</span>}
+        {f.t==='num'&&<span style={{fontSize:13,color:'rgba(255,255,255,.55)',fontFamily:"'JetBrains Mono',monospace"}}>{f.v}</span>}
+        {f.t==='radio'&&<div style={{display:'flex',gap:3}}>{f.opts.map(o=><button key={o} style={{padding:'2px 8px',borderRadius:5,border:'1px solid transparent',cursor:'default',fontSize:11,fontFamily:'inherit',background:f.v===o?`${accent}22`:'rgba(255,255,255,.05)',borderColor:f.v===o?`${accent}50`:'rgba(255,255,255,.08)',color:f.v===o?accent:'rgba(255,255,255,.42)'}}>{o}</button>)}</div>}
+        {f.t==='info'&&<span style={{fontSize:11,color:'rgba(255,255,255,.4)',fontFamily:"'JetBrains Mono',monospace"}}>{f.v}</span>}
+      </div>)}
+    </div>
+  </div>;
+}
+
+// ── EXTENSIONS ────────────────────────────────────────────────
+function ExtsView({accent}){
+  const [exts,setExts]=useState(EXTS);
+  function toggle(i){setExts(es=>es.map((e,j)=>j===i?{...e,on:!e.on}:e));}
+  return <div className="scr" style={{maxHeight:376,overflowY:'auto'}}>
+    <SecHdr label={`Built-in · ${exts.filter(e=>e.on).length} of ${exts.length} active`}/>
+    {exts.map((ext,i)=><div key={ext.name} className="rrow" style={{height:52,padding:'0 14px',display:'flex',alignItems:'center',gap:10,cursor:'default',animationDelay:`${i*18}ms`,opacity:ext.on?1:0.5}}>
+      <div style={{width:32,height:32,borderRadius:8,flexShrink:0,background:ext.on?`${accent}18`:'rgba(255,255,255,.05)',border:`1px solid ${ext.on?accent+'35':'rgba(255,255,255,.08)'}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,color:ext.on?accent:'rgba(255,255,255,.3)',fontWeight:700}}>{ext.icon}</div>
+      <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'rgba(255,255,255,.88)',marginBottom:2}}>{ext.name}</div><div style={{fontSize:11,color:'rgba(255,255,255,.36)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ext.desc}</div></div>
+      <Toggle on={ext.on} onClick={()=>toggle(i)} accent={accent}/>
+    </div>)}
+  </div>;
+}
+
+// ── SEARCH BAR ────────────────────────────────────────────────
+const VIEW_LABELS={dashboard:'Dashboard',ai:'AI Chat',clipboard:'Clipboard',emoji:'Emoji Picker',fonts:'Font Browser',network:'Network',audio:'Audio',media:'Media',notifs:'Notifications',sysmon:'System Monitor',prefs:'Preferences',exts:'Extensions'};
+function SearchBar({query,onChange,calcMode,onClearCalc,accent,view,onBack}){
+  const ref=useRef(null);
+  useEffect(()=>{ref.current?.focus();},[view]);
+  const inSub=view!=='search';
+  return <div style={{height:60,display:'flex',alignItems:'center',padding:'0 14px',gap:8,borderBottom:'1px solid rgba(255,255,255,.07)'}}>
+    {inSub&&<button onClick={onBack} style={{flexShrink:0,display:'flex',alignItems:'center',gap:5,padding:'3px 9px 3px 5px',background:'rgba(255,255,255,.055)',border:'1px solid rgba(255,255,255,.09)',borderRadius:7,cursor:'default',color:'rgba(255,255,255,.55)',fontSize:12,fontWeight:500,fontFamily:'inherit'}}><span style={{fontSize:15,lineHeight:1}}>‹</span><span style={{letterSpacing:'-.01em'}}>{VIEW_LABELS[view]||view}</span></button>}
+    {calcMode&&!inSub&&<div style={{display:'flex',alignItems:'center',gap:4,padding:'2px 8px 2px 6px',background:`${accent}1A`,border:`1px solid ${accent}40`,borderRadius:7,flexShrink:0}}><span style={{fontSize:11,color:accent,fontWeight:600,letterSpacing:'.04em'}}>Calculator</span><span onClick={onClearCalc} style={{fontSize:11,color:accent,opacity:.6,cursor:'default',lineHeight:1}}>×</span></div>}
+    <input ref={ref} className="sinput" value={inSub?'':query} onChange={e=>onChange(e.target.value)} spellCheck={false} autoComplete="off" placeholder={inSub?'':query===''?'Search for apps and commands…':''} style={{pointerEvents:inSub?'none':'all',opacity:inSub?0:1}}/>
+    <KBadge>⌃K</KBadge>
+  </div>;
+}
+
+// ── ACTION PANEL ──────────────────────────────────────────────
+function ActionPanel({selItem,accent,onClose}){
+  const [filt,setFilt]=useState('');const [si,setSi]=useState(0);const ref=useRef(null);
+  useEffect(()=>{ref.current?.focus();},[]);
+  const all=useMemo(()=>{const f=[];Object.entries(ACTS).forEach(([sec,acts])=>acts.forEach(a=>f.push({...a,sec})));return f;},[]);
+  const f2=useMemo(()=>filt?all.filter(a=>a.label.toLowerCase().includes(filt.toLowerCase())):all,[filt,all]);
+  const grouped=useMemo(()=>{const m={};f2.forEach(a=>{if(!m[a.sec])m[a.sec]=[];m[a.sec].push(a);});return m;},[f2]);
+  let gi=0;
+  return <div className="panwrap" style={{position:'absolute',inset:'0',background:'#13131C',borderTop:'1px solid rgba(255,255,255,.06)',display:'flex',flexDirection:'column',zIndex:10}}>
+    <div style={{height:46,display:'flex',alignItems:'center',padding:'0 14px',gap:10,borderBottom:'1px solid rgba(255,255,255,.06)'}}>
+      <span style={{fontSize:10,fontWeight:600,letterSpacing:'.07em',textTransform:'uppercase',color:'rgba(255,255,255,.26)',flexShrink:0}}>Actions</span>
+      <input ref={ref} value={filt} onChange={e=>setFilt(e.target.value)} placeholder={selItem?`for ${selItem.title}…`:'Filter actions…'} style={{flex:1,background:'transparent',border:'none',outline:'none',color:'rgba(255,255,255,.85)',fontFamily:'inherit',fontSize:13,letterSpacing:'-.01em'}} spellCheck={false}/>
+      <button onClick={onClose} style={{background:'rgba(255,255,255,.05)',border:'1px solid rgba(255,255,255,.09)',borderRadius:5,padding:'2px 7px',color:'rgba(255,255,255,.36)',fontSize:11,cursor:'default',fontFamily:'inherit'}}>Esc</button>
+    </div>
+    <div className="scr" style={{flex:1,overflowY:'auto'}}>
+      {Object.entries(grouped).map(([sec,acts])=><div key={sec}><SecHdr label={sec}/>{acts.map(a=>{const idx=gi++;const isDanger=sec==='Danger';return <div key={a.label} className="arow" onClick={()=>setSi(idx)} style={{height:38,padding:'0 14px',display:'flex',alignItems:'center',cursor:'default',userSelect:'none',background:idx===si?'rgba(255,255,255,.07)':'transparent',boxShadow:idx===si?`inset 3px 0 0 ${isDanger?'#FF6B5F':accent}`:'none'}}><span style={{flex:1,fontSize:13,fontWeight:500,letterSpacing:'-.01em',color:isDanger?'#FF6B5F':'rgba(255,255,255,.85)'}}>{a.label}</span>{a.key&&<KBadge>{a.key}</KBadge>}</div>;})}</div>)}
+    </div>
+  </div>;
+}
+
+// ── ACTION BAR + STATUS STRIP ─────────────────────────────────
+function ActionBar({total,view,onPanel}){
+  return <div style={{height:38,display:'flex',alignItems:'center',padding:'0 12px',gap:4,borderTop:'1px solid rgba(255,255,255,.06)'}}>
+    {['⊟','◈'].map(ic=><button key={ic} style={{width:26,height:26,background:'transparent',border:'1px solid transparent',borderRadius:6,cursor:'default',fontSize:12,color:'rgba(255,255,255,.26)',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'inherit',transition:'background 120ms,color 120ms,border-color 120ms'}} onMouseEnter={e=>{e.currentTarget.style.background='rgba(255,255,255,.055)';e.currentTarget.style.borderColor='rgba(255,255,255,.08)';e.currentTarget.style.color='rgba(255,255,255,.55)';}} onMouseLeave={e=>{e.currentTarget.style.background='transparent';e.currentTarget.style.borderColor='transparent';e.currentTarget.style.color='rgba(255,255,255,.26)'}}>{ic}</button>)}
+    <div style={{flex:1}}/>
+    {view==='search'&&total>8&&<span style={{fontSize:11,color:'rgba(255,255,255,.26)',letterSpacing:'.01em'}}>{Math.min(8,total)} of {total} ↕</span>}
+    <button onClick={onPanel} style={{display:'flex',alignItems:'center',padding:'3px 8px',background:'transparent',border:'1px solid transparent',borderRadius:6,cursor:'default',color:'rgba(255,255,255,.28)',fontSize:13,fontFamily:'inherit',transition:'background 120ms,color 120ms,border-color 120ms'}} onMouseEnter={e=>{e.currentTarget.style.background='rgba(255,255,255,.055)';e.currentTarget.style.borderColor='rgba(255,255,255,.08)';e.currentTarget.style.color='rgba(255,255,255,.55)';}} onMouseLeave={e=>{e.currentTarget.style.background='transparent';e.currentTarget.style.borderColor='transparent';e.currentTarget.style.color='rgba(255,255,255,.28)'}}>···</button>
+  </div>;
+}
+function StatusStrip({accent}){
+  const [now,setNow]=useState(new Date());
+  useEffect(()=>{const id=setInterval(()=>setNow(new Date()),5000);return()=>clearInterval(id);},[]);
+  const hh=String(now.getHours()).padStart(2,'0'),mm=String(now.getMinutes()).padStart(2,'0');
+  const chips=[['⌘','Connected',true],['♦','84%',false],['♪','65%',false],['▦','ws 2',true]];
+  return <div style={{display:'flex',alignItems:'center',padding:'7px 14px 10px',gap:6}}>
+    <span style={{fontSize:12,fontWeight:600,color:'rgba(255,255,255,.42)',letterSpacing:'-.01em',fontVariantNumeric:'tabular-nums',marginRight:2}}>{hh}:{mm}</span>
+    <span style={{fontSize:11,color:'rgba(255,255,255,.22)',letterSpacing:'.01em'}}>{now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span>
+    <div style={{flex:1}}/>
+    {chips.map(([ic,v,ac])=><div key={v} className="schip" style={{display:'flex',alignItems:'center',gap:4,padding:'2px 7px',background:ac?`${accent}12`:'rgba(255,255,255,.042)',border:`1px solid ${ac?accent+'2E':'rgba(255,255,255,.07)'}`,borderRadius:6,cursor:'default'}}>
+      <span style={{fontSize:9,color:ac?accent:'rgba(255,255,255,.28)'}}>{ic}</span>
+      <span style={{fontSize:11,fontWeight:500,color:ac?'rgba(255,255,255,.62)':'rgba(255,255,255,.32)',fontVariantNumeric:'tabular-nums'}}>{v}</span>
+    </div>)}
+  </div>;
+}
+
+// ── TWEAKS ────────────────────────────────────────────────────
+const ACCENTS=[{c:'#8B7CF8',n:'Purple'},{c:'#FF8C42',n:'Orange'},{c:'#3A9EFF',n:'Blue'},{c:'#2DD4BF',n:'Teal'}];
+const ALL_VIEWS=[['search','Search'],['dashboard','Dashboard'],['ai','AI Chat'],['clipboard','Clipboard'],['emoji','Emoji Picker'],['fonts','Font Browser'],['network','Network'],['audio','Audio'],['media','Media'],['notifs','Notifications'],['sysmon','System Monitor'],['prefs','Preferences'],['exts','Extensions']];
+function TweaksPanel({accent,setAccent,rh,setRh,view,setView}){
+  const [open,setOpen]=useState(false);
+  return <div className="tpanel">
+    {open&&<div className="tbox">
+      <div><div className="tlabel">Accent</div><div style={{display:'flex',gap:6,marginTop:4}}>{ACCENTS.map(a=><div key={a.c} className={`tswatch${accent===a.c?' on':''}`} title={a.n} onClick={()=>setAccent(a.c)} style={{background:a.c}}/>)}</div></div>
+      <div><div className="tlabel">Row Style</div><div style={{display:'flex',gap:4,marginTop:4}}>{[['compact',44],['comfortable',52]].map(([l,v])=><button key={l} className={`tbtn${rh===v?' on':''}`} onClick={()=>setRh(v)}>{l}</button>)}</div></div>
+      <div><div className="tlabel">View</div>
+        <select value={view} onChange={e=>setView(e.target.value)} style={{marginTop:4,width:'100%',background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.12)',borderRadius:6,padding:'5px 8px',color:'rgba(255,255,255,.7)',fontSize:12,fontFamily:'inherit',cursor:'default',outline:'none'}}>
+          {ALL_VIEWS.map(([k,l])=><option key={k} value={k}>{l}</option>)}
+        </select>
+      </div>
+    </div>}
+    <button className="ttoggle" onClick={()=>setOpen(o=>!o)}>{open?'✕ Close':'⚙ Tweaks'}</button>
+  </div>;
+}
+
+// ── APP ───────────────────────────────────────────────────────
+function App(){
+  const [accent,setAccent]=useState('#8B7CF8');
+  const [rh,setRh]=useState(44);
+  const [view,setView]=useState('search');
+  const [query,setQuery]=useState('');
+  const [si,setSi]=useState(0);
+  const [showPanel,setShowPanel]=useState(false);
+  const [aiQ,setAiQ]=useState('');
+  const isCalc=query.startsWith('=');
+  const filtered=useMemo(()=>{
+    if(isCalc||view!=='search')return[];
+    if(!query)return ITEMS;
+    const q=query.toLowerCase();
+    return ITEMS.filter(i=>i.title.toLowerCase().includes(q)||(i.sub&&i.sub.toLowerCase().includes(q)));
+  },[query,view,isCalc]);
+  const cSi=Math.min(si,Math.max(0,filtered.length-1));
+  function nav(item){if(!item)return;if(item.nav){setView(item.nav);setQuery('');}}
+  useEffect(()=>{
+    function onKey(e){
+      if(e.key==='Escape'){if(showPanel){setShowPanel(false);return;}if(view!=='search'){setView('search');return;}setQuery('');}
+      if(e.ctrlKey&&e.key==='k'){e.preventDefault();setShowPanel(s=>!s);}
+      if(e.key==='Tab'&&!e.shiftKey&&view==='search'){e.preventDefault();setAiQ(query);setQuery('');setView('ai');}
+      if(e.key==='ArrowDown'){e.preventDefault();setSi(i=>Math.min(i+1,filtered.length-1));}
+      if(e.key==='ArrowUp'){e.preventDefault();setSi(i=>Math.max(i-1,0));}
+      if(e.key==='Enter'&&!showPanel)nav(filtered[cSi]);
+    }
+    window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
+  },[showPanel,view,query,filtered,cSi]);
+  const selItem=view==='search'?filtered[cSi]:null;
+  function changeView(v){setView(v);setQuery('');}
+  return <>
+    <div className="lw" style={{'--ac':accent}}>
+      <SearchBar query={query} onChange={v=>{setQuery(v);setSi(0);}} calcMode={isCalc} onClearCalc={()=>setQuery('')} accent={accent} view={view} onBack={()=>{setView('search');setQuery('');}}/>
+      <div style={{position:'relative'}}>
+        <div className="scr" style={{maxHeight:344,overflowY:'auto'}}>
+          {view==='search'    && <SearchView query={query} selIdx={cSi} onSel={item=>{setSi(filtered.indexOf(item));nav(item);}} rh={rh} accent={accent}/>}
+          {view==='dashboard' && <DashView accent={accent}/>}
+          {view==='ai'        && <AIView accent={accent} initQ={aiQ}/>}
+          {view==='clipboard' && <ClipView accent={accent}/>}
+          {view==='emoji'     && <EmojiView accent={accent}/>}
+          {view==='fonts'     && <FontView accent={accent}/>}
+          {view==='network'   && <NetworkView accent={accent}/>}
+          {view==='audio'     && <AudioView accent={accent}/>}
+          {view==='media'     && <MediaView accent={accent}/>}
+          {view==='notifs'    && <NotifView/>}
+          {view==='sysmon'    && <SysMonView accent={accent}/>}
+          {view==='prefs'     && <PrefsView accent={accent}/>}
+          {view==='exts'      && <ExtsView accent={accent}/>}
+        </div>
+        {showPanel&&<ActionPanel selItem={selItem} accent={accent} onClose={()=>setShowPanel(false)}/>}
+      </div>
+      <ActionBar total={filtered.length} view={view} onPanel={()=>setShowPanel(s=>!s)}/>
+      <StatusStrip accent={accent}/>
+    </div>
+    <TweaksPanel accent={accent} setAccent={setAccent} rh={rh} setRh={setRh} view={view} setView={changeView}/>
+  </>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

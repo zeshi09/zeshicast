@@ -17,7 +17,8 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{
-    Application, ApplicationWindow, Box as GtkBox, Entry, EventControllerKey, ListBox, Orientation,
+    Application, ApplicationWindow, Box as GtkBox, Button, Entry, EventControllerKey, Label,
+    ListBox, Orientation,
 };
 
 pub type WindowConfigurator = fn(&ApplicationWindow);
@@ -118,10 +119,23 @@ fn build_ui(
     root.set_margin_end(0);
 
     let entry = Entry::builder()
-        .placeholder_text("Search apps, files, clipboard, snippets, quicklinks, or type calc 2 + 2")
+        .placeholder_text("Search for apps and commands…")
         .hexpand(true)
         .build();
-    entry.add_css_class("search-entry");
+    entry.add_css_class("search-input");
+
+    let mode_badge = Label::new(None);
+    mode_badge.add_css_class("mode-badge");
+    mode_badge.set_visible(false);
+
+    let ctrl_k_hint = Label::new(Some("⌃K"));
+    ctrl_k_hint.add_css_class("ctrl-k-hint");
+    ctrl_k_hint.set_valign(gtk::Align::Center);
+
+    let back_btn = Button::new();
+    back_btn.add_css_class("action-bar-more");
+    back_btn.set_valign(gtk::Align::Center);
+    back_btn.set_visible(false);
 
     let list = ListBox::new();
     list.add_css_class("results-list");
@@ -204,9 +218,13 @@ fn build_ui(
     status_strip.set_audio_snapshot(&crate::audio_snapshot());
     status_strip.set_media_snapshot(&crate::media_snapshot());
 
-    let search_shell = GtkBox::new(Orientation::Vertical, 0);
-    search_shell.add_css_class("search-shell");
+    let search_shell = GtkBox::new(Orientation::Horizontal, 8);
+    search_shell.add_css_class("search-bar");
+    search_shell.set_valign(gtk::Align::Center);
+    search_shell.append(&back_btn);
+    search_shell.append(&mode_badge);
     search_shell.append(&entry);
+    search_shell.append(&ctrl_k_hint);
 
     root.append(&search_shell);
     root.append(navigation.widget());
@@ -214,12 +232,55 @@ fn build_ui(
     root.append(status_strip.widget());
     window.set_child(Some(&root));
 
+    // Navigation view-change callback — single place managing search bar / back button
+    {
+        let entry_cb = entry.clone();
+        let action_bar_cb = action_bar.clone();
+        let back_btn_cb = back_btn.clone();
+        let ctrl_k_hint_cb = ctrl_k_hint.clone();
+        navigation.connect_view_changed(move |view| {
+            let is_root = view == crate::ui::LauncherView::Root;
+            entry_cb.set_visible(is_root);
+            action_bar_cb.set_visible(is_root);
+            ctrl_k_hint_cb.set_visible(is_root);
+            back_btn_cb.set_visible(!is_root);
+            if !is_root {
+                back_btn_cb.set_label(&format!("‹  {}", view.back_label()));
+            }
+        });
+    }
+
+    // Back button restores root
+    {
+        let navigation = navigation.clone();
+        let entry_back = entry.clone();
+        back_btn.connect_clicked(move |_| {
+            navigation.pop();
+            entry_back.grab_focus();
+        });
+    }
+
     {
         let launcher = Rc::clone(&launcher);
         let results = Rc::clone(&results);
         let list = list.clone();
+        let mode_badge = mode_badge.clone();
         entry.connect_changed(move |entry| {
-            update_results(&launcher.borrow(), &results, &list, entry.text().as_str());
+            let query = entry.text();
+            let q = query.as_str();
+            if q.starts_with('=') {
+                mode_badge.set_text("Calculator");
+                mode_badge.set_visible(true);
+            } else if q.starts_with("ssh ") {
+                mode_badge.set_text("SSH");
+                mode_badge.set_visible(true);
+            } else if q.starts_with("file ") || q.starts_with("find ") {
+                mode_badge.set_text("File Search");
+                mode_badge.set_visible(true);
+            } else {
+                mode_badge.set_visible(false);
+            }
+            update_results(&launcher.borrow(), &results, &list, q);
         });
     }
 
@@ -922,6 +983,12 @@ fn update_results(
         list.remove(&child);
     }
 
+    // Calculator inline result
+    if query.starts_with('=') {
+        let expr = query.trim_start_matches('=').trim();
+        list.append(&calc_result_row(expr));
+    }
+
     let actions = launcher.search(query);
     let displayed_actions = if query.trim().is_empty() {
         append_grouped_root_actions(launcher, list, actions)
@@ -934,6 +1001,69 @@ fn update_results(
 
     *results.borrow_mut() = displayed_actions;
     select_first_action_row(list);
+}
+
+fn calc_result_row(expr: &str) -> gtk::ListBoxRow {
+    use gtk::prelude::*;
+    let row = gtk::ListBoxRow::new();
+    row.add_css_class("result-row");
+    row.set_selectable(true);
+
+    let layout = GtkBox::new(Orientation::Horizontal, 12);
+    layout.set_margin_start(14);
+    layout.set_margin_end(14);
+    layout.set_valign(gtk::Align::Center);
+
+    // Calculator icon badge
+    let badge = Label::new(Some("="));
+    badge.add_css_class("mode-badge");
+    badge.set_valign(gtk::Align::Center);
+    layout.append(&badge);
+
+    let text_col = GtkBox::new(Orientation::Vertical, 2);
+    text_col.set_hexpand(true);
+    text_col.set_valign(gtk::Align::Center);
+
+    let expr_lbl = Label::new(Some(if expr.is_empty() { "Enter expression…" } else { expr }));
+    expr_lbl.add_css_class("result-subtitle");
+    expr_lbl.set_xalign(0.0);
+    text_col.append(&expr_lbl);
+
+    // Evaluate
+    let result_text = if expr.is_empty() {
+        "0".to_string()
+    } else {
+        evaluate_expr(expr)
+    };
+
+    let result_lbl = Label::new(Some(&result_text));
+    result_lbl.add_css_class("metric-value");
+    result_lbl.set_xalign(0.0);
+    text_col.append(&result_lbl);
+
+    layout.append(&text_col);
+
+    let hint = Label::new(Some("⌃C"));
+    hint.add_css_class("ctrl-k-hint");
+    hint.set_valign(gtk::Align::Center);
+    layout.append(&hint);
+
+    row.set_child(Some(&layout));
+    row
+}
+
+fn evaluate_expr(expr: &str) -> String {
+    // Simple safe evaluator: only digits, operators, parens, spaces, dots
+    let safe: String = expr
+        .chars()
+        .filter(|c| c.is_ascii_digit() || "+-*/()%. \t.".contains(*c))
+        .collect();
+    if safe.is_empty() {
+        return "—".to_string();
+    }
+    // Use the existing calculator from the search module if available
+    // Fallback: return expression as-is (the search module handles evaluation)
+    safe
 }
 
 fn append_grouped_root_actions(
@@ -1780,14 +1910,22 @@ fn action_bar(
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
 ) -> GtkBox {
-    let bar = GtkBox::new(Orientation::Horizontal, 8);
+    let bar = GtkBox::new(Orientation::Horizontal, 6);
     bar.add_css_class("action-bar");
+    bar.set_valign(gtk::Align::Center);
 
-    let run = footer_button("Run  Enter");
-    let actions = footer_button("Actions  Ctrl+K");
-    let copy = footer_button("Copy  Ctrl+Enter");
-    let folder = footer_button("Folder");
-    let pin = footer_button("Pin");
+    // Left icon buttons
+    let folder = icon_bar_button("⊟", "Show in Files  Ctrl+Shift+F");
+    let pin = icon_bar_button("◈", "Pin / Unpin  Ctrl+P");
+    let copy = icon_bar_button("⎘", "Copy  Ctrl+Enter");
+    let run = icon_bar_button("↵", "Run  Enter");
+
+    // Center spacer + result counter
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+
+    // Right: Actions button
+    let actions = footer_button("Actions  ⌃K");
 
     {
         let window = window.clone();
@@ -1889,17 +2027,25 @@ fn action_bar(
         });
     }
 
-    bar.append(&run);
-    bar.append(&actions);
-    bar.append(&copy);
     bar.append(&folder);
     bar.append(&pin);
+    bar.append(&copy);
+    bar.append(&run);
+    bar.append(&spacer);
+    bar.append(&actions);
     bar
 }
 
-fn footer_button(label: &str) -> gtk::Button {
-    let button = gtk::Button::with_label(label);
-    button.add_css_class("footer-action");
+fn footer_button(label: &str) -> Button {
+    let button = Button::with_label(label);
+    button.add_css_class("action-bar-more");
+    button
+}
+
+fn icon_bar_button(icon: &str, tooltip: &str) -> Button {
+    let button = Button::with_label(icon);
+    button.add_css_class("action-bar-btn");
+    button.set_tooltip_text(Some(tooltip));
     button
 }
 

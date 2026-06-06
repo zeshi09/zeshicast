@@ -1,38 +1,44 @@
-use gtk::{CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION, gdk};
+/*
+ * zeshicast-gtk4.css
+ * GTK4 CSS stylesheet — Raycast v2 visual language for Linux
+ * ─────────────────────────────────────────────────────────────
+ * Token replacements (Rust str::replace pass before load):
+ *   __FONT_SIZE__           →  15   (px, configurable 12–22)
+ *   __SUBTITLE_SIZE__       →  12
+ *   __SEARCH_SIZE__         →  17
+ *   __PANEL_TITLE_SIZE__    →  13
+ *   __DASHBOARD_CLOCK_SIZE__ → 33
+ *   __ROW_HEIGHT__          →  44   (px, compact) or 52 (expanded)
+ *
+ * Color system (GTK4 custom props — all via alpha() / @variable):
+ *   Surface:          alpha(@window_fg_color, 0.040)
+ *   Surface raised:   alpha(@window_fg_color, 0.085)
+ *   Border:           alpha(@window_fg_color, 0.075)
+ *   Border strong:    alpha(@window_fg_color, 0.120)
+ *   Text primary:     alpha(@window_fg_color, 0.940)
+ *   Text secondary:   alpha(@window_fg_color, 0.520)
+ *   Text muted:       alpha(@window_fg_color, 0.320)
+ *   Accent:           @accent_color
+ *   Danger:           #FF6B5F
+ *   Success:          #4BD98A
+ *
+ * GTK4 limitations vs web CSS:
+ *   ✗  No backdrop-filter (blur) — handled at compositor level (Niri/Hyprland)
+ *   ✗  No clip-path
+ *   ✗  No filter (drop-shadow, brightness, etc.)
+ *   ✗  No ::before / ::after pseudo-elements
+ *   ✗  No CSS var() custom properties (use alpha()/@variable tokens instead)
+ *   ✗  No CSS subgrid, container queries
+ *   ✓  @keyframes and animation/transition — fully supported
+ *   ✓  transform: scale/translateX/translateY — fully supported
+ *   ✓  box-shadow (including inset) — fully supported
+ *   ✓  border-radius — fully supported
+ *   ✓  alpha(color, 0–1) — GTK4 colour function
+ *   ✓  @accent_color / @window_bg_color / @window_fg_color — GTK named colours
+ *   ✓  calc() — supported, but no nested calc
+ * ─────────────────────────────────────────────────────────────
+ */
 
-use crate::{home_dir, load_preferences};
-
-pub fn install_css() {
-    let preferences = load_preferences(&home_dir().join(".config/zeshicast/preferences.toml"));
-    let font_family = css_font_family(
-        preferences
-            .get("ui_font_family")
-            .map(String::as_str)
-            .unwrap_or("Outfit, Inter, Noto Sans, sans-serif"),
-    );
-    let font_size = preferences
-        .get("ui_font_size")
-        .and_then(|value| value.parse::<u32>().ok())
-        .filter(|value| (12..=22).contains(value))
-        .unwrap_or(15);
-    let subtitle_size = font_size.saturating_sub(3).max(11);
-    let search_size = font_size + 2;
-    let panel_title_size = font_size - 2;
-    let dashboard_clock_size = font_size + 18;
-
-    let density = preferences
-        .get("ui_density")
-        .map(String::as_str)
-        .unwrap_or("compact");
-    let row_height: u32 = if density == "compact" { 44 } else { 52 };
-
-    let theme = preferences
-        .get("ui_theme")
-        .map(String::as_str)
-        .unwrap_or("system");
-    apply_gtk_theme(theme);
-
-    let css = "
 /* ════════════════════════════════════════════════════════════
    ANIMATIONS
    ════════════════════════════════════════════════════════════ */
@@ -64,7 +70,6 @@ pub fn install_css() {
 .launcher-window {
   background-color: alpha(@window_bg_color, 0.985);
   border-radius: 14px;
-  font-family: __FONT_FAMILY__;
   box-shadow:
     0 0  0  1px alpha(@window_fg_color, 0.090),
     0 1px 0  0   alpha(@window_fg_color, 0.060),
@@ -72,11 +77,6 @@ pub fn install_css() {
     0 12px 40px  alpha(black, 0.360),
     0 32px 96px  alpha(black, 0.540);
   animation: launcher-open 110ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
-
-.window-invisible {
-  opacity: 0;
-  transform: scale(0.96) translateY(-4px);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -89,56 +89,23 @@ pub fn install_css() {
   border-bottom: 1px solid alpha(@window_fg_color, 0.070);
 }
 
-/* alias for sub-views that still use search-shell */
-.search-shell {
-  padding: 0 14px;
-  border-bottom: 1px solid alpha(@window_fg_color, 0.070);
-}
-
-.search-input,
-entry.search-input,
-entry.search-input:focus,
-entry.search-input:focus-within {
+.search-input {
   font-size: __SEARCH_SIZE__px;
   font-weight: 400;
   letter-spacing: -0.02em;
   color: alpha(@window_fg_color, 0.940);
   caret-color: @accent_color;
-  background-color: transparent;
-  border: none;
-  box-shadow: none;
-  outline: none;
-  padding: 0 4px;
-  min-height: 56px;
-}
-
-entry.search-input text {
-  background-color: transparent;
-}
-
-entry.search-input undershoot,
-entry.search-input overshoot {
-  background: none;
-}
-
-/* sub-view entry fields (AI chat search, emoji search, etc.) */
-entry.search-entry,
-entry.search-entry:focus {
-  font-size: __SUBTITLE_SIZE__px;
   background: transparent;
   border: none;
   box-shadow: none;
-  outline: none;
-  padding: 0 4px;
-  min-height: 36px;
+  padding: 0;
 }
 
-entry, entry:focus, entry:focus-visible {
-  outline: none;
-  box-shadow: none;
+.search-input:placeholder-shown {
+  color: alpha(@window_fg_color, 0.240);
 }
 
-/* Mode badge (Calculator, File Search, SSH…) */
+/* Mode badge (Calculator, File Search, etc.) */
 .mode-badge {
   background: alpha(@accent_color, 0.110);
   border: 1px solid alpha(@accent_color, 0.260);
@@ -150,7 +117,12 @@ entry, entry:focus, entry:focus-visible {
   letter-spacing: 0.04em;
 }
 
-/* Ctrl+K hint badge */
+.mode-badge-dismiss {
+  color: alpha(@accent_color, 0.600);
+  font-size: 11px;
+}
+
+/* Ctrl+K hint */
 .ctrl-k-hint {
   background: alpha(@window_fg_color, 0.055);
   border: 1px solid alpha(@window_fg_color, 0.100);
@@ -167,18 +139,7 @@ entry, entry:focus, entry:focus-visible {
    ════════════════════════════════════════════════════════════ */
 
 .results-list {
-  background: transparent;
   padding: 4px 0;
-}
-
-.results-scroll {
-  background: transparent;
-  border: none;
-  min-height: 240px;
-}
-
-.section-header-row {
-  min-height: 28px;
 }
 
 .section-header {
@@ -203,25 +164,22 @@ entry, entry:focus, entry:focus-visible {
   transition: background 70ms ease;
 }
 
+/* Stagger entrance delays — set in code via animationDelay */
+
 .result-row:hover {
   background: alpha(@window_fg_color, 0.040);
 }
 
 .result-row:selected,
 .result-row.selected {
-  background-color: alpha(@window_fg_color, 0.085);
-  box-shadow: inset 3px 0 0 @accent_color;
-  color: @window_fg_color;
+  background: alpha(@window_fg_color, 0.085);
+  box-shadow: inset 3px 0 0 alpha(@accent_color, 0.900);
 }
 
-.result-row.danger .result-title {
-  color: #FF6B5F;
-}
-
+/* ── Icon ── */
 .result-icon {
   min-width: 18px;
   min-height: 18px;
-  color: alpha(@window_fg_color, 0.72);
 }
 
 .result-icon.app {
@@ -236,28 +194,21 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.400);
 }
 
-.fa-icon {
-  font-family: 'Font Awesome 6 Free', 'Font Awesome 6 Free Solid',
-               'FontAwesome', 'Font Awesome 5 Free';
-  font-weight: 900;
-  color: alpha(@window_fg_color, 0.72);
-}
-
+/* ── Title + subtitle ── */
 .result-title {
   font-size: __FONT_SIZE__px;
   font-weight: 500;
   letter-spacing: -0.012em;
   color: alpha(@window_fg_color, 0.930);
-  min-height: 22px;
 }
 
 .result-subtitle {
   font-size: __SUBTITLE_SIZE__px;
   color: alpha(@window_fg_color, 0.400);
   margin-top: 1px;
-  min-height: 18px;
 }
 
+/* ── Category pill (right-aligned, visible only on selected) ── */
 .category-pill {
   padding: 2px 7px;
   background: alpha(@window_fg_color, 0.055);
@@ -266,9 +217,9 @@ entry, entry:focus, entry:focus-visible {
   font-weight: 500;
   color: alpha(@window_fg_color, 0.300);
   letter-spacing: 0.010em;
-  min-height: 18px;
 }
 
+/* ── Result counter ── */
 .overflow-counter {
   font-size: 11px;
   color: alpha(@window_fg_color, 0.280);
@@ -281,9 +232,7 @@ entry, entry:focus, entry:focus-visible {
 
 .action-panel {
   background: alpha(@window_bg_color, 1.000);
-  border: 1px solid alpha(@accent_color, 0.30);
-  border-radius: 12px;
-  font-family: __FONT_FAMILY__;
+  border-top: 1px solid alpha(@window_fg_color, 0.060);
   animation: panel-slide-in 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
 }
 
@@ -299,7 +248,6 @@ entry, entry:focus, entry:focus-visible {
   letter-spacing: 0.060em;
   text-transform: uppercase;
   color: alpha(@window_fg_color, 0.280);
-  min-height: 24px;
 }
 
 .action-panel-filter {
@@ -309,19 +257,6 @@ entry, entry:focus, entry:focus-visible {
   border: none;
   box-shadow: none;
   letter-spacing: -0.010em;
-}
-
-.action-section-row {
-  min-height: 24px;
-}
-
-.action-section-label {
-  color: alpha(@window_fg_color, 0.50);
-  font-size: __SUBTITLE_SIZE__px;
-  font-weight: 600;
-  min-height: 14px;
-  padding-top: 6px;
-  padding-bottom: 2px;
 }
 
 /* ── Action rows ── */
@@ -350,6 +285,10 @@ entry, entry:focus, entry:focus-visible {
 }
 
 .action-row-label.danger {
+  color: #FF6B5F;
+}
+
+.action-row:selected .action-row-label.danger {
   color: #FF6B5F;
 }
 
@@ -393,17 +332,6 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.550);
 }
 
-/* backward compat */
-.action-button {
-  min-width: 26px;
-  min-height: 26px;
-  padding: 0;
-  border-radius: 6px;
-  background: transparent;
-  border: 1px solid transparent;
-  color: alpha(@window_fg_color, 0.280);
-}
-
 .action-bar-more {
   padding: 3px 8px;
   border-radius: 6px;
@@ -422,28 +350,12 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.550);
 }
 
-/* backward compat */
-.footer-action {
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: transparent;
-  border: 1px solid alpha(@window_fg_color, 0.100);
-  color: alpha(@window_fg_color, 0.300);
-  font-size: __SUBTITLE_SIZE__px;
-  min-height: 30px;
-}
-
-.footer-action:hover {
-  background: alpha(@window_fg_color, 0.055);
-}
-
 /* ════════════════════════════════════════════════════════════
    STATUS STRIP
    ════════════════════════════════════════════════════════════ */
 
 .status-strip {
   padding: 7px 14px 10px;
-  border-top: 1px solid alpha(@window_fg_color, 0.080);
 }
 
 .status-time {
@@ -453,13 +365,6 @@ entry, entry:focus, entry:focus-visible {
   letter-spacing: -0.010em;
 }
 
-/* backward compat */
-.status-clock {
-  font-size: __SUBTITLE_SIZE__px;
-  font-weight: 600;
-  color: alpha(@window_fg_color, 0.450);
-}
-
 .status-date {
   font-size: 11px;
   color: alpha(@window_fg_color, 0.240);
@@ -467,24 +372,24 @@ entry, entry:focus, entry:focus-visible {
 }
 
 .status-chip {
-  padding: 3px 8px;
-  background-color: alpha(@window_fg_color, 0.08);
-  border: 1px solid alpha(@window_fg_color, 0.12);
+  padding: 2px 7px;
+  background: alpha(@window_fg_color, 0.042);
+  border: 1px solid alpha(@window_fg_color, 0.070);
   border-radius: 6px;
   font-size: 11px;
   font-weight: 500;
-  color: alpha(@window_fg_color, 0.55);
-  transition: background-color 120ms ease;
+  color: alpha(@window_fg_color, 0.350);
+  transition: background 120ms ease;
 }
 
 .status-chip:hover {
-  background-color: alpha(@window_fg_color, 0.12);
+  background: alpha(@window_fg_color, 0.070);
 }
 
 .status-chip.active {
-  background-color: alpha(@accent_color, 0.15);
-  border-color: alpha(@accent_color, 0.30);
-  color: @accent_color;
+  background: alpha(@accent_color, 0.080);
+  border-color: alpha(@accent_color, 0.200);
+  color: alpha(@window_fg_color, 0.650);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -514,50 +419,19 @@ entry, entry:focus, entry:focus-visible {
   margin-top: 4px;
 }
 
-/* ── Stat chips ── */
-.stat-chip {
-  padding: 4px 9px;
-  background-color: alpha(@window_fg_color, 0.07);
-  border: 1px solid alpha(@window_fg_color, 0.10);
-  border-radius: 7px;
-}
-
-.stat-chip-label {
-  font-size: 11px;
-  color: alpha(@window_fg_color, 0.360);
-  font-weight: 500;
-}
-
-.stat-chip-value {
-  font-size: 12px;
-  color: alpha(@window_fg_color, 0.780);
-  font-weight: 600;
-  letter-spacing: -0.010em;
-}
-
-/* backward compat */
-.dashboard-stat-chip {
-  padding: 4px 9px;
-  background: alpha(@window_fg_color, 0.050);
-  border: 1px solid alpha(@window_fg_color, 0.080);
-  border-radius: 7px;
-  color: alpha(@window_fg_color, 0.680);
-  font-size: __SUBTITLE_SIZE__px;
-}
-
 /* ── Metric cards ── */
 .metric-card {
-  background-color: alpha(@window_fg_color, 0.055);
-  border: 1px solid alpha(@window_fg_color, 0.090);
+  background: alpha(@window_fg_color, 0.038);
+  border: 1px solid alpha(@window_fg_color, 0.070);
   border-radius: 10px;
   padding: 13px 14px;
   animation: dashboard-enter 200ms ease both;
-  transition: background-color 140ms ease, border-color 140ms ease;
+  transition: background 140ms ease, border-color 140ms ease;
 }
 
 .metric-card:hover {
-  background-color: alpha(@window_fg_color, 0.085);
-  border-color: alpha(@window_fg_color, 0.130);
+  background: alpha(@window_fg_color, 0.065);
+  border-color: alpha(@window_fg_color, 0.110);
 }
 
 .metric-label {
@@ -582,12 +456,13 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.360);
 }
 
-/* ── Progress bars (new design) ── */
+/* ── Progress bars ── */
 .progress-track {
   min-height: 3px;
   background: alpha(@window_fg_color, 0.070);
   border-radius: 2px;
   margin-top: 8px;
+  overflow: hidden;
 }
 
 .progress-fill {
@@ -600,32 +475,19 @@ entry, entry:focus, entry:focus-visible {
 .progress-fill.warn  { background: #F5A623; }
 .progress-fill.crit  { background: #FF6B5F; }
 
-/* ── Progress bars (GTK ProgressBar widget compat) ── */
-.dashboard-metric-bar trough {
-  min-height: 3px;
-  border-radius: 2px;
-  background: alpha(@window_fg_color, 0.070);
-}
-
-.dashboard-metric-bar progress {
-  min-height: 3px;
-  border-radius: 2px;
-  background: @accent_color;
-}
-
 /* ── Control cards ── */
 .control-card {
-  background-color: alpha(@window_fg_color, 0.055);
-  border: 1px solid alpha(@window_fg_color, 0.090);
+  background: alpha(@window_fg_color, 0.038);
+  border: 1px solid alpha(@window_fg_color, 0.070);
   border-radius: 10px;
   padding: 12px 14px;
   animation: dashboard-enter 200ms ease both;
-  transition: background-color 140ms ease, border-color 140ms ease;
+  transition: background 140ms ease, border-color 140ms ease;
 }
 
 .control-card:hover {
-  background-color: alpha(@window_fg_color, 0.085);
-  border-color: alpha(@window_fg_color, 0.130);
+  background: alpha(@window_fg_color, 0.065);
+  border-color: alpha(@window_fg_color, 0.110);
 }
 
 .control-card-icon {
@@ -663,70 +525,25 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.360);
 }
 
-.control-card-actions {
-  padding-top: 4px;
-}
-
-/* backward compat for old dashboard-card classes */
-.dashboard-card {
-  background: alpha(@window_fg_color, 0.038);
-  border: 1px solid alpha(@window_fg_color, 0.070);
-  border-radius: 10px;
-  padding: 12px 14px;
-  animation: dashboard-enter 200ms ease both;
-  transition: background 140ms ease;
-}
-
-.dashboard-card-title {
-  font-size: __SUBTITLE_SIZE__px;
-  font-weight: 600;
-  color: alpha(@window_fg_color, 0.550);
-}
-
-.dashboard-metric-value {
-  font-size: __FONT_SIZE__px;
-  font-weight: 700;
-  color: @window_fg_color;
-  min-height: 20px;
-}
-
-.dashboard-card-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: alpha(@window_fg_color, 0.880);
-  min-height: 16px;
-}
-
-.dashboard-card-actions {
-  padding-top: 4px;
-}
-
-.dashboard-header-stat {
-  padding: 7px 10px;
-  border-radius: 8px;
+/* ── Stat chips (in dashboard header) ── */
+.stat-chip {
+  padding: 4px 9px;
   background: alpha(@window_fg_color, 0.050);
   border: 1px solid alpha(@window_fg_color, 0.080);
+  border-radius: 7px;
 }
 
-.dashboard-button {
-  min-height: 24px;
-  padding: 0 8px;
-  border-radius: 6px;
-  background: alpha(@window_fg_color, 0.060);
-  border: 1px solid alpha(@window_fg_color, 0.090);
-  font-size: __SUBTITLE_SIZE__px;
-  color: alpha(@window_fg_color, 0.700);
-  transition: background 100ms ease;
+.stat-chip-label {
+  font-size: 11px;
+  color: alpha(@window_fg_color, 0.360);
+  font-weight: 500;
 }
 
-.dashboard-button:hover {
-  background: alpha(@window_fg_color, 0.100);
-}
-
-.metric-graph {
-  min-height: 52px;
-  border-radius: 6px;
-  margin-top: 6px;
+.stat-chip-value {
+  font-size: 12px;
+  color: alpha(@window_fg_color, 0.780);
+  font-weight: 600;
+  letter-spacing: -0.010em;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -755,35 +572,24 @@ entry, entry:focus, entry:focus-visible {
   color: @accent_color;
 }
 
-/* backward compat */
-.ai-model-chip {
-  background: alpha(@window_fg_color, 0.040);
-  border: 1px solid alpha(@window_fg_color, 0.070);
-  border-radius: 5px;
-  font-size: 11px;
-  color: alpha(@window_fg_color, 0.380);
-}
-
 .ai-message-user {
-  background-color: alpha(@accent_color, 0.18);
-  border: 1px solid alpha(@accent_color, 0.30);
+  background: alpha(@accent_color, 0.110);
+  border: 1px solid alpha(@accent_color, 0.200);
   border-radius: 10px;
   border-bottom-right-radius: 3px;
   padding: 8px 12px;
   font-size: 13px;
-  color: alpha(@window_fg_color, 0.930);
-  margin-start: 40px;
+  color: alpha(@window_fg_color, 0.900);
 }
 
 .ai-message-assistant {
-  background-color: alpha(@window_fg_color, 0.07);
-  border: 1px solid alpha(@window_fg_color, 0.11);
+  background: alpha(@window_fg_color, 0.040);
+  border: 1px solid alpha(@window_fg_color, 0.070);
   border-radius: 10px;
   border-bottom-left-radius: 3px;
   padding: 8px 12px;
   font-size: 13px;
-  color: alpha(@window_fg_color, 0.850);
-  margin-end: 40px;
+  color: alpha(@window_fg_color, 0.820);
 }
 
 .ai-input-row {
@@ -805,15 +611,6 @@ entry, entry:focus, entry:focus-visible {
 .ai-send-btn.ready {
   background: @accent_color;
   color: white;
-}
-
-.ai-context-chip {
-  background: alpha(@accent_color, 0.140);
-  border: 1px solid alpha(@accent_color, 0.300);
-  border-radius: 8px;
-  padding: 2px 8px;
-  font-size: __SUBTITLE_SIZE__px;
-  color: @accent_color;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -853,163 +650,6 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.280);
 }
 
-/* backward compat */
-.clipboard-ago {
-  color: alpha(@window_fg_color, 0.280);
-  font-size: __SUBTITLE_SIZE__px;
-  min-width: 60px;
-}
-
-/* ════════════════════════════════════════════════════════════
-   AUDIO VIEW
-   ════════════════════════════════════════════════════════════ */
-
-.audio-volume-bar trough {
-  min-height: 6px;
-  border-radius: 4px;
-  background: alpha(@window_fg_color, 0.100);
-}
-
-.audio-volume-bar progress {
-  min-height: 6px;
-  border-radius: 4px;
-  background: @accent_color;
-}
-
-.audio-volume-value {
-  font-weight: 600;
-  font-size: 13px;
-  min-width: 42px;
-}
-
-/* ════════════════════════════════════════════════════════════
-   SYSTEM MONITOR
-   ════════════════════════════════════════════════════════════ */
-
-.resource-graphs {
-  padding: 4px 0;
-}
-
-.resource-bar trough,
-.process-memory-bar trough {
-  min-height: 6px;
-  border-radius: 4px;
-  background: alpha(@window_fg_color, 0.100);
-}
-
-.resource-bar progress,
-.process-memory-bar progress {
-  min-height: 6px;
-  border-radius: 4px;
-  background: @accent_color;
-}
-
-.process-memory-bar trough,
-.process-memory-bar progress {
-  min-height: 3px;
-}
-
-/* ════════════════════════════════════════════════════════════
-   MEDIA VIEW
-   ════════════════════════════════════════════════════════════ */
-
-.media-title {
-  font-size: __FONT_SIZE__px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: alpha(@window_fg_color, 0.930);
-}
-
-/* ════════════════════════════════════════════════════════════
-   PREFERENCES
-   ════════════════════════════════════════════════════════════ */
-
-.pref-sidebar {
-  background: alpha(@window_fg_color, 0.040);
-  border-right: 1px solid alpha(@window_fg_color, 0.080);
-  min-width: 138px;
-}
-
-.pref-sidebar-row {
-  min-height: 34px;
-  border-radius: 0;
-}
-
-.pref-sidebar-row:selected {
-  background: alpha(@window_fg_color, 0.070);
-  box-shadow: inset 3px 0 0 @accent_color;
-  color: @window_fg_color;
-}
-
-.pref-sidebar-label {
-  font-size: __FONT_SIZE__px;
-  font-weight: 500;
-}
-
-.pref-content {
-  padding: 12px 14px;
-}
-
-.pref-field-row {
-  padding: 5px 0;
-  min-height: 36px;
-  border-bottom: 1px solid alpha(@window_fg_color, 0.040);
-}
-
-.pref-field-label {
-  font-size: __SUBTITLE_SIZE__px;
-  color: alpha(@window_fg_color, 0.680);
-}
-
-/* ════════════════════════════════════════════════════════════
-   SCALE (GtkScale — volume, scrubber)
-   ════════════════════════════════════════════════════════════ */
-
-scale trough {
-  min-height: 4px;
-  border-radius: 3px;
-  background: alpha(@window_fg_color, 0.100);
-}
-
-scale trough highlight {
-  min-height: 4px;
-  border-radius: 3px;
-  background: @accent_color;
-}
-
-scale slider {
-  min-width: 14px;
-  min-height: 14px;
-  border-radius: 50%;
-  background: white;
-  box-shadow: 0 1px 3px alpha(black, 0.3);
-}
-
-scale.audio-volume-bar trough { min-height: 6px; border-radius: 4px; }
-scale.audio-volume-bar trough highlight { min-height: 6px; border-radius: 4px; }
-
-/* GtkSwitch styling */
-switch {
-  border-radius: 9px;
-  background: alpha(@window_fg_color, 0.120);
-  border: 1px solid alpha(@window_fg_color, 0.100);
-  min-width: 34px;
-  min-height: 18px;
-}
-
-switch:checked {
-  background: @accent_color;
-  border-color: @accent_color;
-}
-
-switch slider {
-  border-radius: 50%;
-  background: white;
-  min-width: 14px;
-  min-height: 14px;
-  margin: 2px;
-}
-
 /* ════════════════════════════════════════════════════════════
    SCROLLBAR
    ════════════════════════════════════════════════════════════ */
@@ -1029,47 +669,4 @@ scrollbar slider {
 
 scrollbar slider:hover {
   background: alpha(@window_fg_color, 0.180);
-}
-"
-    .replace("__FONT_FAMILY__", &font_family)
-    .replace("__FONT_SIZE__", &font_size.to_string())
-    .replace("__SUBTITLE_SIZE__", &subtitle_size.to_string())
-    .replace("__SEARCH_SIZE__", &search_size.to_string())
-    .replace("__PANEL_TITLE_SIZE__", &panel_title_size.to_string())
-    .replace("__DASHBOARD_CLOCK_SIZE__", &dashboard_clock_size.to_string())
-    .replace("__ROW_HEIGHT__", &row_height.to_string());
-
-    let provider = CssProvider::new();
-    provider.load_from_data(&css);
-
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
-}
-
-fn apply_gtk_theme(theme: &str) {
-    if let Some(settings) = gtk::Settings::default() {
-        match theme {
-            "dark" => settings.set_gtk_application_prefer_dark_theme(true),
-            "light" => settings.set_gtk_application_prefer_dark_theme(false),
-            _ => {}
-        }
-    }
-}
-
-fn css_font_family(value: &str) -> String {
-    let filtered = value
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | ','))
-        .collect::<String>();
-    let filtered = filtered.trim();
-    if filtered.is_empty() {
-        "Outfit, Inter, Noto Sans, sans-serif".to_string()
-    } else {
-        filtered.to_string()
-    }
 }
