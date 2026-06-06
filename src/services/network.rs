@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Default)]
 pub struct NetworkSnapshot {
@@ -42,6 +44,34 @@ pub fn network_snapshot() -> NetworkSnapshot {
         vpn_connections: read_vpn_connections().unwrap_or_default(),
         dns_servers: read_dns_servers().unwrap_or_default(),
     }
+}
+
+static NET_SPEED_STATE: Mutex<Option<(HashMap<String, (u64, u64)>, Instant)>> = Mutex::new(None);
+
+/// Returns (rx_mbps, tx_mbps) for the given interface, using a static to track deltas.
+pub fn net_speed_mbps(iface: &str) -> (f64, f64) {
+    let rx = fs::read_to_string(format!("/sys/class/net/{iface}/statistics/rx_bytes"))
+        .ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+    let tx = fs::read_to_string(format!("/sys/class/net/{iface}/statistics/tx_bytes"))
+        .ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+    let now = Instant::now();
+
+    let mut state = NET_SPEED_STATE.lock().unwrap();
+    let speeds = if let Some((prev_map, prev_time)) = state.as_ref() {
+        let dt = now.duration_since(*prev_time).as_secs_f64();
+        if dt > 0.2 {
+            if let Some(&(prev_rx, prev_tx)) = prev_map.get(iface) {
+                let rx_s = rx.saturating_sub(prev_rx) as f64 / dt / 1_000_000.0;
+                let tx_s = tx.saturating_sub(prev_tx) as f64 / dt / 1_000_000.0;
+                (rx_s, tx_s)
+            } else { (0.0, 0.0) }
+        } else { (0.0, 0.0) }
+    } else { (0.0, 0.0) };
+
+    let mut map = state.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    map.insert(iface.to_string(), (rx, tx));
+    *state = Some((map, now));
+    speeds
 }
 
 fn read_interfaces() -> io::Result<Vec<NetworkInterfaceSnapshot>> {

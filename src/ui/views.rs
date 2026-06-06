@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use chrono::Local;
 use gtk::cairo;
+use gtk::glib;
 use gtk::prelude::*;
 use gtk::{
     Box as GtkBox, Box, Button, DrawingArea, DropDown, Entry, Grid, Image, Label, ListBox,
@@ -99,6 +100,7 @@ pub struct DashboardView {
     pub uptime: Label,
     pub battery: Label,
     pub processes: Label,
+    pub workspace: Label,
     pub load: Label,
     pub load_sub: Label,
     pub memory: Label,
@@ -143,11 +145,15 @@ pub struct SystemMonitorView {
     pub disk: Label,
     pub processes: Label,
     pub load_bar: ProgressBar,
-    pub memory_bar: ProgressBar,
+    pub memory_bar: DrawingArea,
+    pub memory_bar_vals: Rc<RefCell<(f64, f64)>>,
     pub disk_bar: ProgressBar,
     pub load_graph: MetricGraph,
     pub memory_graph: MetricGraph,
     pub disk_graph: MetricGraph,
+    pub net_iface: String,
+    pub net_rx: Label,
+    pub net_tx: Label,
     pub list: ListBox,
     pub kill: Button,
 }
@@ -618,6 +624,21 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     clock_block.append(&date);
     root.append(&clock_block);
 
+    // Per-second clock update with blinking colon
+    {
+        let clock_c = clock.clone();
+        let date_c = date.clone();
+        let show_colon = Rc::new(RefCell::new(true));
+        glib::timeout_add_seconds_local(1, move || {
+            let now = Local::now();
+            let colon = if *show_colon.borrow() { ":" } else { " " };
+            clock_c.set_text(&format!("{}{}{}", now.format("%H"), colon, now.format("%M")));
+            date_c.set_text(&now.format("%A, %d %B %Y").to_string());
+            *show_colon.borrow_mut() ^= true;
+            glib::ControlFlow::Continue
+        });
+    }
+
     // ── Stat chips row ───────────────────────────────────────────────────────
     let stats_row = GtkBox::new(Orientation::Horizontal, 6);
     stats_row.set_margin_bottom(14);
@@ -626,9 +647,12 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     let battery = dashboard_stat_chip();
     battery.set_visible(false);
     let processes = dashboard_stat_chip();
+    let workspace = dashboard_stat_chip();
+    workspace.set_visible(false);
     stats_row.append(&uptime);
     stats_row.append(&battery);
     stats_row.append(&processes);
+    stats_row.append(&workspace);
     root.append(&stats_row);
 
     // ── Metric 2×2 grid ──────────────────────────────────────────────────────
@@ -758,6 +782,7 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         uptime,
         battery,
         processes,
+        workspace,
         load,
         load_sub,
         memory,
@@ -862,7 +887,7 @@ pub fn system_monitor_view(
     cpu_row.append(&load_graph.area);
     overview.append(&cpu_row);
 
-    // RAM row
+    // RAM row — segmented bar (red=used, accent=cached)
     let ram_row = GtkBox::new(Orientation::Horizontal, 10);
     let ram_label = Label::new(Some("RAM"));
     ram_label.add_css_class("metric-label");
@@ -872,9 +897,39 @@ pub fn system_monitor_view(
     memory.add_css_class("metric-value");
     memory.set_width_chars(10);
     memory.set_xalign(0.0);
-    let memory_bar = ProgressBar::new();
+    let memory_bar_vals = Rc::new(RefCell::new((0.0_f64, 0.0_f64)));
+    let memory_bar = DrawingArea::new();
     memory_bar.add_css_class("dashboard-metric-bar");
     memory_bar.set_hexpand(true);
+    memory_bar.set_content_height(5);
+    memory_bar.set_valign(gtk::Align::Center);
+    {
+        let vals = Rc::clone(&memory_bar_vals);
+        memory_bar.set_draw_func(move |_, cr, w, h| {
+            let (used, cached) = *vals.borrow();
+            let wf = w as f64;
+            let hf = h as f64;
+            // Track
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.08);
+            cr.rectangle(0.0, 0.0, wf, hf);
+            let _ = cr.fill();
+            // Used segment (red >85%, orange >65%, accent otherwise)
+            let col = if used > 0.85 { (1.0_f64, 0.42, 0.37, 1.0) }
+                      else if used > 0.65 { (0.96, 0.65, 0.14, 1.0) }
+                      else { (0.545, 0.486, 0.973, 1.0) };
+            cr.set_source_rgba(col.0, col.1, col.2, col.3);
+            let used_w = wf * used.clamp(0.0, 1.0);
+            cr.rectangle(0.0, 0.0, used_w, hf);
+            let _ = cr.fill();
+            // Cached segment (accent 50% alpha, after used)
+            let cached_end = wf * (used + cached).clamp(0.0, 1.0);
+            if cached_end > used_w {
+                cr.set_source_rgba(0.545, 0.486, 0.973, 0.45);
+                cr.rectangle(used_w, 0.0, cached_end - used_w, hf);
+                let _ = cr.fill();
+            }
+        });
+    }
     let memory_graph = metric_graph();
     memory_graph.area.set_hexpand(false);
     memory_graph.area.set_width_request(60);
@@ -906,6 +961,36 @@ pub fn system_monitor_view(
     disk_row.append(&disk_graph.area);
     overview.append(&disk_row);
 
+    // NET row
+    let net_row = GtkBox::new(Orientation::Horizontal, 10);
+    let net_label = Label::new(Some("NET"));
+    net_label.add_css_class("metric-label");
+    net_label.set_width_chars(4);
+    net_label.set_xalign(0.0);
+    let net_rx = Label::new(Some("—"));
+    net_rx.add_css_class("result-subtitle");
+    net_rx.set_xalign(0.0);
+    let net_tx = Label::new(Some("—"));
+    net_tx.add_css_class("result-subtitle");
+    net_tx.set_xalign(0.0);
+    net_tx.set_hexpand(true);
+    net_row.append(&net_label);
+    let rx_chip = GtkBox::new(Orientation::Horizontal, 3);
+    rx_chip.add_css_class("stat-chip");
+    let rx_icon = Label::new(Some("↓"));
+    rx_icon.add_css_class("result-subtitle");
+    rx_chip.append(&rx_icon);
+    rx_chip.append(&net_rx);
+    let tx_chip = GtkBox::new(Orientation::Horizontal, 3);
+    tx_chip.add_css_class("stat-chip");
+    let tx_icon = Label::new(Some("↑"));
+    tx_icon.add_css_class("result-subtitle");
+    tx_chip.append(&tx_icon);
+    tx_chip.append(&net_tx);
+    net_row.append(&rx_chip);
+    net_row.append(&tx_chip);
+    overview.append(&net_row);
+
     let sep_line = gtk::Separator::new(Orientation::Horizontal);
     sep_line.set_margin_top(4);
     overview.append(&sep_line);
@@ -920,6 +1005,17 @@ pub fn system_monitor_view(
     temperature.set_visible(false);
     let processes_label = Label::new(None);
     processes_label.set_visible(false);
+
+    // Detect primary non-loopback interface for speed display
+    let net_iface = {
+        let snap = crate::network_snapshot();
+        snap.interfaces
+            .iter()
+            .find(|i| i.name != "lo" && i.state == "up")
+            .or_else(|| snap.interfaces.iter().find(|i| i.name != "lo"))
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| "eth0".to_string())
+    };
 
     // ── Process table ────────────────────────────────────────────────────────
     // Table header: filter + sort buttons
@@ -965,10 +1061,14 @@ pub fn system_monitor_view(
         processes: processes_label,
         load_bar,
         memory_bar,
+        memory_bar_vals,
         disk_bar,
         load_graph,
         memory_graph,
         disk_graph,
+        net_iface,
+        net_rx,
+        net_tx,
         list,
         kill,
     };
@@ -1511,8 +1611,15 @@ fn notification_history_row(
 
 pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     let now = Local::now();
-    view.clock.set_text(&now.format("%H:%M:%S").to_string());
-    view.date.set_text(&now.format("%A, %d %B %Y").to_string());
+    // Clock is updated by a per-second blinking timer; just set date here if not ticking yet
+    if view.clock.text().is_empty() {
+        view.clock.set_text(&now.format("%H:%M").to_string());
+        view.date.set_text(&now.format("%A, %d %B %Y").to_string());
+    }
+    // Update workspace chip
+    let ws = crate::workspace_snapshot();
+    view.workspace.set_text(&ws.label());
+    view.workspace.set_visible(true);
     view.uptime.set_text(
         &snapshot
             .uptime_seconds
@@ -1526,6 +1633,7 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     view.load_sub.set_text(&cores);
     let load_fraction = snapshot.load_average.map(load_fraction).unwrap_or_default();
     view.load_bar.set_fraction(load_fraction);
+    set_bar_color_class(&view.load_bar, load_fraction);
     push_metric_graph(&view.load_graph, load_fraction);
 
     // Memory: show GB value + "GB" unit
@@ -1539,6 +1647,7 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     view.memory.set_text(&mem_gb);
     view.memory_sub.set_text("GB");
     view.memory_bar.set_fraction(memory_fraction);
+    set_bar_color_class(&view.memory_bar, memory_fraction);
     push_metric_graph(&view.memory_graph, memory_fraction);
 
     // Disk: show percentage + "%" unit
@@ -1552,6 +1661,7 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     view.disk.set_text(&disk_pct);
     view.disk_sub.set_text("%");
     view.disk_bar.set_fraction(disk_fraction);
+    set_bar_color_class(&view.disk_bar, disk_fraction);
     push_metric_graph(&view.disk_graph, disk_fraction);
 
     view.processes.set_text(
@@ -1726,8 +1836,25 @@ pub fn set_system_monitor_snapshot(
         .memory_used_percent()
         .map(|percent| (percent / 100.0).clamp(0.0, 1.0) as f64)
         .unwrap_or_default();
-    view.memory_bar.set_fraction(memory_fraction);
+    let cached_fraction = match (snapshot.memory_cached_kib, snapshot.memory_total_kib) {
+        (Some(cached), Some(total)) if total > 0 => {
+            (cached as f64 / total as f64).clamp(0.0, 1.0 - memory_fraction)
+        }
+        _ => 0.0,
+    };
+    *view.memory_bar_vals.borrow_mut() = (memory_fraction, cached_fraction);
+    view.memory_bar.queue_draw();
     push_metric_graph(&view.memory_graph, memory_fraction);
+
+    // NET row speeds
+    let (rx_mbps, tx_mbps) = crate::net_speed_mbps(&view.net_iface);
+    let fmt_speed = |v: f64| -> String {
+        if v < 0.001 { "0 B/s".to_string() }
+        else if v < 1.0 { format!("{:.0} KB/s", v * 1000.0) }
+        else { format!("{v:.1} MB/s") }
+    };
+    view.net_rx.set_text(&fmt_speed(rx_mbps));
+    view.net_tx.set_text(&fmt_speed(tx_mbps));
     view.disk.set_text(
         &snapshot
             .disk_used_percent()
@@ -2093,6 +2220,19 @@ fn push_metric_graph(graph: &MetricGraph, value: f64) {
         values.remove(0);
     }
     graph.area.queue_draw();
+}
+
+fn set_bar_color_class(bar: &ProgressBar, fraction: f64) {
+    if fraction > 0.85 {
+        bar.add_css_class("danger");
+        bar.remove_css_class("warning");
+    } else if fraction > 0.65 {
+        bar.remove_css_class("danger");
+        bar.add_css_class("warning");
+    } else {
+        bar.remove_css_class("danger");
+        bar.remove_css_class("warning");
+    }
 }
 
 fn load_fraction(load: f32) -> f64 {
@@ -2502,29 +2642,15 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
             entry.set_placeholder_text(Some(key));
 
             if is_bool {
-                // Show a visual toggle hint in the entry
                 let current_val = current.get(*key).map(String::as_str).unwrap_or("true");
-                let toggle_btn = Button::with_label(if current_val == "false" { "Off" } else { "On" });
-                toggle_btn.add_css_class("ai-model-btn");
-                if current_val != "false" {
-                    toggle_btn.add_css_class("active");
-                }
-                // Clicking toggles the hidden entry value
+                let sw = gtk::Switch::new();
+                sw.set_active(current_val != "false");
+                sw.set_valign(gtk::Align::Center);
                 let entry_c = entry.clone();
-                let toggle_c = toggle_btn.clone();
-                toggle_btn.connect_clicked(move |_| {
-                    let cur = entry_c.text();
-                    if cur.as_str() == "false" {
-                        entry_c.set_text("true");
-                        toggle_c.set_label("On");
-                        toggle_c.add_css_class("active");
-                    } else {
-                        entry_c.set_text("false");
-                        toggle_c.set_label("Off");
-                        toggle_c.remove_css_class("active");
-                    }
+                sw.connect_active_notify(move |sw| {
+                    entry_c.set_text(if sw.is_active() { "true" } else { "false" });
                 });
-                row.append(&toggle_btn);
+                row.append(&sw);
             } else if is_numeric {
                 entry.set_input_purpose(gtk::InputPurpose::Digits);
                 row.append(&entry);

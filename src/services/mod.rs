@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod compositor;
 pub mod storage;
 pub mod battery;
 pub mod local_ai;

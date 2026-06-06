@@ -569,6 +569,7 @@ entry, entry:focus, entry:focus-visible {
 .metric-card:hover {
   background-color: alpha(@window_fg_color, 0.085);
   border-color: alpha(@window_fg_color, 0.130);
+  transform: translateY(-1px);
 }
 
 .metric-label {
@@ -622,6 +623,15 @@ entry, entry:focus, entry:focus-visible {
   min-height: 3px;
   border-radius: 2px;
   background: @accent_color;
+  transition: background 300ms ease;
+}
+
+.dashboard-metric-bar.warning progress {
+  background: #F5A623;
+}
+
+.dashboard-metric-bar.danger progress {
+  background: #FF6B5F;
 }
 
 /* ── Control cards ── */

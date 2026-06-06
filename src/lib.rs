@@ -72,9 +72,10 @@ pub use services::battery::{BatteryDeviceSnapshot, BatterySnapshot, battery_snap
 pub use services::local_ai::{LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming};
 pub use services::storage as storage_service;
 pub use services::media::{MediaSnapshot, media_snapshot};
+pub use services::compositor::{WorkspaceSnapshot, workspace_snapshot};
 pub use services::network::{
     NetworkInterfaceSnapshot, NetworkSnapshot, VpnConnectionSnapshot, WifiNetworkSnapshot,
-    network_snapshot,
+    net_speed_mbps, network_snapshot,
 };
 pub use services::notifications::{NotificationSnapshot, notification_snapshot};
 pub use services::system_stats::{
