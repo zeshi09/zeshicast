@@ -190,7 +190,7 @@ fn build_ui(
         &system_monitor_view.root,
     );
 
-    let action_bar = action_bar(
+    let (action_bar, result_counter) = action_bar(
         &window,
         &launcher,
         &entry,
@@ -265,6 +265,7 @@ fn build_ui(
         let results = Rc::clone(&results);
         let list = list.clone();
         let mode_badge = mode_badge.clone();
+        let result_counter = result_counter.clone();
         entry.connect_changed(move |entry| {
             let query = entry.text();
             let q = query.as_str();
@@ -280,7 +281,7 @@ fn build_ui(
             } else {
                 mode_badge.set_visible(false);
             }
-            update_results(&launcher.borrow(), &results, &list, q);
+            update_results(&launcher.borrow(), &results, &list, q, Some(&result_counter));
         });
     }
 
@@ -908,7 +909,7 @@ fn build_ui(
         });
     }
 
-    update_results(&launcher.borrow(), &results, &list, "");
+    update_results(&launcher.borrow(), &results, &list, "", None);
     GuiState {
         launcher,
         results,
@@ -928,6 +929,7 @@ pub fn present_launcher(state: &GuiState) {
         &state.results,
         &state.list,
         state.entry.text().as_str(),
+        None,
     );
     state.entry.grab_focus();
     state.window.present();
@@ -978,6 +980,7 @@ fn update_results(
     results: &Rc<RefCell<Vec<Action>>>,
     list: &ListBox,
     query: &str,
+    counter: Option<&Label>,
 ) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -999,8 +1002,20 @@ fn update_results(
         actions
     };
 
+    let total = displayed_actions.len();
     *results.borrow_mut() = displayed_actions;
     select_first_action_row(list);
+
+    // Update overflow counter
+    if let Some(ctr) = counter {
+        const OVERFLOW_THRESHOLD: usize = 5;
+        if total > OVERFLOW_THRESHOLD {
+            ctr.set_text(&format!("{total}  ↕"));
+            ctr.set_visible(true);
+        } else {
+            ctr.set_visible(false);
+        }
+    }
 }
 
 fn calc_result_row(expr: &str) -> gtk::ListBoxRow {
@@ -1661,7 +1676,7 @@ fn run_action_panel_row(
             if let Err(error) = launcher.borrow_mut().run_secondary_action(&action, kind) {
                 eprintln!("failed to run action: {error}");
             }
-            update_results(&launcher.borrow(), results, list, entry.text().as_str());
+            update_results(&launcher.borrow(), results, list, entry.text().as_str(), None);
         }
         ActionPanelItemKind::SetAlias => {
             crate::ui::show_alias_panel(window, launcher, &action);
@@ -1909,7 +1924,7 @@ fn action_bar(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
-) -> GtkBox {
+) -> (GtkBox, Label) {
     let bar = GtkBox::new(Orientation::Horizontal, 6);
     bar.add_css_class("action-bar");
     bar.set_valign(gtk::Align::Center);
@@ -1920,9 +1935,12 @@ fn action_bar(
     let copy = icon_bar_button("⎘", "Copy  Ctrl+Enter");
     let run = icon_bar_button("↵", "Run  Enter");
 
-    // Center spacer + result counter
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
+    // Center: result counter (hidden when no results)
+    let counter = Label::new(None);
+    counter.add_css_class("result-counter");
+    counter.set_hexpand(true);
+    counter.set_halign(gtk::Align::Center);
+    counter.set_visible(false);
 
     // Right: Actions button
     let actions = footer_button("Actions  ⌃K");
@@ -2031,9 +2049,9 @@ fn action_bar(
     bar.append(&pin);
     bar.append(&copy);
     bar.append(&run);
-    bar.append(&spacer);
+    bar.append(&counter);
     bar.append(&actions);
-    bar
+    (bar, counter)
 }
 
 fn footer_button(label: &str) -> Button {
@@ -2068,7 +2086,7 @@ fn show_form_for_action(
 
     crate::ui::show_form_panel(&parent_window, action, move |action, values| {
         launcher.borrow_mut().run_form_action(&action, values);
-        update_results(&launcher.borrow(), &results, &list, entry.text().as_str());
+        update_results(&launcher.borrow(), &results, &list, entry.text().as_str(), None);
         finish_interaction(&finish_window, &hold);
     });
 }

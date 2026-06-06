@@ -218,6 +218,10 @@ entry, entry:focus, entry:focus-visible {
   color: #FF6B5F;
 }
 
+.result-row.extension-disabled {
+  opacity: 0.5;
+}
+
 .result-icon {
   min-width: 18px;
   min-height: 18px;
@@ -420,6 +424,13 @@ entry, entry:focus, entry:focus-visible {
   background: alpha(@window_fg_color, 0.055);
   border-color: alpha(@window_fg_color, 0.080);
   color: alpha(@window_fg_color, 0.550);
+}
+
+.result-counter {
+  font-size: 11px;
+  font-weight: 500;
+  color: alpha(@window_fg_color, 0.38);
+  letter-spacing: -0.01em;
 }
 
 /* backward compat */

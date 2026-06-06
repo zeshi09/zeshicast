@@ -48,15 +48,6 @@ pub(crate) struct PrefSection {
 
 pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
     PrefSection {
-        name: "Appearance",
-        keys: &[
-            ("ui_font_family", "Font family (restart required)"),
-            ("ui_font_size", "Font size 12-22 (restart required)"),
-            ("ui_density", "Row density: comfortable (default) or compact"),
-            ("ui_theme", "Theme: system (default), dark, or light"),
-        ],
-    },
-    PrefSection {
         name: "General",
         keys: &[
             ("show_status_strip", "Show status strip (true/false)"),
@@ -72,7 +63,20 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
         ],
     },
     PrefSection {
-        name: "Features",
+        name: "Appearance",
+        keys: &[
+            ("ui_font_family", "Font family (restart required)"),
+            ("ui_font_size", "Font size 12-22 (restart required)"),
+            ("ui_density", "Row density: comfortable or compact"),
+            ("ui_theme", "Theme: system (default), dark, or light"),
+        ],
+    },
+    PrefSection {
+        name: "Keyboard",
+        keys: &[],
+    },
+    PrefSection {
+        name: "Extensions",
         keys: &[
             ("network_enabled", "Network features (true/false)"),
             ("media_enabled", "Media features (true/false)"),
@@ -80,23 +84,13 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
                 "notifications_enabled",
                 "Notifications features (true/false)",
             ),
-        ],
-    },
-    PrefSection {
-        name: "AI",
-        keys: &[
-            ("ai_enabled", "AI features enabled (true/false)"),
+            ("ai_enabled", "AI features (true/false)"),
             ("ai_provider", "AI provider (ollama/openai)"),
             ("ollama_endpoint", "Ollama endpoint"),
             ("ollama_model", "Ollama model"),
             ("ai_endpoint", "AI/OpenAI endpoint"),
             ("ai_model", "AI model"),
             ("ai_api_key", "AI API key"),
-        ],
-    },
-    PrefSection {
-        name: "Extensions",
-        keys: &[
             (
                 "script_dirs",
                 "Script directories (comma-separated paths)",
@@ -108,5 +102,13 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
                 "Translate target language (e.g. en, ru, de)",
             ),
         ],
+    },
+    PrefSection {
+        name: "Privacy",
+        keys: &[],
+    },
+    PrefSection {
+        name: "About",
+        keys: &[],
     },
 ];

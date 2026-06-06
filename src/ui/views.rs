@@ -107,8 +107,11 @@ pub struct DashboardView {
     pub disk_sub: Label,
     pub thermal: Label,
     pub network: Label,
+    pub network_sub: Label,
     pub audio: Label,
+    pub audio_sub: Label,
     pub media: Label,
+    pub media_sub: Label,
     pub notifications: Label,
     pub load_bar: ProgressBar,
     pub memory_bar: ProgressBar,
@@ -448,7 +451,9 @@ pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserVi
     let root = super::panel_root(8, 12);
     root.set_vexpand(true);
 
-    let header = super::panel_title("Extensions");
+    let active_count = commands.iter().filter(|c| c.enabled).count();
+    let header_text = format!("Built-in  ·  {} of {} active", active_count, commands.len());
+    let header = super::panel_title(&header_text);
     root.append(&header);
 
     let list = super::results_list();
@@ -686,15 +691,34 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         super::control_card("Notifications", "preferences-system-notifications-symbolic");
     notifications_card.set_visible(false);
 
+    // Sub-text labels inserted before action buttons
+    let network_sub = Label::new(None);
+    network_sub.add_css_class("result-subtitle");
+    network_sub.set_xalign(0.0);
+    network_sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    network_row.append(&network_sub);
+
     let open_network = dashboard_button("Open");
     let toggle_wifi = dashboard_button("Wi-Fi");
     network_row.append(&open_network);
     network_row.append(&toggle_wifi);
 
+    let audio_sub = Label::new(None);
+    audio_sub.add_css_class("result-subtitle");
+    audio_sub.set_xalign(0.0);
+    audio_sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    audio_row.append(&audio_sub);
+
     let open_audio = dashboard_button("Mixer");
     let toggle_mute = dashboard_button("Mute");
     audio_row.append(&open_audio);
     audio_row.append(&toggle_mute);
+
+    let media_sub = Label::new(None);
+    media_sub.add_css_class("result-subtitle");
+    media_sub.set_xalign(0.0);
+    media_sub.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    media_row.append(&media_sub);
 
     let open_media = dashboard_button("Open");
     media_row.append(&open_media);
@@ -742,8 +766,11 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         disk_sub,
         thermal,
         network,
+        network_sub,
         audio,
+        audio_sub,
         media,
+        media_sub,
         notifications,
         load_bar,
         memory_bar,
@@ -1537,7 +1564,7 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
 
 pub fn set_dashboard_thermal(view: &DashboardView, celsius: Option<f32>) {
     if let Some(t) = celsius {
-        view.thermal.set_text(&format!("{t:.0} °C"));
+        view.thermal.set_text(&format!("{t:.0}°C"));
     } else {
         view.thermal.set_text("—");
     }
@@ -1556,25 +1583,26 @@ pub fn set_dashboard_network_snapshot(view: &DashboardView, snapshot: &NetworkSn
         });
 
     let Some(interface) = selected else {
-        view.network.set_text("unknown");
+        view.network.set_text("Disconnected");
+        view.network_sub.set_text("");
         return;
     };
+
+    let status = if interface.state == "up" { "Connected" } else { &interface.state };
+    view.network.set_text(status);
 
     let address = interface
         .ipv4_addresses
         .first()
         .or_else(|| interface.ipv6_addresses.first())
         .map(String::as_str)
-        .unwrap_or("no address");
-    let kind = if interface.is_wireless {
-        "Wi-Fi"
+        .unwrap_or("");
+    let sub = if address.is_empty() {
+        interface.name.clone()
     } else {
-        "Interface"
+        format!("{}  ·  {}", interface.name, address)
     };
-    view.network.set_text(&format!(
-        "{kind} {}  {}  {address}",
-        interface.name, interface.state
-    ));
+    view.network_sub.set_text(&sub);
 }
 
 pub fn set_dashboard_battery_snapshot(view: &DashboardView, snapshot: &BatterySnapshot) {
@@ -1592,23 +1620,19 @@ pub fn set_dashboard_battery_snapshot(view: &DashboardView, snapshot: &BatterySn
 }
 
 pub fn set_dashboard_audio_snapshot(view: &DashboardView, snapshot: &AudioSnapshot) {
-    let output = snapshot
-        .output
-        .as_ref()
-        .map(|device| {
-            let muted = if device.muted { " muted" } else { "" };
-            format!("out {}%{muted}", device.volume_percent)
-        })
-        .unwrap_or("out unknown".to_string());
-    let input = snapshot
-        .input
-        .as_ref()
-        .map(|device| {
-            let muted = if device.muted { " muted" } else { "" };
-            format!("mic {}%{muted}", device.volume_percent)
-        })
-        .unwrap_or("mic unknown".to_string());
-    view.audio.set_text(&format!("{output}  {input}"));
+    if let Some(output) = &snapshot.output {
+        let status = if output.muted { "Muted".to_string() } else { format!("{}%", output.volume_percent) };
+        view.audio.set_text(&status);
+        let name = output.name.as_deref().unwrap_or("Built-in Output");
+        let short_name = if name.len() > 22 { &name[..20] } else { name };
+        let mic_info = snapshot.input.as_ref()
+            .map(|i| format!("  ·  mic {}%", i.volume_percent))
+            .unwrap_or_default();
+        view.audio_sub.set_text(&format!("{short_name}{mic_info}"));
+    } else {
+        view.audio.set_text("No device");
+        view.audio_sub.set_text("");
+    }
 }
 
 pub fn set_audio_snapshot(view: &AudioView, snapshot: &AudioSnapshot) {
@@ -1631,19 +1655,21 @@ pub fn set_audio_snapshot(view: &AudioView, snapshot: &AudioSnapshot) {
 
 pub fn set_dashboard_media_snapshot(view: &DashboardView, snapshot: &MediaSnapshot) {
     if !snapshot.is_active() {
-        view.media.set_text("no active player");
+        view.media.set_text("No player");
+        view.media_sub.set_text("");
         return;
     }
 
-    let status = snapshot.status.as_deref().unwrap_or("Playing");
-    let title = match (&snapshot.artist, &snapshot.title) {
-        (Some(artist), Some(title)) => format!("{artist} - {title}"),
-        (_, Some(title)) => title.clone(),
-        (Some(artist), _) => artist.clone(),
-        _ => "Unknown track".to_string(),
-    };
+    let playing = snapshot.status.as_deref() == Some("Playing");
+    view.media.set_text(if playing { "Playing" } else { "Paused" });
+
+    let title = snapshot.title.as_deref().unwrap_or("Unknown");
+    let short_title = if title.len() > 20 { &title[..18] } else { title };
     let player = snapshot.player.as_deref().unwrap_or("MPRIS");
-    view.media.set_text(&format!("{status}  {player}  {title}"));
+    let artist_part = snapshot.artist.as_deref()
+        .map(|a| format!("{a}  ·  "))
+        .unwrap_or_default();
+    view.media_sub.set_text(&format!("{artist_part}{short_title}  ·  {player}"));
 }
 
 pub fn set_dashboard_notification_snapshot(view: &DashboardView, snapshot: &NotificationSnapshot) {
@@ -2696,6 +2722,9 @@ fn format_bytes(bytes: usize) -> String {
 fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.add_css_class("result-row");
+    if !command.enabled {
+        row.add_css_class("extension-disabled");
+    }
 
     let layout = GtkBox::new(Orientation::Horizontal, 10);
     layout.set_margin_top(0);
@@ -2704,12 +2733,14 @@ fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
     layout.set_margin_end(14);
     layout.set_valign(gtk::Align::Center);
 
-    // 32×32 icon box with accent bg
+    // 32×32 icon box
     let icon_box = GtkBox::new(Orientation::Vertical, 0);
     icon_box.set_width_request(32);
     icon_box.set_height_request(32);
     icon_box.add_css_class("control-card-icon");
-    icon_box.add_css_class("active");
+    if command.enabled {
+        icon_box.add_css_class("active");
+    }
     icon_box.set_valign(gtk::Align::Center);
 
     let icon = gtk::Image::from_icon_name(&command.icon_name);
@@ -2744,10 +2775,23 @@ fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
     text.append(&subtitle);
     layout.append(&text);
 
-    // Toggle switch (GtkSwitch)
+    // Toggle switch — toggling changes row opacity visually
     let toggle = gtk::Switch::new();
-    toggle.set_active(true);
+    toggle.set_active(command.enabled);
     toggle.set_valign(gtk::Align::Center);
+    {
+        let row_ref = row.clone();
+        let icon_box_ref = icon_box.clone();
+        toggle.connect_active_notify(move |sw| {
+            if sw.is_active() {
+                row_ref.remove_css_class("extension-disabled");
+                icon_box_ref.add_css_class("active");
+            } else {
+                row_ref.add_css_class("extension-disabled");
+                icon_box_ref.remove_css_class("active");
+            }
+        });
+    }
     layout.append(&toggle);
 
     row.set_child(Some(&layout));

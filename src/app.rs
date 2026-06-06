@@ -832,6 +832,7 @@ impl Zeshicast {
                 icon_name: e.icon_name.clone(),
                 tags: e.tags.clone(),
                 permissions: e.permissions.clone(),
+                enabled: true,
             })
             .collect()
     }
@@ -984,4 +985,5 @@ pub struct CommandSummary {
     pub icon_name: String,
     pub tags: Vec<String>,
     pub permissions: Vec<String>,
+    pub enabled: bool,
 }

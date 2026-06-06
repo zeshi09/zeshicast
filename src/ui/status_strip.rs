@@ -104,18 +104,20 @@ impl StatusStrip {
     }
 
     pub fn set_network_snapshot(&self, snapshot: &NetworkSnapshot) {
-        let text = snapshot
+        let iface = snapshot
             .interfaces
             .iter()
             .find(|i| i.name != "lo" && i.state == "up")
-            .or_else(|| snapshot.interfaces.iter().find(|i| i.name != "lo"))
-            .map(|i| {
-                if i.is_wireless { format!("Wi-Fi") } else { "Ethernet".to_string() }
-            })
-            .unwrap_or_default();
-        let connected = !text.is_empty();
+            .or_else(|| snapshot.interfaces.iter().find(|i| i.name != "lo"));
+        let Some(iface) = iface else {
+            self.network.set_visible(false);
+            return;
+        };
+        let connected = iface.state == "up";
+        let label = if iface.is_wireless { "Wi-Fi" } else { "Ethernet" };
+        let text = format!("✻  {label}");
         self.network.set_text(&text);
-        self.network.set_visible(!text.is_empty());
+        self.network.set_visible(true);
         if connected {
             self.network.add_css_class("active");
         } else {
@@ -131,15 +133,16 @@ impl StatusStrip {
         let capacity = battery
             .capacity_percent
             .map(|v| format!("{v}%"))
-            .unwrap_or_else(|| "Bat".to_string());
+            .unwrap_or_else(|| "?".to_string());
         let charging = battery.status.as_deref() == Some("Charging");
-        let text = if charging {
-            format!("⚡ {capacity}")
-        } else {
-            format!("🔋 {capacity}")
-        };
-        self.battery.set_text(&text);
+        let icon = if charging { "⚡" } else { "♦" };
+        self.battery.set_text(&format!("{icon}  {capacity}"));
         self.battery.set_visible(true);
+        if charging {
+            self.battery.add_css_class("active");
+        } else {
+            self.battery.remove_css_class("active");
+        }
     }
 
     pub fn set_audio_snapshot(&self, snapshot: &AudioSnapshot) {
@@ -148,9 +151,9 @@ impl StatusStrip {
             return;
         };
         let text = if output.muted {
-            "🔇 Muted".to_string()
+            "♩  Muted".to_string()
         } else {
-            format!("🔊 {}%", output.volume_percent)
+            format!("♩  {}%", output.volume_percent)
         };
         self.audio.set_text(&text);
         self.audio.set_visible(true);
@@ -170,12 +173,12 @@ impl StatusStrip {
                 .unwrap_or("Media");
             let playing = snapshot.status.as_deref() == Some("Playing");
             let icon = if playing { "▶" } else { "⏸" };
-            let short_title = if title.len() > 20 {
-                format!("{}…", &title[..18])
+            let short_title = if title.len() > 18 {
+                format!("{}…", &title[..16])
             } else {
                 title.to_string()
             };
-            self.media.set_text(&format!("{icon} {short_title}"));
+            self.media.set_text(&format!("{icon}  {short_title}"));
             self.media.set_visible(true);
             if playing {
                 self.media.add_css_class("active");
