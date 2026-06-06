@@ -105,6 +105,7 @@ pub enum LauncherCommand {
     Audio,
     Dashboard,
     Emoji,
+    Fonts,
     Media,
     Network,
     Notifications,

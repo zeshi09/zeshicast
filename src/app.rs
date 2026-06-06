@@ -762,6 +762,14 @@ impl Zeshicast {
                 LauncherCommand::Emoji,
                 "dashboard_enabled",
             ),
+            (
+                "Font Browser",
+                "Browse installed system fonts with live preview",
+                "applications-fonts-symbolic",
+                "fonts typography typeface preview system",
+                LauncherCommand::Fonts,
+                "dashboard_enabled",
+            ),
         ];
 
         candidates

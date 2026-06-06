@@ -271,6 +271,36 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.300);
   letter-spacing: 0.010em;
   min-height: 18px;
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+
+.result-row:selected .category-pill,
+.result-row.selected .category-pill {
+  opacity: 1;
+}
+
+/* ── Row entrance stagger ── */
+.row-stagger-0 { animation-delay:  0ms; }
+.row-stagger-1 { animation-delay:  9ms; }
+.row-stagger-2 { animation-delay: 18ms; }
+.row-stagger-3 { animation-delay: 27ms; }
+.row-stagger-4 { animation-delay: 36ms; }
+
+/* ── No results ── */
+.no-results-label {
+  font-size: 13px;
+  color: alpha(@window_fg_color, 0.26);
+  text-align: center;
+}
+
+/* ── Font Browser ── */
+.font-name-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: alpha(@window_fg_color, 0.28);
 }
 
 .overflow-counter {
@@ -1075,6 +1105,19 @@ scrollbar slider {
 scrollbar slider:hover {
   background: alpha(@window_fg_color, 0.180);
 }
+
+/* ── Network connected row ── */
+.result-row.selected .result-title {
+  font-weight: 600;
+}
+
+/* ── Stat chip in NET row ── */
+.stat-chip label {
+  font-size: 11px;
+  font-weight: 500;
+  color: alpha(@window_fg_color, 0.68);
+}
+
 "
     .replace("__FONT_FAMILY__", &font_family)
     .replace("__FONT_SIZE__", &font_size.to_string())

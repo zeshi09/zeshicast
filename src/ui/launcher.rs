@@ -6,7 +6,7 @@ use crate::ui::launcher_helpers::{
 };
 use crate::ui::launcher_views::{
     run_launcher_command, show_ai_chat_view, show_audio_view, show_dashboard_view, show_emoji_view,
-    show_media_view,
+    show_font_browser_view, show_media_view,
     show_network_view, show_notifications_view, show_script_output_view, show_system_monitor_view,
 };
 use crate::{
@@ -168,6 +168,7 @@ fn build_ui(
     *snippet_items.borrow_mut() = current_snippets.clone();
     let snippet_view = crate::ui::snippet_manager_view(&current_snippets);
     let emoji_view = crate::ui::emoji_picker_view();
+    let font_view = crate::ui::font_browser_view();
     let preferences_view = crate::ui::preferences_view(launcher.borrow().get_preferences());
     let script_output_view = crate::ui::script_output_view();
 
@@ -178,6 +179,7 @@ fn build_ui(
     navigation.add_page(crate::ui::LauncherView::Clipboard, &clipboard_view.root);
     navigation.add_page(crate::ui::LauncherView::Dashboard, &dashboard_view.root);
     navigation.add_page(crate::ui::LauncherView::Emoji, &emoji_view.root);
+    navigation.add_page(crate::ui::LauncherView::Fonts, &font_view.root);
     navigation.add_page(crate::ui::LauncherView::Extensions, &extension_view.root);
     navigation.add_page(crate::ui::LauncherView::Media, &media_view.root);
     navigation.add_page(crate::ui::LauncherView::Network, &network_view.root);
@@ -209,6 +211,7 @@ fn build_ui(
         &audio_view,
         &dashboard_view,
         &emoji_view,
+        &font_view,
         &system_monitor_view,
         &media_view,
         &network_view.list,
@@ -302,6 +305,7 @@ fn build_ui(
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
         let emoji_view_c = emoji_view.clone();
+        let font_view_c = font_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
@@ -319,6 +323,7 @@ fn build_ui(
                         &audio_view,
                         &dashboard_view,
                         &emoji_view_c,
+                        &font_view_c,
                         &system_monitor_view,
                         &media_view,
                         &network_list,
@@ -364,6 +369,7 @@ fn build_ui(
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
         let emoji_view_key = emoji_view.clone();
+        let font_view_key = font_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
@@ -392,6 +398,7 @@ fn build_ui(
                 &audio_view,
                 &dashboard_view,
                 &emoji_view_key,
+                &font_view_key,
                 &system_monitor_view,
                 &media_view,
                 &network_list,
@@ -1004,21 +1011,40 @@ fn update_results(
     let displayed_actions = if query.trim().is_empty() {
         append_grouped_root_actions(launcher, list, actions)
     } else {
+        let mut stagger = 0usize;
         for action in &actions {
-            list.append(&crate::ui::result_row(action));
+            let row = crate::ui::result_row(action);
+            if stagger < 5 {
+                row.add_css_class(&format!("row-stagger-{stagger}"));
+                stagger += 1;
+            }
+            list.append(&row);
         }
         actions
     };
+
+    // No results empty state
+    if displayed_actions.is_empty() && !query.trim().is_empty() && !query.starts_with('=') {
+        let row = gtk::ListBoxRow::new();
+        row.set_selectable(false);
+        row.set_activatable(false);
+        let lbl = Label::new(Some(&format!("No results for \"{query}\"")));
+        lbl.add_css_class("no-results-label");
+        lbl.set_margin_top(30);
+        lbl.set_margin_bottom(30);
+        row.set_child(Some(&lbl));
+        list.append(&row);
+    }
 
     let total = displayed_actions.len();
     *results.borrow_mut() = displayed_actions;
     select_first_action_row(list);
 
-    // Update overflow counter
+    // Update overflow counter: show total when > threshold
     if let Some(ctr) = counter {
-        const OVERFLOW_THRESHOLD: usize = 5;
+        const OVERFLOW_THRESHOLD: usize = 6;
         if total > OVERFLOW_THRESHOLD {
-            ctr.set_text(&format!("{total}  ↕"));
+            ctr.set_text(&format!("{total} results  ↕"));
             ctr.set_visible(true);
         } else {
             ctr.set_visible(false);
@@ -1163,6 +1189,7 @@ fn handle_key(
     audio_view: &crate::ui::AudioView,
     dashboard_view: &crate::ui::DashboardView,
     emoji_view: &crate::ui::EmojiPickerView,
+    font_view: &crate::ui::FontBrowserView,
     system_monitor_view: &crate::ui::SystemMonitorView,
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
@@ -1229,6 +1256,7 @@ fn handle_key(
                     audio_view,
                     dashboard_view,
                     emoji_view,
+                    font_view,
                     system_monitor_view,
                     media_view,
                     network_list,
@@ -1304,6 +1332,10 @@ fn handle_key(
         }
         gdk::Key::e if state.contains(gdk::ModifierType::CONTROL_MASK) => {
             show_emoji_view(navigation, entry, action_bar, emoji_view);
+            glib::Propagation::Stop
+        }
+        gdk::Key::f if state.contains(gdk::ModifierType::CONTROL_MASK) => {
+            show_font_browser_view(navigation, entry, action_bar, font_view);
             glib::Propagation::Stop
         }
         gdk::Key::comma if state.contains(gdk::ModifierType::CONTROL_MASK) => {
@@ -1935,6 +1967,7 @@ fn action_bar(
     audio_view: &crate::ui::AudioView,
     dashboard_view: &crate::ui::DashboardView,
     emoji_view: &crate::ui::EmojiPickerView,
+    font_view: &crate::ui::FontBrowserView,
     system_monitor_view: &crate::ui::SystemMonitorView,
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
@@ -1973,6 +2006,7 @@ fn action_bar(
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
         let emoji_view_run = emoji_view.clone();
+        let font_view_run = font_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_list.clone();
@@ -1991,6 +2025,7 @@ fn action_bar(
                 &audio_view,
                 &dashboard_view,
                 &emoji_view_run,
+                &font_view_run,
                 &system_monitor_view,
                 &media_view,
                 &network_list,
@@ -2121,6 +2156,7 @@ fn run_selected_with_views(
     audio_view: &crate::ui::AudioView,
     dashboard_view: &crate::ui::DashboardView,
     emoji_view: &crate::ui::EmojiPickerView,
+    font_view: &crate::ui::FontBrowserView,
     system_monitor_view: &crate::ui::SystemMonitorView,
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
@@ -2137,6 +2173,7 @@ fn run_selected_with_views(
                 audio_view,
                 dashboard_view,
                 emoji_view,
+                font_view,
                 system_monitor_view,
                 media_view,
                 network_list,
