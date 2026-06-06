@@ -104,6 +104,7 @@ pub enum LauncherCommand {
     AiChat,
     Audio,
     Dashboard,
+    Emoji,
     Media,
     Network,
     Notifications,

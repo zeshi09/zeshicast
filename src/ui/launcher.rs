@@ -5,7 +5,8 @@ use crate::ui::launcher_helpers::{
     ai_snippet_name, ask_ai_from_view, preference_duration_ms, preference_enabled, preference_list,
 };
 use crate::ui::launcher_views::{
-    run_launcher_command, show_ai_chat_view, show_audio_view, show_dashboard_view, show_media_view,
+    run_launcher_command, show_ai_chat_view, show_audio_view, show_dashboard_view, show_emoji_view,
+    show_media_view,
     show_network_view, show_notifications_view, show_script_output_view, show_system_monitor_view,
 };
 use crate::{
@@ -166,6 +167,7 @@ fn build_ui(
     let current_snippets = launcher.borrow().list_snippets();
     *snippet_items.borrow_mut() = current_snippets.clone();
     let snippet_view = crate::ui::snippet_manager_view(&current_snippets);
+    let emoji_view = crate::ui::emoji_picker_view();
     let preferences_view = crate::ui::preferences_view(launcher.borrow().get_preferences());
     let script_output_view = crate::ui::script_output_view();
 
@@ -175,6 +177,7 @@ fn build_ui(
     navigation.add_page(crate::ui::LauncherView::Audio, &audio_view.root);
     navigation.add_page(crate::ui::LauncherView::Clipboard, &clipboard_view.root);
     navigation.add_page(crate::ui::LauncherView::Dashboard, &dashboard_view.root);
+    navigation.add_page(crate::ui::LauncherView::Emoji, &emoji_view.root);
     navigation.add_page(crate::ui::LauncherView::Extensions, &extension_view.root);
     navigation.add_page(crate::ui::LauncherView::Media, &media_view.root);
     navigation.add_page(crate::ui::LauncherView::Network, &network_view.root);
@@ -205,6 +208,7 @@ fn build_ui(
         &ai_chat_view,
         &audio_view,
         &dashboard_view,
+        &emoji_view,
         &system_monitor_view,
         &media_view,
         &network_view.list,
@@ -297,6 +301,7 @@ fn build_ui(
         let ai_chat_view = ai_chat_view.clone();
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
+        let emoji_view_c = emoji_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
@@ -313,6 +318,7 @@ fn build_ui(
                         &ai_chat_view,
                         &audio_view,
                         &dashboard_view,
+                        &emoji_view_c,
                         &system_monitor_view,
                         &media_view,
                         &network_list,
@@ -357,6 +363,7 @@ fn build_ui(
         let ai_chat_view = ai_chat_view.clone();
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
+        let emoji_view_key = emoji_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
@@ -384,6 +391,7 @@ fn build_ui(
                 &ai_chat_view,
                 &audio_view,
                 &dashboard_view,
+                &emoji_view_key,
                 &system_monitor_view,
                 &media_view,
                 &network_list,
@@ -1154,6 +1162,7 @@ fn handle_key(
     ai_chat_view: &crate::ui::AiChatView,
     audio_view: &crate::ui::AudioView,
     dashboard_view: &crate::ui::DashboardView,
+    emoji_view: &crate::ui::EmojiPickerView,
     system_monitor_view: &crate::ui::SystemMonitorView,
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
@@ -1219,6 +1228,7 @@ fn handle_key(
                     ai_chat_view,
                     audio_view,
                     dashboard_view,
+                    emoji_view,
                     system_monitor_view,
                     media_view,
                     network_list,
@@ -1290,6 +1300,10 @@ fn handle_key(
         }
         gdk::Key::b if state.contains(gdk::ModifierType::CONTROL_MASK) => {
             show_extension_view(navigation, entry, action_bar, extension_list);
+            glib::Propagation::Stop
+        }
+        gdk::Key::e if state.contains(gdk::ModifierType::CONTROL_MASK) => {
+            show_emoji_view(navigation, entry, action_bar, emoji_view);
             glib::Propagation::Stop
         }
         gdk::Key::comma if state.contains(gdk::ModifierType::CONTROL_MASK) => {
@@ -1920,6 +1934,7 @@ fn action_bar(
     ai_chat_view: &crate::ui::AiChatView,
     audio_view: &crate::ui::AudioView,
     dashboard_view: &crate::ui::DashboardView,
+    emoji_view: &crate::ui::EmojiPickerView,
     system_monitor_view: &crate::ui::SystemMonitorView,
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
@@ -1957,6 +1972,7 @@ fn action_bar(
         let ai_chat_view = ai_chat_view.clone();
         let audio_view = audio_view.clone();
         let dashboard_view = dashboard_view.clone();
+        let emoji_view_run = emoji_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let media_view = media_view.clone();
         let network_list = network_list.clone();
@@ -1974,6 +1990,7 @@ fn action_bar(
                 &ai_chat_view,
                 &audio_view,
                 &dashboard_view,
+                &emoji_view_run,
                 &system_monitor_view,
                 &media_view,
                 &network_list,
@@ -2103,6 +2120,7 @@ fn run_selected_with_views(
     ai_chat_view: &crate::ui::AiChatView,
     audio_view: &crate::ui::AudioView,
     dashboard_view: &crate::ui::DashboardView,
+    emoji_view: &crate::ui::EmojiPickerView,
     system_monitor_view: &crate::ui::SystemMonitorView,
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
@@ -2118,6 +2136,7 @@ fn run_selected_with_views(
                 ai_chat_view,
                 audio_view,
                 dashboard_view,
+                emoji_view,
                 system_monitor_view,
                 media_view,
                 network_list,

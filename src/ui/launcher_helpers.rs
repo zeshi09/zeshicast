@@ -45,13 +45,17 @@ pub(super) fn ask_ai_from_view(
             match rx.try_recv() {
                 Ok(StreamChunk::Token(token)) => {
                     accumulated.borrow_mut().push_str(&token);
-                    ai_chat_view.output.set_text(&*accumulated.borrow());
+                    // Show streaming cursor at end of text
+                    ai_chat_view.output.set_text(&format!("{}▋", *accumulated.borrow()));
                 }
                 Ok(StreamChunk::Done) => {
+                    // Remove cursor on completion
+                    ai_chat_view.output.set_text(&*accumulated.borrow());
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }
                 Ok(StreamChunk::Cancelled) => {
+                    ai_chat_view.output.set_text(&*accumulated.borrow());
                     ai_chat_view.status.set_text("Cancelled");
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
@@ -63,6 +67,7 @@ pub(super) fn ask_ai_from_view(
                 }
                 Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
                 Err(mpsc::TryRecvError::Disconnected) => {
+                    ai_chat_view.output.set_text(&*accumulated.borrow());
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }

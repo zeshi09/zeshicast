@@ -777,6 +777,30 @@ entry, entry:focus, entry:focus-visible {
 }
 
 /* backward compat */
+/* ── Emoji Picker ── */
+.emoji-btn {
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  font-size: 22px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+}
+
+.emoji-btn:hover {
+  background: alpha(@accent_color, 0.22);
+  border: 1px solid alpha(@accent_color, 0.50);
+}
+
+.emoji-confirm {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4BD98A;
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+
 .ai-model-chip {
   background: alpha(@window_fg_color, 0.040);
   border: 1px solid alpha(@window_fg_color, 0.070);

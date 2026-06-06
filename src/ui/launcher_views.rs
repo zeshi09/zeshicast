@@ -1,6 +1,18 @@
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Entry, ListBox};
 
+pub(super) fn show_emoji_view(
+    navigation: &crate::ui::NavigationStack,
+    entry: &Entry,
+    action_bar: &GtkBox,
+    emoji_view: &crate::ui::EmojiPickerView,
+) {
+    entry.set_visible(false);
+    action_bar.set_visible(false);
+    navigation.push(crate::ui::LauncherView::Emoji);
+    emoji_view.search.grab_focus();
+}
+
 pub(super) fn show_dashboard_view(
     navigation: &crate::ui::NavigationStack,
     entry: &Entry,
@@ -125,6 +137,7 @@ pub(super) fn run_launcher_command(
     ai_chat_view: &crate::ui::AiChatView,
     audio_view: &crate::ui::AudioView,
     dashboard_view: &crate::ui::DashboardView,
+    emoji_view: &crate::ui::EmojiPickerView,
     system_monitor_view: &crate::ui::SystemMonitorView,
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
@@ -137,6 +150,9 @@ pub(super) fn run_launcher_command(
         crate::LauncherCommand::Audio => show_audio_view(navigation, entry, action_bar, audio_view),
         crate::LauncherCommand::Dashboard => {
             show_dashboard_view(navigation, entry, action_bar, dashboard_view)
+        }
+        crate::LauncherCommand::Emoji => {
+            show_emoji_view(navigation, entry, action_bar, emoji_view)
         }
         crate::LauncherCommand::SystemMonitor => {
             show_system_monitor_view(navigation, entry, action_bar, system_monitor_view)

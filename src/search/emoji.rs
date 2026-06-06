@@ -157,3 +157,7 @@ fn emoji_action(emoji: &str, name: &str, category: &str, score: i32) -> Action {
     .with_subtitle(format!("{name}  ·  {category}"))
     .with_icon("face-smile-symbolic")
 }
+
+pub fn emoji_data() -> &'static [(&'static str, &'static str, &'static str)] {
+    EMOJI_DATA
+}

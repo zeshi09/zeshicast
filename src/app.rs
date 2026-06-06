@@ -754,6 +754,14 @@ impl Zeshicast {
                 LauncherCommand::Notifications,
                 "notifications_enabled",
             ),
+            (
+                "Emoji Picker",
+                "Browse and copy emoji by category",
+                "face-smile-symbolic",
+                "emoji picker emoticons symbols faces",
+                LauncherCommand::Emoji,
+                "dashboard_enabled",
+            ),
         ];
 
         candidates
