@@ -114,6 +114,7 @@ fn build_ui(
     configure_window(&window);
 
     let root = GtkBox::new(Orientation::Vertical, 0);
+    root.add_css_class("launcher-frame");
 
     let entry = Entry::builder()
         .placeholder_text("Search for apps and commands…")
@@ -285,6 +286,22 @@ fn build_ui(
                 mode_badge.set_visible(false);
             }
             update_results(&launcher.borrow(), &results, &list, q, Some(&result_counter));
+        });
+    }
+
+    // Footer counter follows selection: "8 of 24"
+    {
+        let results = Rc::clone(&results);
+        let result_counter = result_counter.clone();
+        list.connect_row_selected(move |_, row| {
+            let total = results.borrow().len();
+            const OVERFLOW_THRESHOLD: usize = 6;
+            if total > OVERFLOW_THRESHOLD {
+                if let Some(row) = row {
+                    result_counter.set_text(&format!("{} of {}", row.index() + 1, total));
+                    result_counter.set_visible(true);
+                }
+            }
         });
     }
 
@@ -562,6 +579,10 @@ fn build_ui(
         glib::timeout_add_local(dashboard_poll_interval, move || {
             if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_snapshot(&dashboard_view, &crate::system_snapshot());
+                crate::ui::set_dashboard_thermal(
+                    &dashboard_view,
+                    crate::thermal_snapshot().hottest_zone().map(|z| z.temperature_c),
+                );
             } else if navigation.current() == crate::ui::LauncherView::SystemMonitor {
                 crate::ui::set_system_monitor_snapshot(
                     &system_monitor_view,
@@ -1026,6 +1047,8 @@ fn update_results(
         row.set_activatable(false);
         let lbl = Label::new(Some(&format!("No results for \"{query}\"")));
         lbl.add_css_class("no-results-label");
+        lbl.set_halign(gtk::Align::Center);
+        lbl.set_hexpand(true);
         lbl.set_margin_top(30);
         lbl.set_margin_bottom(30);
         row.set_child(Some(&lbl));
@@ -1040,7 +1063,8 @@ fn update_results(
     if let Some(ctr) = counter {
         const OVERFLOW_THRESHOLD: usize = 6;
         if total > OVERFLOW_THRESHOLD {
-            ctr.set_text(&format!("{total} results  ↕"));
+            // Selection handler refines this to "N of M"; seed with first row.
+            ctr.set_text(&format!("1 of {total}"));
             ctr.set_visible(true);
         } else {
             ctr.set_visible(false);

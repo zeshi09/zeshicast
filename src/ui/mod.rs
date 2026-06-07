@@ -1,3 +1,4 @@
+mod fonts;
 mod forms;
 pub(crate) mod icons;
 mod launcher;
@@ -32,6 +33,6 @@ pub use views::{
     set_system_monitor_thermal_snapshot, snippet_manager_view, system_monitor_view,
 };
 pub use widgets::{
-    action_panel, control_card, metric_card, move_selection, panel_root, panel_title, result_row,
-    results_list, scrollable_list, secondary_action_row, section_header,
+    action_panel, control_card, letter_icon, metric_card, move_selection, panel_root, panel_title,
+    result_row, results_list, scrollable_list, secondary_action_row, section_header,
 };

@@ -3,6 +3,7 @@ use gtk::{CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION, gdk};
 use crate::{home_dir, load_preferences};
 
 pub fn install_css() {
+    super::fonts::ensure_fonts();
     let preferences = load_preferences(&home_dir().join(".config/zeshicast/preferences.toml"));
     let font_family = css_font_family(
         preferences
@@ -18,7 +19,7 @@ pub fn install_css() {
     let subtitle_size = font_size.saturating_sub(3).max(11);
     let search_size = font_size + 2;
     let panel_title_size = font_size - 2;
-    let dashboard_clock_size = font_size + 18;
+    let dashboard_clock_size = 64u32;
 
     let density = preferences
         .get("ui_density")
@@ -33,6 +34,20 @@ pub fn install_css() {
     apply_gtk_theme(theme);
 
     let css = "
+@define-color ac_purple #8B7CF8;
+@define-color ac_amber  #F5A623;
+@define-color ac_green  #4BD98A;
+@define-color ac_red    #FF6B5F;
+
+* { font-family: __FONT_FAMILY__; }
+.mono,
+.process-name,
+.ip-addr { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+
+/* GTK theme paints window {} opaque by default — override so our
+   border-radius corners are truly transparent on the compositor */
+window { background-color: transparent; }
+
 /* ════════════════════════════════════════════════════════════
    ANIMATIONS
    ════════════════════════════════════════════════════════════ */
@@ -62,15 +77,20 @@ pub fn install_css() {
    ════════════════════════════════════════════════════════════ */
 
 .launcher-window {
+  background-color: transparent;
+  /* box-shadow on the window widget becomes the Wayland CSD shadow */
+  box-shadow:
+    0 0  0  1px rgba(255,255,255,0.09),
+    0 4px 12px  rgba(0,0,0,0.28),
+    0 18px 52px rgba(0,0,0,0.42),
+    0 44px 100px rgba(0,0,0,0.54);
+}
+
+/* Inner frame: rounded background, clips all child widgets to border-radius */
+.launcher-frame {
   background-color: alpha(@window_bg_color, 0.985);
   border-radius: 14px;
-  font-family: __FONT_FAMILY__;
-  box-shadow:
-    0 0  0  1px alpha(@window_fg_color, 0.090),
-    0 1px 0  0   alpha(@window_fg_color, 0.060),
-    0 4px 12px   alpha(black, 0.250),
-    0 12px 40px  alpha(black, 0.360),
-    0 32px 96px  alpha(black, 0.540);
+  overflow: hidden;
   animation: launcher-open 110ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
@@ -146,7 +166,7 @@ entry, entry:focus, entry:focus-visible {
   border-radius: 5px;
   padding: 2px 5px;
   font-size: 11px;
-  font-family: monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   color: alpha(@window_fg_color, 0.380);
   letter-spacing: 0.01em;
 }
@@ -269,6 +289,26 @@ entry, entry:focus, entry:focus-visible {
   opacity: 1;
 }
 
+/* ── Result type badge (alias for category-pill with spec styling) ── */
+.result-badge {
+  padding: 1px 7px;
+  background: rgba(255,255,255,0.055);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.40);
+  letter-spacing: 0.010em;
+  min-height: 18px;
+}
+
+/* ── Letter icon square (colored app icon) ── */
+.letter-icon {
+  border-radius: 7px;
+  min-width: 28px;
+  min-height: 28px;
+}
+
 /* ── Row entrance stagger ── */
 .row-stagger-0 { animation-delay:  0ms; }
 .row-stagger-1 { animation-delay:  9ms; }
@@ -280,7 +320,6 @@ entry, entry:focus, entry:focus-visible {
 .no-results-label {
   font-size: 13px;
   color: alpha(@window_fg_color, 0.26);
-  text-align: center;
 }
 
 /* ── Font Browser ── */
@@ -384,7 +423,7 @@ entry, entry:focus, entry:focus-visible {
   border-radius: 5px;
   padding: 2px 5px;
   font-size: 11px;
-  font-family: monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   color: alpha(@window_fg_color, 0.380);
   letter-spacing: 0.010em;
 }
@@ -497,7 +536,7 @@ entry, entry:focus, entry:focus-visible {
 .dashboard-clock {
   font-size: __DASHBOARD_CLOCK_SIZE__px;
   font-weight: 700;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.04em;
   color: alpha(@window_fg_color, 0.950);
 }
 
@@ -506,18 +545,19 @@ entry, entry:focus, entry:focus-visible {
 }
 
 .dashboard-date {
-  font-size: 13px;
-  color: alpha(@window_fg_color, 0.380);
+  font-size: 15px;
+  color: alpha(@window_fg_color, 0.450);
   letter-spacing: 0.010em;
   margin-top: 4px;
 }
 
 /* ── Stat chips ── */
 .stat-chip {
-  padding: 4px 9px;
-  background-color: alpha(@window_fg_color, 0.07);
+  padding: 4px 10px;
+  background-color: alpha(@window_fg_color, 0.06);
   border: 1px solid alpha(@window_fg_color, 0.10);
   border-radius: 7px;
+  font-size: 12px;
 }
 
 /* ── Signal bars (Wi-Fi strength indicator) ── */
@@ -544,10 +584,11 @@ entry, entry:focus, entry:focus-visible {
 
 /* ── Metric cards ── */
 .metric-card {
-  background-color: alpha(@window_fg_color, 0.055);
-  border: 1px solid alpha(@window_fg_color, 0.090);
+  background-color: alpha(@window_fg_color, 0.038);
+  border: 1px solid alpha(@window_fg_color, 0.070);
   border-radius: 10px;
-  padding: 13px 14px;
+  padding: 16px;
+  min-height: 100px;
   animation: dashboard-enter 200ms ease both;
   transition: background-color 140ms ease, border-color 140ms ease;
 }
@@ -556,6 +597,12 @@ entry, entry:focus, entry:focus-visible {
   background-color: alpha(@window_fg_color, 0.085);
   border-color: alpha(@window_fg_color, 0.130);
   transform: translateY(-1px);
+}
+
+.metric-card .metric-value {
+  font-size: 52px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
 }
 
 .metric-label {
@@ -577,7 +624,7 @@ entry, entry:focus, entry:focus-visible {
 .metric-unit {
   font-size: 12px;
   font-weight: 500;
-  color: alpha(@window_fg_color, 0.360);
+  color: alpha(@window_fg_color, 0.500);
 }
 
 /* ── Progress bars (GTK ProgressBar) ── */
@@ -600,6 +647,92 @@ entry, entry:focus, entry:focus-visible {
 
 .dashboard-metric-bar.danger progress {
   background: #FF6B5F;
+}
+
+/* Fixed per-metric bar colors (match dashboard mockup) */
+.metric-bar-cpu progress  { background: #8B7CF8; }
+.metric-bar-mem progress  { background: #F5A623; }
+.metric-bar-disk progress { background: #F5A623; }
+.metric-bar-temp progress { background: #8B7CF8; }
+
+/* ── Media player buttons ── */
+.media-btn-primary {
+  background: @accent_color;
+  border: none;
+  border-radius: 50%;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  color: white;
+  font-size: 18px;
+  transition: background 120ms ease;
+}
+
+.media-btn-primary:hover {
+  background: alpha(@accent_color, 0.850);
+}
+
+.media-btn-secondary {
+  background: alpha(@window_fg_color, 0.080);
+  border: none;
+  border-radius: 50%;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  color: alpha(@window_fg_color, 0.650);
+  font-size: 16px;
+  transition: background 120ms ease;
+}
+
+.media-btn-secondary:hover {
+  background: alpha(@window_fg_color, 0.130);
+}
+
+/* Outer skip buttons (⏮ ⏭): small, no fill */
+.media-btn-skip {
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  color: alpha(@window_fg_color, 0.450);
+  font-size: 14px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.media-btn-skip:hover {
+  background: alpha(@window_fg_color, 0.080);
+  color: alpha(@window_fg_color, 0.700);
+}
+
+/* Inner seek buttons (⏪ ⏩): amber-tinted circles */
+.media-btn-seek {
+  background: alpha(@ac_amber, 0.150);
+  border: none;
+  border-radius: 50%;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  color: @ac_amber;
+  font-size: 15px;
+  transition: background 120ms ease;
+}
+
+.media-btn-seek:hover {
+  background: alpha(@ac_amber, 0.260);
+}
+
+/* ── Process kill button (hidden until row hovered/selected) ── */
+.kill-btn {
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.result-row:hover .kill-btn,
+.result-row:selected .kill-btn,
+.result-row.selected .kill-btn {
+  opacity: 1;
 }
 
 /* ── Control cards ── */
@@ -654,6 +787,26 @@ entry, entry:focus, entry:focus-visible {
 
 .control-card-actions {
   padding-top: 4px;
+}
+
+.widget-btn {
+  background: alpha(@window_fg_color, 0.080);
+  border: 1px solid alpha(@window_fg_color, 0.120);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: alpha(@window_fg_color, 0.700);
+  transition: background 100ms ease;
+}
+
+.widget-btn:hover {
+  background: alpha(@window_fg_color, 0.120);
+}
+
+.widget-btn.active {
+  background: alpha(@accent_color, 0.130);
+  border-color: alpha(@accent_color, 0.280);
+  color: @accent_color;
 }
 
 /* backward compat for old dashboard-card classes */
@@ -719,7 +872,7 @@ entry, entry:focus, entry:focus-visible {
   border: 1px solid alpha(@window_fg_color, 0.070);
   border-radius: 5px;
   font-size: 11px;
-  font-family: monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   color: alpha(@window_fg_color, 0.380);
   transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
 }
@@ -750,7 +903,6 @@ entry, entry:focus, entry:focus-visible {
   font-size: 13px;
   font-weight: 600;
   color: #4BD98A;
-  text-align: center;
   letter-spacing: -0.01em;
 }
 
@@ -762,7 +914,7 @@ entry, entry:focus, entry:focus-visible {
   padding: 8px 12px;
   font-size: 13px;
   color: alpha(@window_fg_color, 0.930);
-  margin-start: 40px;
+  margin-left: 40px;
 }
 
 .ai-message-assistant {
@@ -773,7 +925,7 @@ entry, entry:focus, entry:focus-visible {
   padding: 8px 12px;
   font-size: 13px;
   color: alpha(@window_fg_color, 0.850);
-  margin-end: 40px;
+  margin-right: 40px;
 }
 
 .ai-input-row {
@@ -824,7 +976,7 @@ entry, entry:focus, entry:focus-visible {
 }
 
 .clipboard-text.code {
-  font-family: monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 12px;
   letter-spacing: -0.010em;
 }
@@ -856,6 +1008,12 @@ entry, entry:focus, entry:focus-visible {
   min-width: 42px;
 }
 
+.notif-time {
+  font-size: 11px;
+  color: alpha(@window_fg_color, 0.350);
+  letter-spacing: 0.010em;
+}
+
 /* ════════════════════════════════════════════════════════════
    SYSTEM MONITOR
    ════════════════════════════════════════════════════════════ */
@@ -875,6 +1033,10 @@ entry, entry:focus, entry:focus-visible {
 .process-memory-bar progress {
   min-height: 3px;
 }
+
+.process-memory-bar.usage-low progress  { background: alpha(@window_fg_color, 0.15); }
+.process-memory-bar.usage-mid progress  { background: #8B7CF8; }
+.process-memory-bar.usage-high progress { background: #F5A623; }
 
 /* ════════════════════════════════════════════════════════════
    MEDIA VIEW
@@ -903,8 +1065,8 @@ entry, entry:focus, entry:focus-visible {
 }
 
 .pref-sidebar-row:selected {
-  background: alpha(@window_fg_color, 0.070);
-  box-shadow: inset 3px 0 0 @accent_color;
+  background: alpha(@accent_color, 0.100);
+  box-shadow: inset 2px 0 0 @accent_color;
   color: @window_fg_color;
 }
 
@@ -945,11 +1107,12 @@ scale trough highlight {
 }
 
 scale slider {
-  min-width: 14px;
-  min-height: 14px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: -6px 0;
   border-radius: 50%;
   background: white;
-  box-shadow: 0 1px 3px alpha(black, 0.3);
+  box-shadow: 0 1px 4px alpha(black, 0.4);
 }
 
 scale.audio-volume-bar trough { min-height: 6px; border-radius: 4px; }
@@ -1008,6 +1171,42 @@ scrollbar slider:hover {
   font-size: 11px;
   font-weight: 500;
   color: alpha(@window_fg_color, 0.68);
+}
+
+/* ── Network active access point ── */
+.network-active {
+  box-shadow: inset 2px 0 0 @accent_color;
+  background: alpha(@accent_color, 0.060);
+}
+
+.network-status-connected {
+  color: @accent_color;
+  font-weight: 500;
+}
+
+/* ── Preferences text inputs ── */
+.pref-entry,
+.pref-entry:focus {
+  background: alpha(@window_fg_color, 0.060);
+  border: 1px solid alpha(@window_fg_color, 0.120);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  color: alpha(@window_fg_color, 0.850);
+  min-height: 0;
+}
+
+.pref-entry:focus,
+.pref-entry:focus-within {
+  border-color: @accent_color;
+  box-shadow: 0 0 0 2px alpha(@accent_color, 0.200);
+}
+
+spinbutton.pref-entry,
+spinbutton.pref-entry entry {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
 }
 
 "

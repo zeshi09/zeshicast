@@ -1,3 +1,28 @@
+pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
+    ("ui_font_family", "Outfit, Inter, Noto Sans, sans-serif"),
+    ("ui_font_size", "15"),
+    ("ui_density", "compact"),
+    ("ui_theme", "system"),
+    ("show_status_strip", "true"),
+    ("status_items", "clock,date,network,battery,audio,media"),
+    ("dashboard_enabled", "true"),
+    ("dashboard_poll_interval_ms", "1000"),
+    ("network_enabled", "true"),
+    ("media_enabled", "true"),
+    ("notifications_enabled", "true"),
+    ("ai_enabled", "true"),
+    ("ai_provider", "ollama"),
+    ("ollama_endpoint", "http://localhost:11434"),
+    ("ollama_model", "llama3.2:3b"),
+    ("ai_endpoint", "https://api.openai.com/v1"),
+    ("ai_model", "gpt-4o-mini"),
+    ("ai_api_key", ""),
+    ("translate_endpoint", "http://localhost:5000"),
+    ("translate_api_key", ""),
+    ("translate_target", "en"),
+    ("script_dirs", "~/.config/zeshicast/scripts"),
+];
+
 pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
     ("ui_font_family", "UI font family (restart required)"),
     ("ui_font_size", "UI base font size 12-22 (restart required)"),
@@ -50,25 +75,19 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
     PrefSection {
         name: "General",
         keys: &[
-            ("show_status_strip", "Show status strip (true/false)"),
-            (
-                "status_items",
-                "Status items (clock,date,network,battery,audio,media)",
-            ),
-            ("dashboard_enabled", "Dashboard enabled (true/false)"),
-            (
-                "dashboard_poll_interval_ms",
-                "Dashboard refresh interval (ms)",
-            ),
+            ("show_status_strip", "Show status strip"),
+            ("status_items", "Status items"),
+            ("dashboard_enabled", "Dashboard enabled"),
+            ("dashboard_poll_interval_ms", "Refresh interval (ms)"),
         ],
     },
     PrefSection {
         name: "Appearance",
         keys: &[
-            ("ui_font_family", "Font family (restart required)"),
-            ("ui_font_size", "Font size 12-22 (restart required)"),
-            ("ui_density", "Row density: comfortable or compact"),
-            ("ui_theme", "Theme: system (default), dark, or light"),
+            ("ui_font_family", "Font family"),
+            ("ui_font_size", "Font size"),
+            ("ui_density", "Row density"),
+            ("ui_theme", "Theme"),
         ],
     },
     PrefSection {
@@ -78,29 +97,20 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
     PrefSection {
         name: "Extensions",
         keys: &[
-            ("network_enabled", "Network features (true/false)"),
-            ("media_enabled", "Media features (true/false)"),
-            (
-                "notifications_enabled",
-                "Notifications features (true/false)",
-            ),
-            ("ai_enabled", "AI features (true/false)"),
+            ("network_enabled", "Network features"),
+            ("media_enabled", "Media features"),
+            ("notifications_enabled", "Notification features"),
+            ("ai_enabled", "AI features"),
             ("ai_provider", "AI provider (ollama/openai)"),
             ("ollama_endpoint", "Ollama endpoint"),
             ("ollama_model", "Ollama model"),
             ("ai_endpoint", "AI/OpenAI endpoint"),
             ("ai_model", "AI model"),
             ("ai_api_key", "AI API key"),
-            (
-                "script_dirs",
-                "Script directories (comma-separated paths)",
-            ),
-            ("translate_endpoint", "Translate endpoint (LibreTranslate)"),
+            ("script_dirs", "Script directories"),
+            ("translate_endpoint", "Translate endpoint"),
             ("translate_api_key", "Translate API key"),
-            (
-                "translate_target",
-                "Translate target language (e.g. en, ru, de)",
-            ),
+            ("translate_target", "Translate target language"),
         ],
     },
     PrefSection {

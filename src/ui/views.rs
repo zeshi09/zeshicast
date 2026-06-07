@@ -118,6 +118,7 @@ pub struct DashboardView {
     pub load_bar: ProgressBar,
     pub memory_bar: ProgressBar,
     pub disk_bar: ProgressBar,
+    pub thermal_bar: ProgressBar,
     pub load_graph: MetricGraph,
     pub memory_graph: MetricGraph,
     pub disk_graph: MetricGraph,
@@ -190,6 +191,9 @@ pub struct MediaView {
     pub previous: Button,
     pub play_pause: Button,
     pub next: Button,
+    pub scrubber: gtk::Scale,
+    pub time_pos: Label,
+    pub time_total: Label,
 }
 
 #[derive(Clone)]
@@ -345,6 +349,7 @@ pub fn ai_chat_view() -> AiChatView {
 
     let stop = Button::with_label("■");
     stop.add_css_class("dashboard-button");
+    stop.add_css_class("widget-btn");
     stop.set_visible(false);
     input_row.append(&stop);
 
@@ -582,11 +587,10 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     root.append(&in_vol_row);
 
     // ── App streams ─────────────────────────────────────────────────────────
-    root.append(&super::section_header("Applications"));
+    // PipeWire per-application streams are intentionally not shown (they clutter
+    // the view and aren't part of the target design). Kept for struct/data compat.
     let streams_list = super::results_list();
-    streams_list.set_vexpand(true);
-    let streams_scroller = super::scrollable_list(&streams_list);
-    root.append(&streams_scroller);
+    streams_list.set_visible(false);
 
     // Compat fields: output_bar / input_bar as ProgressBar for snapshot update
     let output_bar = ProgressBar::new();
@@ -684,8 +688,12 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         super::metric_card("Memory", "media-flash-symbolic");
     let (disk_card, disk, disk_sub, disk_bar) =
         super::metric_card("Disk", "drive-harddisk-symbolic");
+    // Fixed per-metric bar colors (match dashboard mockup)
+    load_bar.add_css_class("metric-bar-cpu");
+    memory_bar.add_css_class("metric-bar-mem");
+    disk_bar.add_css_class("metric-bar-disk");
 
-    let thermal_card = GtkBox::new(Orientation::Vertical, 4);
+    let thermal_card = GtkBox::new(Orientation::Vertical, 6);
     thermal_card.add_css_class("metric-card");
     thermal_card.set_hexpand(true);
     let thermal_header = GtkBox::new(Orientation::Horizontal, 6);
@@ -697,17 +705,30 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     thermal_header.append(&thermal_icon);
     thermal_header.append(&thermal_title);
     thermal_card.append(&thermal_header);
+
+    let thermal_value_row = GtkBox::new(Orientation::Horizontal, 3);
+    thermal_value_row.set_valign(gtk::Align::Baseline);
     let thermal = Label::new(Some("—"));
     thermal.add_css_class("metric-value");
     thermal.set_xalign(0.0);
-    thermal_card.append(&thermal);
+    thermal_value_row.append(&thermal);
+    let thermal_unit = Label::new(Some("°C"));
+    thermal_unit.add_css_class("metric-unit");
+    thermal_unit.set_valign(gtk::Align::End);
+    thermal_unit.set_margin_bottom(2);
+    thermal_value_row.append(&thermal_unit);
+    thermal_card.append(&thermal_value_row);
 
+    let thermal_bar = ProgressBar::new();
+    thermal_bar.add_css_class("dashboard-metric-bar");
+    thermal_bar.add_css_class("metric-bar-temp");
+    thermal_card.append(&thermal_bar);
+
+    // Sparklines are kept for data continuity but not shown on dashboard cards
+    // (the mockup shows a single thin progress bar per metric).
     let load_graph = metric_graph();
     let memory_graph = metric_graph();
     let disk_graph = metric_graph();
-    load_card.append(&load_graph.area);
-    memory_card.append(&memory_graph.area);
-    disk_card.append(&disk_graph.area);
 
     metric_grid.attach(&load_card,    0, 0, 1, 1);
     metric_grid.attach(&memory_card,  1, 0, 1, 1);
@@ -815,6 +836,7 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         load_bar,
         memory_bar,
         disk_bar,
+        thermal_bar,
         load_graph,
         memory_graph,
         disk_graph,
@@ -862,6 +884,7 @@ pub fn system_monitor_view(
     cpu_label.set_xalign(0.0);
     let load = Label::new(Some("—"));
     load.add_css_class("metric-value");
+    load.add_css_class("mono");
     load.set_width_chars(6);
     load.set_xalign(0.0);
     // 8 mini core bars drawn via Cairo
@@ -895,7 +918,10 @@ pub fn system_monitor_view(
     }
 
     let load_graph = metric_graph();
-    load_graph.area.set_hexpand(true);
+    load_graph.area.set_hexpand(false);
+    load_graph.area.set_content_width(120);
+    load_graph.area.set_content_height(40);
+    load_graph.area.set_size_request(120, 40);
     cpu_row.append(&cpu_label);
     cpu_row.append(&load);
     cpu_row.append(&core_area);
@@ -910,6 +936,7 @@ pub fn system_monitor_view(
     ram_label.set_xalign(0.0);
     let memory = Label::new(Some("—"));
     memory.add_css_class("metric-value");
+    memory.add_css_class("mono");
     memory.set_width_chars(10);
     memory.set_xalign(0.0);
     let memory_bar_vals = Rc::new(RefCell::new((0.0_f64, 0.0_f64)));
@@ -946,12 +973,9 @@ pub fn system_monitor_view(
         });
     }
     let memory_graph = metric_graph();
-    memory_graph.area.set_hexpand(false);
-    memory_graph.area.set_width_request(60);
     ram_row.append(&ram_label);
     ram_row.append(&memory);
     ram_row.append(&memory_bar);
-    ram_row.append(&memory_graph.area);
     overview.append(&ram_row);
 
     // Disk row
@@ -962,18 +986,16 @@ pub fn system_monitor_view(
     disk_label.set_xalign(0.0);
     let disk = Label::new(Some("—"));
     disk.add_css_class("metric-value");
+    disk.add_css_class("mono");
     disk.set_width_chars(10);
     disk.set_xalign(0.0);
     let disk_bar = ProgressBar::new();
     disk_bar.add_css_class("dashboard-metric-bar");
     disk_bar.set_hexpand(true);
     let disk_graph = metric_graph();
-    disk_graph.area.set_hexpand(false);
-    disk_graph.area.set_width_request(60);
     disk_row.append(&disk_label);
     disk_row.append(&disk);
     disk_row.append(&disk_bar);
-    disk_row.append(&disk_graph.area);
     overview.append(&disk_row);
 
     // NET row
@@ -984,9 +1006,11 @@ pub fn system_monitor_view(
     net_label.set_xalign(0.0);
     let net_rx = Label::new(Some("—"));
     net_rx.add_css_class("result-subtitle");
+    net_rx.add_css_class("mono");
     net_rx.set_xalign(0.0);
     let net_tx = Label::new(Some("—"));
     net_tx.add_css_class("result-subtitle");
+    net_tx.add_css_class("mono");
     net_tx.set_xalign(0.0);
     net_tx.set_hexpand(true);
     net_row.append(&net_label);
@@ -1064,6 +1088,7 @@ pub fn system_monitor_view(
         .tooltip_text("Terminate selected process")
         .build();
     kill.add_css_class("dashboard-button");
+    kill.add_css_class("widget-btn");
     kill.set_visible(false);
 
     let view = SystemMonitorView {
@@ -1149,6 +1174,19 @@ pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView 
     close_all.add_css_class("action-bar-more");
     let open_panel = Button::with_label("Settings");
     open_panel.add_css_class("action-bar-more");
+
+    toggle_dnd.connect_clicked(|_| {
+        // Try swaync first, fallback to dunst
+        if std::process::Command::new("swaync-client").arg("--toggle-dnd").spawn().is_err() {
+            let _ = std::process::Command::new("dunstctl").arg("set-paused").arg("toggle").spawn();
+        }
+    });
+    close_all.connect_clicked(|_| {
+        if std::process::Command::new("swaync-client").arg("--close-all").spawn().is_err() {
+            let _ = std::process::Command::new("dunstctl").arg("history-clear").spawn();
+        }
+    });
+
     top_bar.append(&toggle_dnd);
     top_bar.append(&close_all);
     top_bar.append(&open_panel);
@@ -1268,11 +1306,24 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     controls.set_halign(gtk::Align::Center);
     controls.set_margin_top(14);
 
-    let previous = media_ctrl_btn("⏮", "Previous");
-    let seek_back = media_ctrl_btn("⏪", "Seek back 10s");
+    let previous = media_ctrl_btn("⏮", "Previous", "media-btn-skip");
+    let seek_back = media_ctrl_btn("⏪", "Seek back 10s", "media-btn-seek");
     let play_pause = media_play_btn("media-playback-start-symbolic");
-    let seek_fwd = media_ctrl_btn("⏩", "Seek forward 10s");
-    let next = media_ctrl_btn("⏭", "Next");
+    let seek_fwd = media_ctrl_btn("⏩", "Seek forward 10s", "media-btn-seek");
+    let next = media_ctrl_btn("⏭", "Next", "media-btn-skip");
+
+    // Wire playerctl commands
+    previous.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").arg("previous").spawn(); });
+    next.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").arg("next").spawn(); });
+    play_pause.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").arg("play-pause").spawn(); });
+    seek_back.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").args(["position", "10-"]).spawn(); });
+    seek_fwd.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").args(["position", "10+"]).spawn(); });
+    scrubber.connect_change_value(|_, _, val| {
+        let _ = std::process::Command::new("playerctl")
+            .args(["position", &format!("{val:.1}")])
+            .spawn();
+        glib::Propagation::Proceed
+    });
 
     controls.append(&previous);
     controls.append(&seek_back);
@@ -1289,52 +1340,63 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
         previous,
         play_pause,
         next,
+        scrubber,
+        time_pos,
+        time_total,
     };
     set_media_snapshot(&view, snapshot);
     view
 }
 
-fn media_ctrl_btn(label: &str, tooltip: &str) -> Button {
+fn media_ctrl_btn(label: &str, tooltip: &str, css_class: &str) -> Button {
     let btn = Button::with_label(label);
-    btn.add_css_class("action-bar-btn");
+    btn.add_css_class(css_class);
     btn.set_tooltip_text(Some(tooltip));
-    btn.set_width_request(32);
-    btn.set_height_request(32);
     btn
 }
 
-fn media_play_btn(icon: &str) -> Button {
-    let btn = Button::builder().icon_name(icon).build();
-    btn.add_css_class("ai-send-btn");
-    btn.add_css_class("ready");
-    btn.set_width_request(42);
-    btn.set_height_request(42);
+fn media_play_btn(_icon: &str) -> Button {
+    let btn = Button::with_label("⏸");
+    btn.add_css_class("media-btn-primary");
     btn
+}
+
+fn fmt_secs(s: f64) -> String {
+    let total = s as u64;
+    format!("{}:{:02}", total / 60, total % 60)
 }
 
 pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
     if snapshot.is_active() {
         let title = match (&snapshot.artist, &snapshot.title) {
-            (Some(artist), Some(title)) => format!("{artist} - {title}"),
+            (Some(artist), Some(title)) => format!("{artist} — {title}"),
             (_, Some(title)) => title.clone(),
             (Some(artist), _) => artist.clone(),
             _ => "Unknown track".to_string(),
         };
         view.title.set_text(&title);
-        view.player.set_text(
-            &snapshot
-                .player
-                .as_deref()
-                .unwrap_or("Unknown player")
-                .to_string(),
-        );
-        view.status
-            .set_text(snapshot.status.as_deref().unwrap_or("Unknown status"));
+        view.player.set_text(snapshot.player.as_deref().unwrap_or(""));
+        let is_playing = snapshot.status.as_deref() == Some("Playing");
+        view.play_pause.set_label(if is_playing { "⏸" } else { "▶" });
+        view.status.set_text(snapshot.status.as_deref().unwrap_or(""));
+
+        if let Some(len) = snapshot.length_secs {
+            view.scrubber.set_range(0.0, len);
+            view.time_total.set_text(&fmt_secs(len));
+        }
+        if let Some(pos) = snapshot.position_secs {
+            view.scrubber.set_value(pos);
+            view.time_pos.set_text(&fmt_secs(pos));
+        }
+        view.scrubber.set_sensitive(snapshot.length_secs.is_some());
     } else {
         view.title.set_text("No active player");
-        view.player
-            .set_text("Install playerctl for MPRIS media status");
+        view.player.set_text("Install playerctl for MPRIS media status");
         view.status.set_text("");
+        view.play_pause.set_label("▶");
+        view.scrubber.set_sensitive(false);
+        view.time_pos.set_text("0:00");
+        view.time_total.set_text("0:00");
     }
 }
 
@@ -1343,93 +1405,14 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         list.remove(&child);
     }
 
-    // Connected interfaces first
-    for interface in &snapshot.interfaces {
-        if interface.name == "lo" { continue; }
-        let row = gtk::ListBoxRow::new();
-        row.add_css_class("result-row");
-        if interface.state == "up" {
-            row.add_css_class("selected");
-        }
-
-        let layout = GtkBox::new(Orientation::Horizontal, 10);
-        layout.set_margin_start(14);
-        layout.set_margin_end(14);
-
-        // Signal bars or wired icon
-        let sig_widget = if interface.is_wireless {
-            signal_bars(75) // default decent signal for connected
-        } else {
-            let b = GtkBox::new(Orientation::Horizontal, 0);
-            let ico = gtk::Image::from_icon_name("network-wired-symbolic");
-            ico.set_pixel_size(16);
-            b.append(&ico);
-            b
-        };
-        layout.append(&sig_widget);
-
-        let text = GtkBox::new(Orientation::Vertical, 2);
-        text.set_hexpand(true);
-        text.set_valign(gtk::Align::Center);
-
-        let title = Label::new(Some(&interface.name));
-        title.add_css_class("result-title");
-        title.set_xalign(0.0);
-        title.set_hexpand(true);
-
-        let addresses = interface
-            .ipv4_addresses.iter().chain(interface.ipv6_addresses.iter())
-            .take(1).cloned().collect::<Vec<_>>();
-        let detail = addresses.first().map(String::as_str)
-            .or(interface.mac_address.as_deref())
-            .unwrap_or("");
-        let sub_text = if interface.state == "up" {
-            format!("Connected  {detail}")
-        } else {
-            format!("{}  {detail}", interface.state)
-        };
-        let subtitle = Label::new(Some(&sub_text));
-        subtitle.add_css_class("result-subtitle");
-        subtitle.set_xalign(0.0);
-        subtitle.set_hexpand(true);
-        subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
-
-        text.append(&title);
-        text.append(&subtitle);
-        layout.append(&text);
-
-        let btn_label = if interface.state == "up" { "Disconnect" } else { "Connect" };
-        let btn = Button::with_label(btn_label);
-        btn.add_css_class("action-bar-more");
-        btn.set_valign(gtk::Align::Center);
-        layout.append(&btn);
-
-        row.set_child(Some(&layout));
-        list.append(&row);
-    }
-
-    if !snapshot.dns_servers.is_empty() {
-        let servers = snapshot
-            .dns_servers
-            .iter()
-            .take(4)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ");
-        let title = format!("DNS  {servers}");
-        list.append(&super::secondary_action_row(
-            "network-server-symbolic",
-            &title,
-        ));
-    }
-
-    if !snapshot.wifi_networks.is_empty() {
-        list.append(&super::section_header("Available Wi-Fi"));
-    }
-
+    // Wi-Fi only — Ethernet interfaces and DNS servers are intentionally hidden
+    // to match the target design (a single WI-FI section).
     for network in &snapshot.wifi_networks {
         let row = gtk::ListBoxRow::new();
         row.add_css_class("result-row");
+        if network.active {
+            row.add_css_class("network-active");
+        }
 
         let layout = GtkBox::new(Orientation::Horizontal, 10);
         layout.set_margin_start(14);
@@ -1449,23 +1432,36 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         title.set_hexpand(true);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
 
-        let security = network.security.as_deref().unwrap_or("Open");
-        let sub = format!("{}  {}%", security, sig);
-        let subtitle = Label::new(Some(&sub));
-        subtitle.add_css_class("result-subtitle");
+        let subtitle = Label::new(None);
         subtitle.set_xalign(0.0);
+        subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        if network.active {
+            subtitle.set_text(&format!("Connected  ·  {sig}%"));
+            subtitle.add_css_class("network-status-connected");
+        } else {
+            let security = network.security.as_deref().unwrap_or("Open");
+            subtitle.set_text(&format!("{security}  ·  {sig}%"));
+            subtitle.add_css_class("result-subtitle");
+        }
 
         text.append(&title);
         text.append(&subtitle);
         layout.append(&text);
 
-        let btn = Button::with_label("Connect");
+        let btn = Button::with_label(if network.active { "Disconnect" } else { "Connect" });
         btn.add_css_class("action-bar-more");
         btn.set_valign(gtk::Align::Center);
         layout.append(&btn);
 
         row.set_child(Some(&layout));
         list.append(&row);
+    }
+
+    if snapshot.wifi_networks.is_empty() {
+        list.append(&super::secondary_action_row(
+            "network-wireless-offline-symbolic",
+            "No Wi-Fi networks found",
+        ));
     }
 
     if !snapshot.vpn_connections.is_empty() {
@@ -1564,22 +1560,11 @@ fn notification_history_row(
     layout.set_margin_start(14);
     layout.set_margin_end(14);
 
-    // App icon 32×32
-    let icon_box = GtkBox::new(Orientation::Vertical, 0);
-    icon_box.set_width_request(32);
-    icon_box.set_height_request(32);
-    icon_box.add_css_class("control-card");
-    icon_box.set_valign(gtk::Align::Start);
-    let first_char = entry.app_name.as_deref()
-        .and_then(|n| n.chars().next())
-        .map(|c| c.to_string())
-        .unwrap_or_else(|| "◎".to_string());
-    let icon_lbl = Label::new(Some(first_char.as_str()));
-    icon_lbl.set_valign(gtk::Align::Center);
-    icon_lbl.set_halign(gtk::Align::Center);
-    icon_lbl.set_vexpand(true);
-    icon_box.append(&icon_lbl);
-    layout.append(&icon_box);
+    // App icon 32×32 — colored letter square
+    let app_str = entry.app_name.as_deref().unwrap_or("App");
+    let icon_area = super::letter_icon(app_str, 32);
+    icon_area.set_valign(gtk::Align::Start);
+    layout.append(&icon_area);
 
     let text = GtkBox::new(Orientation::Vertical, 2);
     text.set_hexpand(true);
@@ -1589,7 +1574,14 @@ fn notification_history_row(
     let app_name = Label::new(entry.app_name.as_deref().or(Some("App")));
     app_name.add_css_class("clipboard-time");
     app_name.set_xalign(0.0);
+    app_name.set_hexpand(true);
     meta_row.append(&app_name);
+    if let Some(ts) = &entry.timestamp {
+        let ts_lbl = Label::new(Some(ts.as_str()));
+        ts_lbl.add_css_class("notif-time");
+        ts_lbl.set_xalign(1.0);
+        meta_row.append(&ts_lbl);
+    }
     text.append(&meta_row);
 
     // Summary (title)
@@ -1612,10 +1604,29 @@ fn notification_history_row(
 
     layout.append(&text);
 
-    // Dismiss × button
+    // Dismiss × button — closes the notification by id when available
     let dismiss = Button::with_label("×");
     dismiss.add_css_class("action-bar-btn");
+    dismiss.add_css_class("kill-btn");
     dismiss.set_valign(gtk::Align::Start);
+    if let Some(id) = entry.id {
+        let row_weak = row.downgrade();
+        dismiss.connect_clicked(move |_| {
+            let id = id.to_string();
+            if std::process::Command::new("swaync-client")
+                .args(["-C", &id])
+                .spawn()
+                .is_err()
+            {
+                let _ = std::process::Command::new("dunstctl")
+                    .args(["history-rm", &id])
+                    .spawn();
+            }
+            if let Some(row) = row_weak.upgrade() {
+                row.set_visible(false);
+            }
+        });
+    }
     layout.append(&dismiss);
 
     row.set_child(Some(&layout));
@@ -1631,22 +1642,26 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     }
     // Update workspace chip
     let ws = crate::workspace_snapshot();
-    view.workspace.set_text(&ws.label());
+    let ws_label = ws.label();
+    view.workspace.set_markup(&format!(
+        "<span alpha='40%'>Workspace</span>  {}",
+        glib::markup_escape_text(&ws_label)
+    ));
     view.workspace.set_visible(true);
-    view.uptime.set_text(
-        &snapshot
-            .uptime_seconds
-            .map(format_duration)
-            .unwrap_or("unknown".to_string()),
-    );
-    // CPU: show load avg as value, cores as unit
-    let load_val = snapshot.load_average.map(|l| format!("{l:.1}")).unwrap_or_else(|| "—".to_string());
-    view.load.set_text(&load_val);
-    let cores = snapshot.cpu_count.map(|n| format!("{n}c")).unwrap_or_default();
-    view.load_sub.set_text(&cores);
+    let uptime_val = snapshot.uptime_seconds.map(format_duration).unwrap_or_else(|| "—".to_string());
+    view.uptime.set_markup(&format!(
+        "<span alpha='40%'>Uptime</span>  {}",
+        glib::markup_escape_text(&uptime_val)
+    ));
+    // CPU: show utilisation percentage + "%" unit (matches dashboard mockup)
     let load_fraction = snapshot.load_average.map(load_fraction).unwrap_or_default();
+    let load_val = snapshot
+        .load_average
+        .map(|_| format!("{}", (load_fraction * 100.0).round() as u32))
+        .unwrap_or_else(|| "—".to_string());
+    view.load.set_text(&load_val);
+    view.load_sub.set_text("%");
     view.load_bar.set_fraction(load_fraction);
-    set_bar_color_class(&view.load_bar, load_fraction);
     push_metric_graph(&view.load_graph, load_fraction);
 
     // Memory: show GB value + "GB" unit
@@ -1660,7 +1675,6 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     view.memory.set_text(&mem_gb);
     view.memory_sub.set_text("GB");
     view.memory_bar.set_fraction(memory_fraction);
-    set_bar_color_class(&view.memory_bar, memory_fraction);
     push_metric_graph(&view.memory_graph, memory_fraction);
 
     // Disk: show percentage + "%" unit
@@ -1674,22 +1688,23 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     view.disk.set_text(&disk_pct);
     view.disk_sub.set_text("%");
     view.disk_bar.set_fraction(disk_fraction);
-    set_bar_color_class(&view.disk_bar, disk_fraction);
     push_metric_graph(&view.disk_graph, disk_fraction);
 
-    view.processes.set_text(
-        &snapshot
-            .process_count
-            .map(|count| format!("{count} proc"))
-            .unwrap_or_default(),
-    );
+    let proc_val = snapshot.process_count.map(|n| n.to_string()).unwrap_or_else(|| "—".to_string());
+    view.processes.set_markup(&format!(
+        "<span alpha='40%'>Procs</span>  {}",
+        glib::markup_escape_text(&proc_val)
+    ));
 }
 
 pub fn set_dashboard_thermal(view: &DashboardView, celsius: Option<f32>) {
     if let Some(t) = celsius {
-        view.thermal.set_text(&format!("{t:.0}°C"));
+        view.thermal.set_text(&format!("{t:.0}"));
+        // Map 0–100 °C onto the bar; most CPUs idle 30–60, throttle ~90.
+        view.thermal_bar.set_fraction((t as f64 / 100.0).clamp(0.0, 1.0));
     } else {
         view.thermal.set_text("—");
+        view.thermal_bar.set_fraction(0.0);
     }
 }
 
@@ -1736,9 +1751,11 @@ pub fn set_dashboard_battery_snapshot(view: &DashboardView, snapshot: &BatterySn
     let capacity = battery
         .capacity_percent
         .map(|value| format!("{value}%"))
-        .unwrap_or_default();
-    let status = battery.status.as_deref().unwrap_or("");
-    view.battery.set_text(&format!("⚡ {capacity} {status}").trim().to_string());
+        .unwrap_or_else(|| "—".to_string());
+    view.battery.set_markup(&format!(
+        "<span alpha='40%'>Battery</span>  {}",
+        glib::markup_escape_text(&capacity)
+    ));
     view.battery.set_visible(true);
 }
 
@@ -1969,6 +1986,7 @@ fn audio_device_row(name: &str, active: bool) -> gtk::ListBoxRow {
 fn dashboard_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("dashboard-button");
+    button.add_css_class("widget-btn");
     button
 }
 
@@ -2136,19 +2154,6 @@ fn push_metric_graph(graph: &MetricGraph, value: f64) {
     graph.area.queue_draw();
 }
 
-fn set_bar_color_class(bar: &ProgressBar, fraction: f64) {
-    if fraction > 0.85 {
-        bar.add_css_class("danger");
-        bar.remove_css_class("warning");
-    } else if fraction > 0.65 {
-        bar.remove_css_class("danger");
-        bar.add_css_class("warning");
-    } else {
-        bar.remove_css_class("danger");
-        bar.remove_css_class("warning");
-    }
-}
-
 fn load_fraction(load: f32) -> f64 {
     let cores = std::thread::available_parallelism()
         .map(|value| value.get() as f32)
@@ -2197,17 +2202,26 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
     // Process name (monospace, flex-1)
     let title = Label::new(Some(&process.name));
     title.add_css_class("result-title");
+    title.add_css_class("process-name");
     title.set_xalign(0.0);
     title.set_hexpand(true);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     layout.append(&title);
 
-    // Mini memory usage bar (36×3px, width relative to max in process list)
+    // Mini memory usage bar (36×3px, width relative to max in process list).
+    // Colour follows usage: subtle → purple → amber.
     let mem_frac = process.memory_kib
         .map(|v| v as f64 / max_memory_kib.max(1) as f64)
         .unwrap_or(0.0);
     let mem_bar = ProgressBar::new();
     mem_bar.add_css_class("process-memory-bar");
+    mem_bar.add_css_class(if mem_frac > 0.5 {
+        "usage-high"
+    } else if mem_frac > 0.15 {
+        "usage-mid"
+    } else {
+        "usage-low"
+    });
     mem_bar.set_fraction(mem_frac.clamp(0.0, 1.0));
     mem_bar.set_show_text(false);
     mem_bar.set_width_request(36);
@@ -2220,13 +2234,15 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
         .unwrap_or_else(|| "—".to_string());
     let mem_lbl = Label::new(Some(&mem_text));
     mem_lbl.add_css_class("clipboard-time");
+    mem_lbl.add_css_class("mono");
     mem_lbl.set_width_chars(6);
     mem_lbl.set_xalign(1.0);
     layout.append(&mem_lbl);
 
-    // Kill ×
+    // Kill × — hidden, shown only when row is selected (via CSS .kill-btn)
     let kill_btn = Button::with_label("×");
     kill_btn.add_css_class("action-bar-btn");
+    kill_btn.add_css_class("kill-btn");
     kill_btn.set_valign(gtk::Align::Center);
     kill_btn.set_tooltip_text(Some("Kill process"));
     layout.append(&kill_btn);
@@ -2652,6 +2668,8 @@ pub fn emoji_picker_view() -> EmojiPickerView {
     // Confirmation strip
     let confirm = Label::new(None);
     confirm.add_css_class("emoji-confirm");
+    confirm.set_halign(gtk::Align::Center);
+    confirm.set_hexpand(true);
     confirm.set_visible(false);
     confirm.set_margin_top(4);
     confirm.set_margin_bottom(6);
@@ -2914,19 +2932,29 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                     label.set_valign(gtk::Align::Center);
                     row.append(&label);
 
-                    let is_bool = description.contains("true/false");
+                    let default_val = super::preferences::PREFERENCE_DEFAULTS
+                        .iter()
+                        .find(|(k, _)| *k == *key)
+                        .map(|(_, v)| *v)
+                        .unwrap_or("");
+                    let effective_val = current
+                        .get(*key)
+                        .map(String::as_str)
+                        .unwrap_or(default_val);
+
+                    // A preference is boolean when its default is true/false.
+                    let is_bool = matches!(default_val, "true" | "false");
                     let is_numeric = key.contains("_ms") || key.contains("_size");
 
                     let entry = Entry::new();
+                    entry.add_css_class("pref-entry");
                     entry.set_width_chars(if is_bool { 0 } else { 14 });
                     entry.set_valign(gtk::Align::Center);
-                    if let Some(value) = current.get(*key) {
-                        entry.set_text(value);
-                    }
-                    entry.set_placeholder_text(Some(key));
+                    entry.set_text(effective_val);
+                    entry.set_placeholder_text(Some(default_val));
 
                     if is_bool {
-                        let current_val = current.get(*key).map(String::as_str).unwrap_or("true");
+                        let current_val = effective_val;
                         let sw = gtk::Switch::new();
                         sw.set_active(current_val != "false");
                         sw.set_valign(gtk::Align::Center);
@@ -2935,6 +2963,48 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                             entry_c.set_text(if sw.is_active() { "true" } else { "false" });
                         });
                         row.append(&sw);
+                    } else if *key == "ui_font_size" {
+                        let scale = gtk::Scale::with_range(Orientation::Horizontal, 12.0, 22.0, 1.0);
+                        scale.set_hexpand(true);
+                        scale.set_draw_value(true);
+                        scale.set_value_pos(gtk::PositionType::Right);
+                        scale.set_value(effective_val.parse::<f64>().unwrap_or(15.0));
+                        scale.set_valign(gtk::Align::Center);
+                        let entry_c = entry.clone();
+                        scale.connect_value_changed(move |s| {
+                            entry_c.set_text(&format!("{}", s.value() as u32));
+                        });
+                        row.append(&scale);
+                    } else if *key == "ui_density" {
+                        let btn_box = GtkBox::new(Orientation::Horizontal, 0);
+                        btn_box.add_css_class("linked");
+                        btn_box.set_valign(gtk::Align::Center);
+                        let compact_btn = gtk::ToggleButton::with_label("Compact");
+                        let comfort_btn = gtk::ToggleButton::with_label("Comfortable");
+                        comfort_btn.set_group(Some(&compact_btn));
+                        if effective_val == "comfortable" { comfort_btn.set_active(true); }
+                        else { compact_btn.set_active(true); }
+                        let entry_c = entry.clone();
+                        compact_btn.connect_toggled(move |b| {
+                            if b.is_active() { entry_c.set_text("compact"); }
+                        });
+                        let entry_c = entry.clone();
+                        comfort_btn.connect_toggled(move |b| {
+                            if b.is_active() { entry_c.set_text("comfortable"); }
+                        });
+                        btn_box.append(&compact_btn);
+                        btn_box.append(&comfort_btn);
+                        row.append(&btn_box);
+                    } else if *key == "dashboard_poll_interval_ms" {
+                        let spin = gtk::SpinButton::with_range(500.0, 5000.0, 100.0);
+                        spin.add_css_class("pref-entry");
+                        spin.set_value(effective_val.parse::<f64>().unwrap_or(1000.0));
+                        spin.set_valign(gtk::Align::Center);
+                        let entry_c = entry.clone();
+                        spin.connect_value_changed(move |s| {
+                            entry_c.set_text(&format!("{}", s.value() as u32));
+                        });
+                        row.append(&spin);
                     } else if is_numeric {
                         entry.set_input_purpose(gtk::InputPurpose::Digits);
                         row.append(&entry);

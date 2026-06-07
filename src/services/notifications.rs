@@ -19,9 +19,11 @@ impl NotificationSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationEntrySnapshot {
+    pub id: Option<u32>,
     pub app_name: Option<String>,
     pub summary: String,
     pub body: Option<String>,
+    pub timestamp: Option<String>,
 }
 
 pub fn notification_snapshot() -> NotificationSnapshot {
@@ -37,8 +39,12 @@ fn swaync_snapshot() -> io::Result<NotificationSnapshot> {
     let dnd = command_stdout("swaync-client", &["--get-dnd"])
         .ok()
         .and_then(|output| parse_boolish(&output));
+    let history = command_stdout("swaync-client", &["-l"])
+        .ok()
+        .and_then(|output| parse_swaync_history(&output).ok())
+        .unwrap_or_default();
 
-    if count.is_none() && dnd.is_none() {
+    if count.is_none() && dnd.is_none() && history.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             "swaync-client unavailable",
@@ -49,8 +55,51 @@ fn swaync_snapshot() -> io::Result<NotificationSnapshot> {
         backend: Some("swaync".to_string()),
         count,
         dnd,
-        history: Vec::new(),
+        history,
     })
+}
+
+fn parse_swaync_history(output: &str) -> serde_json::Result<Vec<NotificationEntrySnapshot>> {
+    let value = serde_json::from_str::<Value>(output)?;
+    let mut history = Vec::new();
+    collect_swaync_notifications(&value, &mut history);
+    Ok(history)
+}
+
+fn collect_swaync_notifications(value: &Value, history: &mut Vec<NotificationEntrySnapshot>) {
+    match value {
+        Value::Object(object) => {
+            // A notification object carries a summary (and usually an id).
+            if let Some(summary) = object.get("summary").and_then(variant_string) {
+                let timestamp = object
+                    .get("time")
+                    .or_else(|| object.get("timestamp"))
+                    .and_then(Value::as_u64)
+                    .map(format_notif_time);
+                history.push(NotificationEntrySnapshot {
+                    id: object.get("id").and_then(Value::as_u64).map(|v| v as u32),
+                    app_name: object
+                        .get("app_name")
+                        .or_else(|| object.get("appname"))
+                        .and_then(variant_string),
+                    summary,
+                    body: object.get("body").and_then(variant_string),
+                    timestamp,
+                });
+                return;
+            }
+
+            for child in object.values() {
+                collect_swaync_notifications(child, history);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                collect_swaync_notifications(child, history);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn dunst_snapshot() -> io::Result<NotificationSnapshot> {
@@ -114,10 +163,22 @@ fn collect_dunst_notifications(value: &Value, history: &mut Vec<NotificationEntr
     match value {
         Value::Object(object) => {
             if let Some(summary) = object.get("summary").and_then(variant_string) {
+                let timestamp = object
+                    .get("timestamp")
+                    .and_then(|v| {
+                        v.as_u64()
+                            .or_else(|| v.get("data").and_then(Value::as_u64))
+                    })
+                    .map(format_notif_time);
                 history.push(NotificationEntrySnapshot {
+                    id: object
+                        .get("id")
+                        .and_then(|v| v.as_u64().or_else(|| v.get("data").and_then(Value::as_u64)))
+                        .map(|v| v as u32),
                     app_name: object.get("appname").and_then(variant_string),
                     summary,
                     body: object.get("body").and_then(variant_string),
+                    timestamp,
                 });
                 return;
             }
@@ -133,6 +194,18 @@ fn collect_dunst_notifications(value: &Value, history: &mut Vec<NotificationEntr
         }
         _ => {}
     }
+}
+
+fn format_notif_time(unix_secs: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let diff = now.saturating_sub(unix_secs);
+    if diff < 60 { "now".to_string() }
+    else if diff < 3600 { format!("{}m", diff / 60) }
+    else if diff < 86400 { format!("{}h", diff / 3600) }
+    else { format!("{}d", diff / 86400) }
 }
 
 fn variant_string(value: &Value) -> Option<String> {
@@ -188,9 +261,11 @@ mod tests {
         assert_eq!(
             history,
             vec![NotificationEntrySnapshot {
+                id: None,
                 app_name: Some("Mail".to_string()),
                 summary: "New message".to_string(),
                 body: Some("Project update".to_string()),
+                timestamp: None,
             }]
         );
     }

@@ -29,6 +29,7 @@ pub struct WifiNetworkSnapshot {
     pub ssid: String,
     pub signal_percent: Option<u8>,
     pub security: Option<String>,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +85,11 @@ fn read_interfaces() -> io::Result<Vec<NetworkInterfaceSnapshot>> {
             interface_snapshot(&path, name, &addresses).ok()
         })
         .collect::<Vec<_>>();
+    interfaces.retain(|iface| {
+        let n = iface.name.as_str();
+        (n.starts_with("en") || n.starts_with("eth") || n.starts_with("wl"))
+            && !n.starts_with("wg") // WireGuard is VPN, handled separately
+    });
     interfaces.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
@@ -176,36 +182,76 @@ fn parse_ip_addr_line(line: &str) -> Option<(String, String)> {
 fn read_wifi_networks() -> io::Result<Vec<WifiNetworkSnapshot>> {
     let output = command_stdout(
         "nmcli",
-        &["-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
+        &["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
     )?;
     Ok(parse_nmcli_wifi_list(&output))
 }
 
 fn parse_nmcli_wifi_list(output: &str) -> Vec<WifiNetworkSnapshot> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.splitn(3, ':');
-            let ssid = parts.next()?.trim();
-            if ssid.is_empty() {
-                return None;
+    // nmcli escapes literal ':' inside fields as "\:"; split on unescaped ':'.
+    fn split_fields(line: &str) -> Vec<String> {
+        let mut fields = Vec::new();
+        let mut current = String::new();
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\\' => {
+                    if let Some(&next) = chars.peek() {
+                        current.push(next);
+                        chars.next();
+                    }
+                }
+                ':' => fields.push(std::mem::take(&mut current)),
+                _ => current.push(ch),
             }
-            let signal_percent = parts
-                .next()
-                .and_then(|value| value.trim().parse::<u8>().ok())
-                .filter(|value| *value <= 100);
-            let security = parts
-                .next()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
-            Some(WifiNetworkSnapshot {
-                ssid: ssid.to_string(),
-                signal_percent,
-                security,
-            })
-        })
-        .collect()
+        }
+        fields.push(current);
+        fields
+    }
+
+    let mut networks: Vec<WifiNetworkSnapshot> = Vec::new();
+    for line in output.lines() {
+        let fields = split_fields(line);
+        if fields.len() < 4 {
+            continue;
+        }
+        let active = fields[0].trim() == "*";
+        let ssid = fields[1].trim();
+        if ssid.is_empty() {
+            continue;
+        }
+        let signal_percent = fields[2].trim().parse::<u8>().ok().filter(|v| *v <= 100);
+        let security = Some(fields[3].trim())
+            .filter(|v| !v.is_empty())
+            .map(str::to_string);
+
+        // Deduplicate by SSID, keeping the strongest / active entry.
+        if let Some(existing) = networks.iter_mut().find(|n| n.ssid == ssid) {
+            existing.active |= active;
+            if signal_percent.unwrap_or(0) > existing.signal_percent.unwrap_or(0) {
+                existing.signal_percent = signal_percent;
+            }
+            if existing.security.is_none() {
+                existing.security = security;
+            }
+            continue;
+        }
+
+        networks.push(WifiNetworkSnapshot {
+            ssid: ssid.to_string(),
+            signal_percent,
+            security,
+            active,
+        });
+    }
+
+    // Active first, then by descending signal strength.
+    networks.sort_by(|a, b| {
+        b.active
+            .cmp(&a.active)
+            .then(b.signal_percent.unwrap_or(0).cmp(&a.signal_percent.unwrap_or(0)))
+    });
+    networks
 }
 
 fn read_vpn_connections() -> io::Result<Vec<VpnConnectionSnapshot>> {
@@ -285,20 +331,24 @@ mod tests {
 
     #[test]
     fn nmcli_wifi_parser_extracts_networks() {
-        let networks = parse_nmcli_wifi_list("Home:87:WPA2\nCafe:42:\n:10:WPA1\n");
+        let networks =
+            parse_nmcli_wifi_list("*:Home:87:WPA2\n :Cafe:42:\n :Home:55:WPA2\n ::10:WPA1\n");
 
         assert_eq!(
             networks,
             vec![
+                // Active first, deduped (Home kept strongest signal), then by signal.
                 WifiNetworkSnapshot {
                     ssid: "Home".to_string(),
                     signal_percent: Some(87),
                     security: Some("WPA2".to_string()),
+                    active: true,
                 },
                 WifiNetworkSnapshot {
                     ssid: "Cafe".to_string(),
                     signal_percent: Some(42),
                     security: None,
+                    active: false,
                 },
             ]
         );

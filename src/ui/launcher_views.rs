@@ -32,6 +32,10 @@ pub(super) fn show_dashboard_view(
     dashboard_view: &crate::ui::DashboardView,
 ) {
     crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
+    crate::ui::set_dashboard_thermal(
+        dashboard_view,
+        crate::thermal_snapshot().hottest_zone().map(|z| z.temperature_c),
+    );
     crate::ui::set_dashboard_network_snapshot(dashboard_view, &crate::network_snapshot());
     crate::ui::set_dashboard_battery_snapshot(dashboard_view, &crate::battery_snapshot());
     crate::ui::set_dashboard_audio_snapshot(dashboard_view, &crate::audio_snapshot());

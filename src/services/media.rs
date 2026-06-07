@@ -6,6 +6,8 @@ pub struct MediaSnapshot {
     pub status: Option<String>,
     pub artist: Option<String>,
     pub title: Option<String>,
+    pub position_secs: Option<f64>,
+    pub length_secs: Option<f64>,
 }
 
 impl MediaSnapshot {
@@ -19,7 +21,7 @@ pub fn media_snapshot() -> MediaSnapshot {
         .args([
             "metadata",
             "--format",
-            "{{playerName}}\t{{status}}\t{{artist}}\t{{title}}",
+            "{{playerName}}\t{{status}}\t{{artist}}\t{{title}}\t{{position}}\t{{mpris:length}}",
         ])
         .output()
     else {
@@ -34,13 +36,19 @@ pub fn media_snapshot() -> MediaSnapshot {
 }
 
 fn parse_playerctl_metadata(output: &str) -> MediaSnapshot {
-    let mut parts = output.trim().splitn(4, '\t');
-    MediaSnapshot {
-        player: clean_part(parts.next()),
-        status: clean_part(parts.next()),
-        artist: clean_part(parts.next()),
-        title: clean_part(parts.next()),
-    }
+    let mut parts = output.trim().splitn(6, '\t');
+    let player = clean_part(parts.next());
+    let status = clean_part(parts.next());
+    let artist = clean_part(parts.next());
+    let title = clean_part(parts.next());
+    let position_secs = parts.next()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|&v| v >= 0.0);
+    let length_secs = parts.next()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|&v| v > 0.0)
+        .map(|us| us / 1_000_000.0);
+    MediaSnapshot { player, status, artist, title, position_secs, length_secs }
 }
 
 fn clean_part(value: Option<&str>) -> Option<String> {
@@ -60,5 +68,7 @@ mod tests {
         assert_eq!(snapshot.status.as_deref(), Some("Playing"));
         assert_eq!(snapshot.artist.as_deref(), Some("Artist"));
         assert_eq!(snapshot.title.as_deref(), Some("Track"));
+        assert_eq!(snapshot.position_secs, None);
+        assert_eq!(snapshot.length_secs, None);
     }
 }
