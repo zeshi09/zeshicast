@@ -64,6 +64,7 @@ pub struct GuiState {
     list: ListBox,
     action_bar: GtkBox,
     navigation: crate::ui::NavigationStack,
+    open_view: Rc<dyn Fn(&str) -> bool>,
 }
 
 pub fn ensure_ui(
@@ -105,8 +106,8 @@ fn build_ui(
     let window = ApplicationWindow::builder()
         .application(app)
         .title("Zeshicast")
-        .default_width(860)
-        .default_height(600)
+        .default_width(900)
+        .default_height(760)
         .resizable(false)
         .decorated(false)
         .build();
@@ -942,6 +943,64 @@ fn build_ui(
     }
 
     update_results(&launcher.borrow(), &results, &list, "", None);
+
+    // Dispatch used to open a specific view directly (CLI flags, IPC).
+    // Returns false for an unknown view name.
+    let open_view: Rc<dyn Fn(&str) -> bool> = {
+        let navigation = navigation.clone();
+        let entry = entry.clone();
+        let action_bar = action_bar.clone();
+        let launcher = Rc::clone(&launcher);
+        let clipboard_items = Rc::clone(&clipboard_items);
+        let dashboard_view = dashboard_view.clone();
+        let clipboard_view = clipboard_view.clone();
+        let network_view = network_view.clone();
+        let media_view = media_view.clone();
+        let audio_view = audio_view.clone();
+        let ai_chat_view = ai_chat_view.clone();
+        let system_monitor_view = system_monitor_view.clone();
+        let notifications_view = notifications_view.clone();
+        let emoji_view = emoji_view.clone();
+        let font_view = font_view.clone();
+        Rc::new(move |view: &str| {
+            match view {
+                "dashboard" => {
+                    show_dashboard_view(&navigation, &entry, &action_bar, &dashboard_view)
+                }
+                "clipboard" => show_clipboard_view(
+                    &navigation,
+                    &entry,
+                    &action_bar,
+                    &clipboard_view,
+                    &clipboard_items,
+                    &launcher,
+                ),
+                "network" => {
+                    show_network_view(&navigation, &entry, &action_bar, &network_view.list)
+                }
+                "media" => show_media_view(&navigation, &entry, &action_bar, &media_view),
+                "audio" => show_audio_view(&navigation, &entry, &action_bar, &audio_view),
+                "ai" => show_ai_chat_view(&navigation, &entry, &action_bar, &ai_chat_view),
+                "system" => show_system_monitor_view(
+                    &navigation,
+                    &entry,
+                    &action_bar,
+                    &system_monitor_view,
+                ),
+                "notifications" => show_notifications_view(
+                    &navigation,
+                    &entry,
+                    &action_bar,
+                    &notifications_view,
+                ),
+                "emoji" => show_emoji_view(&navigation, &entry, &action_bar, &emoji_view),
+                "fonts" => show_font_browser_view(&navigation, &entry, &action_bar, &font_view),
+                _ => return false,
+            }
+            true
+        })
+    };
+
     GuiState {
         launcher,
         results,
@@ -950,10 +1009,18 @@ fn build_ui(
         list,
         action_bar,
         navigation,
+        open_view,
     }
 }
 
 pub fn present_launcher(state: &GuiState) {
+    present_launcher_view(state, None);
+}
+
+/// Present the window, optionally jumping straight to a named view
+/// (e.g. "clipboard", "dashboard"). Falls back to the search view when
+/// `view` is `None` or unrecognised.
+pub fn present_launcher_view(state: &GuiState, view: Option<&str>) {
     state.entry.set_text("");
     show_root_view(&state.navigation, &state.entry, &state.action_bar);
     update_results(
@@ -963,7 +1030,10 @@ pub fn present_launcher(state: &GuiState) {
         state.entry.text().as_str(),
         None,
     );
-    state.entry.grab_focus();
+    let opened = view.map(|name| (state.open_view)(name)).unwrap_or(false);
+    if !opened {
+        state.entry.grab_focus();
+    }
     state.window.present();
 }
 

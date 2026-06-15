@@ -751,7 +751,9 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         super::control_card("Notifications", "preferences-system-notifications-symbolic");
     notifications_card.set_visible(false);
 
-    // Sub-text labels inserted before action buttons
+    // Each card shows only a muted sub-line under the value (mockup style).
+    // The action buttons are kept (hidden) for keyboard/IPC use and are
+    // triggered by clicking anywhere on the card.
     let network_sub = Label::new(None);
     network_sub.add_css_class("result-subtitle");
     network_sub.set_xalign(0.0);
@@ -760,6 +762,8 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
 
     let open_network = dashboard_button("Open");
     let toggle_wifi = dashboard_button("Wi-Fi");
+    open_network.set_visible(false);
+    toggle_wifi.set_visible(false);
     network_row.append(&open_network);
     network_row.append(&toggle_wifi);
 
@@ -771,6 +775,8 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
 
     let open_audio = dashboard_button("Mixer");
     let toggle_mute = dashboard_button("Mute");
+    open_audio.set_visible(false);
+    toggle_mute.set_visible(false);
     audio_row.append(&open_audio);
     audio_row.append(&toggle_mute);
 
@@ -781,12 +787,27 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     media_row.append(&media_sub);
 
     let open_media = dashboard_button("Open");
+    open_media.set_visible(false);
     media_row.append(&open_media);
 
     let open_notifications = dashboard_button("Notify");
     let toggle_dnd = dashboard_button("DND");
     notify_row.append(&open_notifications);
     notify_row.append(&toggle_dnd);
+
+    // Clicking a control card triggers its (hidden) open button.
+    for (card, btn) in [
+        (&network_card, &open_network),
+        (&audio_card, &open_audio),
+        (&media_card, &open_media),
+    ] {
+        let gesture = gtk::GestureClick::new();
+        let btn = btn.clone();
+        gesture.connect_released(move |_, _, _, _| {
+            btn.activate();
+        });
+        card.add_controller(gesture);
+    }
 
     control_row.append(&network_card);
     control_row.append(&audio_card);
@@ -1800,16 +1821,15 @@ pub fn set_dashboard_media_snapshot(view: &DashboardView, snapshot: &MediaSnapsh
         return;
     }
 
-    let playing = snapshot.status.as_deref() == Some("Playing");
-    view.media.set_text(if playing { "Playing" } else { "Paused" });
-
-    let title = snapshot.title.as_deref().unwrap_or("Unknown");
-    let short_title = if title.len() > 20 { &title[..18] } else { title };
+    // Value = track title; sub = "artist · player" (matches mockup).
+    let title = snapshot.title.as_deref().unwrap_or("Unknown track");
+    view.media.set_text(title);
     let player = snapshot.player.as_deref().unwrap_or("MPRIS");
-    let artist_part = snapshot.artist.as_deref()
-        .map(|a| format!("{a}  ·  "))
-        .unwrap_or_default();
-    view.media_sub.set_text(&format!("{artist_part}{short_title}  ·  {player}"));
+    let sub = match snapshot.artist.as_deref() {
+        Some(artist) if !artist.is_empty() => format!("{artist}  ·  {player}"),
+        _ => player.to_string(),
+    };
+    view.media_sub.set_text(&sub);
 }
 
 pub fn set_dashboard_notification_snapshot(view: &DashboardView, snapshot: &NotificationSnapshot) {

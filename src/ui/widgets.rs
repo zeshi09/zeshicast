@@ -268,23 +268,27 @@ pub fn control_card(title: &str, icon_name: &str) -> (GtkBox, Label, GtkBox) {
     card.add_css_class("control-card");
     card.set_hexpand(true);
 
-    // Header: icon box + label
+    // Header: small icon box + label (left-aligned, like the mockup)
     let header = GtkBox::new(Orientation::Horizontal, 8);
 
     let icon_box = GtkBox::new(Orientation::Vertical, 0);
-    icon_box.set_width_request(26);
-    icon_box.set_height_request(26);
+    icon_box.set_size_request(26, 26);
+    icon_box.set_halign(gtk::Align::Start);
+    icon_box.set_valign(gtk::Align::Center);
+    icon_box.set_hexpand(false);
     icon_box.add_css_class("control-card-icon");
-    let icon = super::icons::fa_icon(icon_name, 14);
+    let icon = super::icons::fa_icon(icon_name, 13);
     icon.set_halign(gtk::Align::Center);
     icon.set_valign(gtk::Align::Center);
-    icon.set_hexpand(true);
-    icon.set_vexpand(true);
+    // Must NOT hexpand — it propagates to icon_box and stretches it full-width.
+    icon.set_hexpand(false);
+    icon.set_vexpand(false);
     icon_box.append(&icon);
 
     let title_label = Label::new(Some(title));
     title_label.add_css_class("control-card-heading");
     title_label.set_xalign(0.0);
+    title_label.set_hexpand(true);
     title_label.set_valign(gtk::Align::Center);
 
     header.append(&icon_box);

@@ -13,7 +13,7 @@ mod views;
 mod widgets;
 
 pub use forms::show_form_panel;
-pub use launcher::{GuiState, ensure_ui, present_launcher};
+pub use launcher::{GuiState, ensure_ui, present_launcher, present_launcher_view};
 pub use navigation::{LauncherView, NavigationStack};
 pub use panels::{show_alias_panel, show_extension_browser, show_preferences_editor};
 pub use status_strip::StatusStrip;

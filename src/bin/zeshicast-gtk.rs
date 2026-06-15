@@ -69,11 +69,12 @@ fn main() -> glib::ExitCode {
             }
 
             let daemon = args.iter().any(|arg| arg == "--daemon");
+            let view = parse_view(&args);
             zeshicast::ui::ensure_ui(app, &state, &hold, daemon, configure_layer_shell);
 
             if !daemon {
                 if let Some(state) = state.borrow().as_ref() {
-                    zeshicast::ui::present_launcher(state);
+                    zeshicast::ui::present_launcher_view(state, view.as_deref());
                 }
             }
 
@@ -84,12 +85,62 @@ fn main() -> glib::ExitCode {
     app.run()
 }
 
+/// Resolve a requested start-up view from the command line.
+///
+/// Accepts both `--view <name>` / `--view=<name>` and per-view convenience
+/// flags (`--clipboard`, `--dashboard`, …). Returns the canonical view name
+/// understood by `present_launcher_view`.
+fn parse_view(args: &[String]) -> Option<String> {
+    fn canonical(name: &str) -> Option<&'static str> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "clipboard" | "clip" => Some("clipboard"),
+            "dashboard" | "dash" => Some("dashboard"),
+            "network" | "net" | "wifi" => Some("network"),
+            "media" | "player" | "mpris" => Some("media"),
+            "audio" | "volume" | "vol" => Some("audio"),
+            "ai" | "ai-chat" | "chat" => Some("ai"),
+            "system" | "system-monitor" | "sysmon" | "monitor" => Some("system"),
+            "notifications" | "notify" | "notifs" => Some("notifications"),
+            "emoji" | "emojis" => Some("emoji"),
+            "fonts" | "font" => Some("fonts"),
+            _ => None,
+        }
+    }
+
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if let Some(value) = arg.strip_prefix("--view=") {
+            if let Some(view) = canonical(value) {
+                return Some(view.to_string());
+            }
+        } else if arg == "--view" {
+            if let Some(value) = iter.next() {
+                if let Some(view) = canonical(value) {
+                    return Some(view.to_string());
+                }
+            }
+        } else if let Some(flag) = arg.strip_prefix("--") {
+            if let Some(view) = canonical(flag) {
+                return Some(view.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn help_text() -> &'static str {
     "\
 Usage:
   zeshicast-gtk            Show the launcher window
   zeshicast-gtk --daemon   Start hidden, keep the index warm, record clipboard history
   zeshicast-gtk --quit     Stop the running daemon
+
+Open a specific view directly (works against a running --daemon too):
+  --view <name>            clipboard | dashboard | network | media | audio
+                           ai | system | notifications | emoji | fonts
+  --clipboard, --dashboard, --network, --media, --audio,
+  --ai, --system, --notifications, --emoji, --fonts
+                           Convenience flags equivalent to --view <name>
 
 In the window:
   Enter                   Run selected result (opens form panel for commands with missing args)
