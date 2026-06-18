@@ -57,11 +57,32 @@ struct NotificationState {
 thread_local! {
     static STATE: RefCell<NotificationState> = RefCell::new(NotificationState {
         next_id: 1,
+        dnd: load_persisted_dnd(),
         ..Default::default()
     });
 }
 
 const MAX_HISTORY: usize = 100;
+
+/// DND is the one piece of notification state that must survive daemon restarts,
+/// so we persist it to a tiny file next to the rest of the config.
+fn dnd_state_path() -> std::path::PathBuf {
+    crate::home_dir().join(".config/zeshicast/dnd")
+}
+
+fn load_persisted_dnd() -> bool {
+    std::fs::read_to_string(dnd_state_path())
+        .map(|value| value.trim() == "1")
+        .unwrap_or(false)
+}
+
+fn persist_dnd(dnd: bool) {
+    let path = dnd_state_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, if dnd { "1" } else { "0" });
+}
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -111,6 +132,7 @@ pub fn toggle_dnd() -> bool {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.dnd = !state.dnd;
+        persist_dnd(state.dnd);
         state.dnd
     })
 }

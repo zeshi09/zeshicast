@@ -26,7 +26,9 @@ pub(crate) use config::{
 pub use config::{export_config, import_config};
 #[cfg(test)]
 pub(crate) use placeholders::format_local_time;
-pub(crate) use placeholders::{PlaceholderContext, expand_placeholders};
+pub(crate) use placeholders::{
+    PlaceholderContext, expand_placeholders, expand_placeholders_shell,
+};
 #[cfg(test)]
 pub(crate) use search::apps::clean_desktop_exec;
 pub(crate) use search::apps::{AppEntry, app_action, load_apps, search_apps};
@@ -83,6 +85,10 @@ pub use services::network::{
 pub use services::notifications::{
     NotificationAction, NotificationEntrySnapshot, NotificationSnapshot, clear_notifications,
     close_notification, mark_server_active, notification_snapshot, push_notification, toggle_dnd,
+};
+#[cfg(feature = "gui")]
+pub use services::poll_cache::{
+    cached_audio_snapshot, cached_network_snapshot, start as start_poll_cache,
 };
 pub use services::system_stats::{
     ProcessSummary, SystemSnapshot, system_snapshot, top_processes_by_memory,
@@ -490,7 +496,7 @@ NOTES_ROOT = "{{pref:notes_root}}"
             parse_command_entry(
                 r#"
 name = "Search Man"
-command = "man -k '{{query}}'"
+command = "man -k {{query}}"
 description = "Search manual pages"
 keyword = "man"
 argument_hint = "<term>"
@@ -510,6 +516,7 @@ tags = ["docs", "terminal"]
         let results = search_commands(&entries, "docs", &context);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].category, "Command");
+        // Placeholder values are shell-quoted, so authors omit their own quotes.
         assert_eq!(results[0].value(), "man -k 'docs'");
         assert!(results[0].subtitle.contains("[docs, terminal]"));
     }
@@ -520,7 +527,7 @@ tags = ["docs", "terminal"]
             parse_command_entry(
                 r#"
 name = "GitHub Search"
-command = "xdg-open 'https://github.com/search?q={{query}}'"
+command = "xdg-open https://github.com/search?q={{query}}"
 keyword = "gh"
 argument_hint = "<query>"
 arguments = [
@@ -542,7 +549,7 @@ arguments = [
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].value(),
-            "xdg-open 'https://github.com/search?q=rust gtk'"
+            "xdg-open https://github.com/search?q='rust gtk'"
         );
         assert!(results[0].subtitle.contains("gh <query>"));
     }
@@ -553,7 +560,7 @@ arguments = [
             parse_command_entry(
                 r#"
 name = "Deploy"
-command = "deploy --env {{arg:env}} --service '{{arg:service}}' --force {{arg:force}}"
+command = "deploy --env {{arg:env}} --service {{arg:service}} --force {{arg:force}}"
 keyword = "deploy"
 argument_hint = "<env> <service>"
 arguments = [
@@ -577,8 +584,36 @@ arguments = [
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].value(),
-            "deploy --env prod --service 'api worker' --force false"
+            "deploy --env 'prod' --service 'api worker' --force 'false'"
         );
+    }
+
+    #[test]
+    fn command_placeholders_neutralize_shell_injection() {
+        let entries = vec![
+            parse_command_entry(
+                r#"
+name = "Echo"
+command = "echo {{query}}"
+keyword = "echo"
+argument_hint = "<text>"
+"#,
+            )
+            .unwrap(),
+        ];
+        let context = PlaceholderContext {
+            query: String::new(),
+            clipboard: String::new(),
+            args: HashMap::new(),
+            preferences: HashMap::new(),
+            now: UNIX_EPOCH,
+        };
+
+        let results = search_commands(&entries, "echo $(rm -rf ~); reboot", &context);
+        assert_eq!(results.len(), 1);
+        // The malicious payload is contained inside a single shell-quoted token,
+        // so `sh -c` treats it as literal text rather than commands to run.
+        assert_eq!(results[0].value(), "echo '$(rm -rf ~); reboot'");
     }
 
     #[test]
@@ -616,7 +651,7 @@ arguments = [
             parse_command_entry(
                 r#"
 name = "Open Workspace"
-command = "xdg-open '{{pref:workspace}}/{{arg:project}}'"
+command = "xdg-open {{pref:workspace}}/{{arg:project}}"
 keyword = "ws"
 arguments = [
   { name = "project", type = "text", required = true }
@@ -638,7 +673,8 @@ workspace = "~/Code"
 
         let results = search_commands(&entries, "ws zeshicast", &context);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].value(), "xdg-open '/src/zeshicast'");
+        // Each value is independently quoted; shell concatenates the tokens.
+        assert_eq!(results[0].value(), "xdg-open '/src'/'zeshicast'");
     }
 
     #[test]

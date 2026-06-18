@@ -173,11 +173,18 @@ impl Action {
             ActionKind::Copy(text) => copy_to_clipboard(text),
             ActionKind::Shell(command) => spawn_shell(command),
             ActionKind::HttpCopy(req) => {
-                if let Some(result) = execute_http_request(req) {
-                    copy_to_clipboard(&result);
-                } else {
-                    eprintln!("http request failed");
-                }
+                // Network round-trips (translate / OpenAI / Ollama) can take
+                // seconds. Run them off the caller's thread so the GUI never
+                // freezes; `copy_to_clipboard` shells out to wl-copy/xclip and is
+                // safe to call from a worker thread.
+                let req = req.clone();
+                std::thread::spawn(move || {
+                    if let Some(result) = execute_http_request(&req) {
+                        copy_to_clipboard(&result);
+                    } else {
+                        eprintln!("http request failed");
+                    }
+                });
             }
             ActionKind::Launcher(_) => {}
             ActionKind::Form(_) => {}

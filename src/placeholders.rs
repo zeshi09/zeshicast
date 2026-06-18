@@ -31,7 +31,22 @@ impl PlaceholderContext {
     }
 }
 
+/// Expand placeholders verbatim. Use for non-shell contexts (URLs, snippets,
+/// environment values).
 pub(crate) fn expand_placeholders(template: &str, context: &PlaceholderContext) -> String {
+    expand(template, context, false)
+}
+
+/// Expand placeholders for a string that will be passed to `sh -c`. Substituted
+/// values (query, clipboard, arg, pref, …) are POSIX shell-quoted so untrusted
+/// input (e.g. clipboard containing `$(rm -rf ~)` or `; reboot`) cannot break
+/// out into command execution. Command authors therefore must NOT add their own
+/// quotes around placeholders — the quoting is supplied here.
+pub(crate) fn expand_placeholders_shell(template: &str, context: &PlaceholderContext) -> String {
+    expand(template, context, true)
+}
+
+fn expand(template: &str, context: &PlaceholderContext, shell_escape: bool) -> String {
     let mut output = String::new();
     let mut rest = template;
 
@@ -47,7 +62,12 @@ pub(crate) fn expand_placeholders(template: &str, context: &PlaceholderContext) 
         };
 
         let (placeholder, after_end) = after_start.split_at(end);
-        output.push_str(&render_placeholder(placeholder.trim(), context));
+        match render_placeholder(placeholder.trim(), context) {
+            Some(value) if shell_escape => output.push_str(&shell_quote(&value)),
+            Some(value) => output.push_str(&value),
+            // Unknown placeholder: emit it literally, unquoted.
+            None => output.push_str(&format!("{{{{{}}}}}", placeholder.trim())),
+        }
         rest = &after_end[2..];
     }
 
@@ -55,13 +75,29 @@ pub(crate) fn expand_placeholders(template: &str, context: &PlaceholderContext) 
     output
 }
 
-fn render_placeholder(placeholder: &str, context: &PlaceholderContext) -> String {
+/// POSIX single-quote escaping: wrap in `'…'`, turning embedded `'` into `'\''`.
+fn shell_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for ch in value.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// Resolve a placeholder to its value, or `None` if the name is unknown.
+fn render_placeholder(placeholder: &str, context: &PlaceholderContext) -> Option<String> {
     let (name, argument) = placeholder
         .split_once(':')
         .map(|(name, argument)| (name.trim(), Some(argument.trim())))
         .unwrap_or((placeholder, None));
 
-    match name {
+    let value = match name {
         "query" => context.query.clone(),
         "clipboard" => context.clipboard.clone(),
         "arg" => argument
@@ -81,8 +117,9 @@ fn render_placeholder(placeholder: &str, context: &PlaceholderContext) -> String
             .and_then(|expr| Calculator::new(expr).parse().ok())
             .map(format_number)
             .unwrap_or_default(),
-        _ => format!("{{{{{placeholder}}}}}"),
-    }
+        _ => return None,
+    };
+    Some(value)
 }
 
 pub(crate) fn format_local_time(time: SystemTime, format: &str) -> String {

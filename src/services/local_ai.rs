@@ -17,13 +17,17 @@ pub fn ask_local_ai(config: &LocalAiConfig, prompt: &str) -> io::Result<String> 
 
     let endpoint = config.endpoint.trim_end_matches('/');
     let url = format!("{endpoint}/api/generate");
-    let response = ureq::post(&url)
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(60))
+        .build();
+    let response = agent
+        .post(&url)
         .send_json(serde_json::json!({
             "model": config.model,
             "prompt": prompt,
             "stream": false,
         }))
-        .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
+        .map_err(|error| io::Error::other(error.to_string()))?;
 
     let value: serde_json::Value = response
         .into_json()
@@ -50,7 +54,12 @@ pub fn ask_local_ai_streaming(
         let endpoint = config.endpoint.trim_end_matches('/').to_string();
         let url = format!("{endpoint}/api/generate");
 
-        let response = match ureq::post(&url).send_json(serde_json::json!({
+        // Connect timeout only — the response body is a long token stream, so we
+        // must not impose an overall read timeout on it.
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(30))
+            .build();
+        let response = match agent.post(&url).send_json(serde_json::json!({
             "model": config.model,
             "prompt": prompt,
             "stream": true,

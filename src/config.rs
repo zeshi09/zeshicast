@@ -21,18 +21,127 @@ pub fn export_config(config_dir: &Path, dest: &Path) -> io::Result<()> {
 }
 
 pub fn import_config(src: &Path, config_dir: &Path) -> io::Result<()> {
-    fs::create_dir_all(config_dir)?;
-    let status = Command::new("tar")
-        .args(["-xzf"])
-        .arg(src)
-        .arg("-C")
-        .arg(config_dir.parent().unwrap_or(config_dir))
-        .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::new(io::ErrorKind::Other, "tar import failed"))
+    // Untrusted archive: validate the member list *before* extracting, extract
+    // into an isolated staging dir, reject symlinks, then atomically swap. This
+    // prevents path traversal (`../`, absolute paths) and symlink write-through
+    // from clobbering files outside `config_dir`.
+    validate_archive_members(src)?;
+
+    let parent = config_dir.parent().unwrap_or(config_dir);
+    fs::create_dir_all(parent)?;
+    let staging = parent.join(format!(
+        ".zeshicast-import-{}-{}",
+        std::process::id(),
+        unix_now()
+    ));
+    // Clean any stale staging dir, then extract into it.
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging)?;
+
+    let extract = || -> io::Result<()> {
+        let status = Command::new("tar")
+            .args(["-xzf"])
+            .arg(src)
+            .args(["--no-same-owner", "-C"])
+            .arg(&staging)
+            .status()?;
+        if !status.success() {
+            return Err(io::Error::other("tar import failed"));
+        }
+        // The validated archive has a single `zeshicast/` root.
+        let imported = staging.join(config_dir.file_name().unwrap_or_default());
+        if !imported.is_dir() {
+            return Err(io::Error::other("archive missing zeshicast/ directory"));
+        }
+        reject_symlinks(&imported)?;
+
+        // Swap into place: move the old config aside, promote the import, drop
+        // the backup. On failure, restore the backup.
+        let backup = parent.join(format!(".zeshicast-backup-{}", unix_now()));
+        let had_old = config_dir.exists();
+        if had_old {
+            fs::rename(config_dir, &backup)?;
+        }
+        match fs::rename(&imported, config_dir) {
+            Ok(()) => {
+                if had_old {
+                    let _ = fs::remove_dir_all(&backup);
+                }
+                Ok(())
+            }
+            Err(err) => {
+                if had_old {
+                    let _ = fs::rename(&backup, config_dir);
+                }
+                Err(err)
+            }
+        }
+    };
+
+    let result = extract();
+    let _ = fs::remove_dir_all(&staging);
+    result
+}
+
+/// Reject archives whose members are absolute, contain a `..` component, or sit
+/// outside a single top-level `zeshicast/` directory.
+fn validate_archive_members(src: &Path) -> io::Result<()> {
+    let output = Command::new("tar").args(["-tzf"]).arg(src).output()?;
+    if !output.status.success() {
+        return Err(io::Error::other("could not read archive"));
     }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    let mut saw_member = false;
+    for raw in listing.lines() {
+        let member = raw.trim_end_matches('/').trim();
+        if member.is_empty() {
+            continue;
+        }
+        saw_member = true;
+        let path = Path::new(member);
+        if path.is_absolute() {
+            return Err(io::Error::other(format!("unsafe absolute path: {member}")));
+        }
+        use std::path::Component;
+        let mut components = path.components();
+        match components.next() {
+            Some(Component::Normal(root)) if root == "zeshicast" => {}
+            _ => {
+                return Err(io::Error::other(format!(
+                    "member outside zeshicast/: {member}"
+                )));
+            }
+        }
+        if path
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+        {
+            return Err(io::Error::other(format!("unsafe path component: {member}")));
+        }
+    }
+    if !saw_member {
+        return Err(io::Error::other("empty archive"));
+    }
+    Ok(())
+}
+
+/// Defense in depth: refuse any symlink in the extracted tree (our exports never
+/// contain symlinks, and a symlink could redirect writes outside config_dir).
+fn reject_symlinks(dir: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            return Err(io::Error::other(format!(
+                "archive contains a symlink: {}",
+                entry.path().display()
+            )));
+        }
+        if file_type.is_dir() {
+            reject_symlinks(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn home_dir() -> PathBuf {
@@ -121,13 +230,6 @@ pub(crate) fn load_frequencies(path: &Path) -> HashMap<String, u32> {
         .collect()
 }
 
-pub(crate) fn write_frequencies(path: &Path, frequencies: &HashMap<String, u32>) -> io::Result<()> {
-    let mut entries: Vec<_> = frequencies.iter().collect();
-    entries.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-    let lines: Vec<String> = entries.iter().map(|(k, v)| format!("{k}:{v}")).collect();
-    write_lines(path, &lines)
-}
-
 pub(crate) fn toml_value_string(value: &toml::Value) -> Option<String> {
     match value {
         toml::Value::String(value) => Some(value.trim().to_string()),
@@ -169,45 +271,7 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn load_clipboard_timestamps(path: &Path) -> HashMap<String, i64> {
-    let Ok(content) = fs::read_to_string(path) else {
-        return HashMap::new();
-    };
-    let Ok(array) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return HashMap::new();
-    };
-    let Some(items) = array.as_array() else {
-        return HashMap::new();
-    };
-    items
-        .iter()
-        .filter_map(|item| {
-            let text = item.get("t")?.as_str()?.to_string();
-            let ts = item.get("ts")?.as_i64()?;
-            Some((text, ts))
-        })
-        .collect()
-}
-
-pub(crate) fn write_clipboard_timestamps(
-    path: &Path,
-    entries: &[String],
-    timestamps: &HashMap<String, i64>,
-) -> io::Result<()> {
-    let array: Vec<serde_json::Value> = entries
-        .iter()
-        .map(|t| {
-            let ts = timestamps.get(t).copied().unwrap_or_else(unix_now);
-            serde_json::json!({"t": t, "ts": ts})
-        })
-        .collect();
-    let content = serde_json::to_string(&array).unwrap_or_else(|_| "[]".to_string());
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, content)
-}
-
+#[cfg(feature = "gui")]
 pub(crate) fn format_time_ago(ts: i64) -> String {
     let now = unix_now();
     let delta = now.saturating_sub(ts);

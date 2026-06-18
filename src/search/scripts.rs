@@ -132,19 +132,12 @@ fn raycast_meta<'a>(comment: &'a str, key: &str) -> Option<&'a str> {
 }
 
 /// Run a script and return its stdout. Used for mode=fullOutput / compact result display.
+#[cfg(feature = "gui")]
 pub(crate) fn run_script_stdout(path: &std::path::Path) -> std::io::Result<String> {
     let output = std::process::Command::new(path)
         .output()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// Parse compact-mode JSON output into actions.
-pub(crate) fn parse_script_json_output(stdout: &str, category: &str) -> Vec<Action> {
-    if serde_json::from_str::<serde_json::Value>(stdout).is_err() {
-        return Vec::new();
-    }
-    crate::search::commands::parse_json_actions(stdout, category, 500)
 }
 
 pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action> {

@@ -11,7 +11,8 @@ use crate::{
     NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext,
     ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SecondaryAction,
     SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
-    app_action, append_alias, expand_placeholders, fuzzy_score, home_dir, load_aliases, load_apps,
+    app_action, append_alias, expand_placeholders, expand_placeholders_shell, fuzzy_score,
+    home_dir, load_aliases, load_apps,
     load_clipboard_history, load_command_entries, load_file_index, load_frequencies, load_lines,
     load_named_values, load_preferences, load_script_entries, normalize_alias,
     search_audio_actions, search_media_actions, search_network_actions,
@@ -191,6 +192,31 @@ pub fn classify_clipboard_text(text: &str) -> ClipboardKind {
 
 impl Zeshicast {
     pub fn load() -> Self {
+        Self::load_inner(true)
+    }
+
+    /// Like `load`, but skips the (potentially slow) filesystem index so the GUI
+    /// can present its window without blocking on a `$HOME` walk. Pair with
+    /// [`build_file_index`](Self::build_file_index) +
+    /// [`set_file_index`](Self::set_file_index) to fill it in on a worker thread.
+    #[cfg(feature = "gui")]
+    pub(crate) fn load_deferred_files() -> Self {
+        Self::load_inner(false)
+    }
+
+    /// Build the filesystem index. Safe to call off the main thread.
+    #[cfg(feature = "gui")]
+    pub(crate) fn build_file_index() -> Vec<FileEntry> {
+        load_file_index(&home_dir())
+    }
+
+    /// Install a filesystem index built elsewhere (see `build_file_index`).
+    #[cfg(feature = "gui")]
+    pub(crate) fn set_file_index(&mut self, files: Vec<FileEntry>) {
+        self.files = files;
+    }
+
+    fn load_inner(index_files: bool) -> Self {
         let home = home_dir();
         let config_dir = home.join(".config/zeshicast");
         let preferences = load_preferences(&config_dir.join("preferences.toml"));
@@ -242,7 +268,11 @@ impl Zeshicast {
                 .collect(),
             recent,
             frequencies,
-            files: load_file_index(&home),
+            files: if index_files {
+                load_file_index(&home)
+            } else {
+                Vec::new()
+            },
             config_dir,
         }
     }
@@ -842,7 +872,7 @@ impl Zeshicast {
             preferences: form.preferences.clone(),
             now: SystemTime::now(),
         };
-        let command = expand_placeholders(&form.command, &context);
+        let command = expand_placeholders_shell(&form.command, &context);
         let env = form
             .env
             .iter()

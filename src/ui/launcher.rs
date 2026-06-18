@@ -94,7 +94,27 @@ fn build_ui(
     hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
     configure_window: WindowConfigurator,
 ) -> GuiState {
-    let launcher = Rc::new(RefCell::new(Zeshicast::load()));
+    // Defer the filesystem index so the window appears immediately instead of
+    // waiting on a `$HOME` walk (up to 10k entries). A worker builds it and
+    // swaps it in; until then file search simply returns no matches.
+    let launcher = Rc::new(RefCell::new(Zeshicast::load_deferred_files()));
+    {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(Zeshicast::build_file_index());
+        });
+        let launcher = Rc::clone(&launcher);
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            match receiver.try_recv() {
+                Ok(files) => {
+                    launcher.borrow_mut().set_file_index(files);
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            }
+        });
+    }
     let results = Rc::new(RefCell::new(Vec::<Action>::new()));
     let current_action = Rc::new(RefCell::new(None::<Action>));
     let action_panel_items = Rc::new(RefCell::new(Vec::<ActionPanelItem>::new()));
@@ -497,6 +517,10 @@ fn build_ui(
     // Media buttons (previous / play-pause / next) are wired to MPRIS over
     // D-Bus inside `media_view`; no duplicate playerctl handlers here.
 
+    // Poll the subprocess-heavy network/audio snapshots on a background thread
+    // so the per-second UI timers below never fork on the main loop.
+    crate::start_poll_cache();
+
     {
         let navigation = navigation.clone();
         let media_view = media_view.clone();
@@ -509,15 +533,15 @@ fn build_ui(
         let last_audio = Rc::new(RefCell::new(crate::AudioSnapshot::default()));
         glib::timeout_add_seconds_local(1, move || {
             if preference_enabled(&launcher, "show_status_strip", true) {
-                status_strip.set_network_snapshot(&crate::network_snapshot());
+                status_strip.set_network_snapshot(&crate::cached_network_snapshot());
                 status_strip.set_battery_snapshot(&crate::battery_snapshot());
-                status_strip.set_audio_snapshot(&crate::audio_snapshot());
+                status_strip.set_audio_snapshot(&crate::cached_audio_snapshot());
                 status_strip.set_media_snapshot(&crate::media_snapshot());
             }
             if navigation.current() == crate::ui::LauncherView::Media {
                 crate::ui::set_media_snapshot(&media_view, &crate::media_snapshot());
             } else if navigation.current() == crate::ui::LauncherView::Audio {
-                let snapshot = crate::audio_snapshot();
+                let snapshot = crate::cached_audio_snapshot();
                 if *last_audio.borrow() != snapshot {
                     *last_audio.borrow_mut() = snapshot.clone();
                     crate::ui::set_audio_snapshot(&audio_view, &snapshot);
@@ -539,7 +563,7 @@ fn build_ui(
         let last_notifications = Rc::new(RefCell::new(crate::NotificationSnapshot::default()));
         glib::timeout_add_seconds_local(1, move || {
             if navigation.current() == crate::ui::LauncherView::Network {
-                let snapshot = crate::network_snapshot();
+                let snapshot = crate::cached_network_snapshot();
                 if *last_network.borrow() != snapshot {
                     *last_network.borrow_mut() = snapshot.clone();
                     crate::ui::set_network_snapshot(&network_list, &snapshot);
@@ -547,13 +571,16 @@ fn build_ui(
             } else if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_network_snapshot(
                     &dashboard_view,
-                    &crate::network_snapshot(),
+                    &crate::cached_network_snapshot(),
                 );
                 crate::ui::set_dashboard_battery_snapshot(
                     &dashboard_view,
                     &crate::battery_snapshot(),
                 );
-                crate::ui::set_dashboard_audio_snapshot(&dashboard_view, &crate::audio_snapshot());
+                crate::ui::set_dashboard_audio_snapshot(
+                    &dashboard_view,
+                    &crate::cached_audio_snapshot(),
+                );
                 crate::ui::set_dashboard_notification_snapshot(
                     &dashboard_view,
                     &crate::notification_snapshot(),

@@ -57,6 +57,14 @@ pub fn clipboard_insert(config_dir: &Path, text: &str) -> Result<()> {
         "INSERT OR REPLACE INTO clipboard (text, added_at) VALUES (?1, ?2)",
         params![text, now()],
     )?;
+    // Keep the table bounded — only the newest entries are ever loaded (LIMIT
+    // 100), so prune the rest to stop the db from growing without bound.
+    conn.execute(
+        "DELETE FROM clipboard WHERE id NOT IN (
+            SELECT id FROM clipboard ORDER BY added_at DESC LIMIT 100
+        )",
+        [],
+    )?;
     Ok(())
 }
 

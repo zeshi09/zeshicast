@@ -279,7 +279,7 @@ name = "Deploy"
 mode = "shell"
 keyword = "deploy"
 argument_hint = "<env> <service>"
-command = "cd '{{pref:workspace}}' && deploy --env {{arg:env}} --service '{{arg:service}}' --force {{arg:force}}"
+command = "cd {{pref:workspace}} && deploy --env {{arg:env}} --service {{arg:service}} --force {{arg:force}}"
 description = "Deploy a service"
 tags = ["work", "devops"]
 icon = "utilities-terminal-symbolic"
@@ -308,6 +308,11 @@ to `prod api worker`, `{{arg:env}}` to `prod`, and `{{arg:service}}` to
 Commands with missing required arguments are shown as disabled warning actions
 until the input is complete. Commands run through `sh -c`.
 
+> **Do not wrap placeholders in your own quotes.** Substituted values
+> (`{{query}}`, `{{clipboard}}`, `{{arg:*}}`, `{{pref:*}}`, …) are automatically
+> shell-quoted before reaching `sh -c`, so untrusted input cannot inject
+> commands. Write `--env {{arg:env}}`, not `--env '{{arg:env}}'`.
+
 `[env]` values are expanded with the same placeholders as `command` and injected
 only into that command process.
 
@@ -321,7 +326,7 @@ name = "Search Docs"
 mode = "json"
 keyword = "docs"
 argument_hint = "<query>"
-command = "my-doc-search '{{query}}'"
+command = "my-doc-search {{query}}"
 arguments = [
   { name = "query", type = "text", required = true }
 ]

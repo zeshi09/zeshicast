@@ -6,5 +6,7 @@ pub mod local_ai;
 pub mod media;
 pub mod network;
 pub mod notifications;
+#[cfg(feature = "gui")]
+pub mod poll_cache;
 pub mod system_stats;
 pub mod thermal;

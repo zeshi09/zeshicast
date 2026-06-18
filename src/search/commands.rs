@@ -6,7 +6,8 @@ use std::process::Command;
 
 use crate::{
     Action, ActionForm, ActionFormField, ActionKind, CommandArgumentKind, MAX_RESULTS,
-    PlaceholderContext, ShellCommand, expand_placeholders, fuzzy_score, normalize_alias,
+    PlaceholderContext, ShellCommand, expand_placeholders, expand_placeholders_shell, fuzzy_score,
+    normalize_alias,
     tagged_subtitle, toml_value_string,
 };
 
@@ -253,7 +254,7 @@ pub(crate) fn search_commands(
                 preferences: command_preferences(entry, &context.preferences),
                 now: context.now,
             };
-            let command = expand_placeholders(&entry.command, &command_context);
+            let command = expand_placeholders_shell(&entry.command, &command_context);
             let env = command_env(entry, &command_context);
             let shell_command = ShellCommand::with_env(command, env);
 
@@ -323,21 +324,54 @@ fn search_json_command(entry: &CommandEntry, command: ShellCommand, score: i32) 
     }
 }
 
+/// JSON-mode commands run synchronously during search (search-as-you-type), so
+/// a slow or hung script would freeze the GTK main loop. Bound that with a hard
+/// timeout: if the script overruns we kill it and report a timeout instead of
+/// blocking the UI indefinitely.
+const JSON_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 fn run_json_command(command: &ShellCommand) -> io::Result<String> {
-    let output = Command::new("sh")
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::Instant;
+
+    let mut child = Command::new("sh")
         .arg("-c")
         .arg(&command.command)
         .envs(&command.env)
-        .output()?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if start.elapsed() >= JSON_COMMAND_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::other("json command timed out"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    };
+
+    let mut stdout = String::new();
+    if let Some(mut out) = child.stdout.take() {
+        out.read_to_string(&mut stdout).ok();
+    }
+
+    if !status.success() {
+        let mut stderr = String::new();
+        if let Some(mut err) = child.stderr.take() {
+            err.read_to_string(&mut stderr).ok();
+        }
         return Err(io::Error::other(
             stderr.trim().chars().take(160).collect::<String>(),
         ));
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(stdout)
 }
 
 pub(crate) fn parse_json_actions(input: &str, category: &str, base_score: i32) -> Vec<Action> {
