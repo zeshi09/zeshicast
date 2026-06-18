@@ -1,10 +1,10 @@
-use crate::{Action, ActionKind, ShellCommand, fuzzy_score};
+use crate::{Action, ActionKind, MediaControl, fuzzy_score};
 
 #[derive(Debug, Clone)]
 struct MediaActionEntry {
     title: &'static str,
     subtitle: &'static str,
-    command: &'static str,
+    control: MediaControl,
     icon_name: &'static str,
 }
 
@@ -38,7 +38,7 @@ pub(crate) fn search_media_actions(query: &str) -> Vec<Action> {
                 Action::new(
                     "Media",
                     entry.title,
-                    ActionKind::Shell(ShellCommand::new(entry.command)),
+                    ActionKind::Media(entry.control),
                     score + if explicit { 260 } else { 30 },
                 )
                 .with_subtitle(entry.subtitle)
@@ -52,26 +52,26 @@ fn media_action_entries() -> Vec<MediaActionEntry> {
     vec![
         MediaActionEntry {
             title: "Play/Pause",
-            subtitle: "Toggle MPRIS playback through playerctl",
-            command: "playerctl play-pause",
+            subtitle: "Toggle playback on the active MPRIS player",
+            control: MediaControl::PlayPause,
             icon_name: "media-playback-start-symbolic",
         },
         MediaActionEntry {
             title: "Next Track",
-            subtitle: "Skip to next MPRIS track through playerctl",
-            command: "playerctl next",
+            subtitle: "Skip to the next MPRIS track",
+            control: MediaControl::Next,
             icon_name: "media-skip-forward-symbolic",
         },
         MediaActionEntry {
             title: "Previous Track",
-            subtitle: "Return to previous MPRIS track through playerctl",
-            command: "playerctl previous",
+            subtitle: "Return to the previous MPRIS track",
+            control: MediaControl::Previous,
             icon_name: "media-skip-backward-symbolic",
         },
         MediaActionEntry {
             title: "Stop Playback",
-            subtitle: "Stop current MPRIS player through playerctl",
-            command: "playerctl stop",
+            subtitle: "Stop the active MPRIS player",
+            control: MediaControl::Stop,
             icon_name: "media-playback-stop-symbolic",
         },
     ]

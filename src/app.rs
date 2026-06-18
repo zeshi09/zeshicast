@@ -43,12 +43,23 @@ pub struct Zeshicast {
     pub(crate) config_dir: PathBuf,
 }
 
+/// Sentinel prefix marking a clipboard history entry as an image. The rest of
+/// the stored value is the path to the cached PNG. The leading SOH control char
+/// keeps it from colliding with any real copied text.
+pub const CLIPBOARD_IMAGE_PREFIX: &str = "\u{1}zeshicast-image:";
+
+/// If `value` is an image entry, return the cached PNG path.
+pub fn clipboard_image_path(value: &str) -> Option<&str> {
+    value.strip_prefix(CLIPBOARD_IMAGE_PREFIX)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipboardKind {
     Text,
     Url,
     Command,
     Code,
+    Image,
 }
 
 impl ClipboardKind {
@@ -58,6 +69,7 @@ impl ClipboardKind {
             Self::Url => "URL",
             Self::Command => "Command",
             Self::Code => "Code",
+            Self::Image => "Image",
         }
     }
 
@@ -67,6 +79,7 @@ impl ClipboardKind {
             Self::Url => "emblem-shared-symbolic",
             Self::Command => "utilities-terminal-symbolic",
             Self::Code => "applications-engineering-symbolic",
+            Self::Image => "image-x-generic-symbolic",
         }
     }
 
@@ -75,6 +88,7 @@ impl ClipboardKind {
             Self::Text => "text/plain;charset=utf-8",
             Self::Url => "text/uri-list",
             Self::Command | Self::Code => "text/plain;charset=utf-8",
+            Self::Image => "image/png",
         }
     }
 }
@@ -97,6 +111,9 @@ pub struct SnippetSummary {
 }
 
 pub fn classify_clipboard_text(text: &str) -> ClipboardKind {
+    if text.starts_with(CLIPBOARD_IMAGE_PREFIX) {
+        return ClipboardKind::Image;
+    }
     let trimmed = text.trim();
     let lower = trimmed.to_lowercase();
     let first_word = trimmed
@@ -538,14 +555,27 @@ impl Zeshicast {
     pub fn list_clipboard_history(&self) -> Vec<ClipboardSummary> {
         self.clipboard_history
             .iter()
-            .map(|entry| ClipboardSummary {
-                preview: crate::clipboard_preview(entry),
-                value: entry.clone(),
-                kind: classify_clipboard_text(entry),
-                size_bytes: entry.len(),
-                timestamp: self.clipboard_timestamps.get(entry).copied(),
+            .map(|entry| {
+                let kind = classify_clipboard_text(entry);
+                let preview = if kind == ClipboardKind::Image {
+                    "Image".to_string()
+                } else {
+                    crate::clipboard_preview(entry)
+                };
+                ClipboardSummary {
+                    preview,
+                    value: entry.clone(),
+                    kind,
+                    size_bytes: entry.len(),
+                    timestamp: self.clipboard_timestamps.get(entry).copied(),
+                }
             })
             .collect()
+    }
+
+    /// Record a captured image (already cached as a PNG at `path`).
+    pub fn add_clipboard_image(&mut self, path: &str) -> io::Result<bool> {
+        self.add_clipboard_text(&format!("{CLIPBOARD_IMAGE_PREFIX}{path}"))
     }
 
     pub fn list_snippets(&self) -> Vec<SnippetSummary> {

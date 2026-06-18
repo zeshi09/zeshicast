@@ -15,7 +15,10 @@ pub use action::{
     SecondaryAction, SecondaryActionKind,
 };
 pub(crate) use action::{ActionKind, HttpRequest, ShellCommand};
-pub use app::{CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary, SnippetSummary, Zeshicast};
+pub use app::{
+    CLIPBOARD_IMAGE_PREFIX, CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary,
+    SnippetSummary, Zeshicast, clipboard_image_path,
+};
 pub(crate) use config::{
     append_alias, home_dir, load_aliases, load_frequencies, load_lines, load_preferences,
     normalize_alias, toml_value_string, unix_now, write_lines, write_preferences,
@@ -66,18 +69,21 @@ pub(crate) use search::{
     load_script_entries,
 };
 pub use services::audio::{
-    AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
+    AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
 };
 pub use services::battery::{BatteryDeviceSnapshot, BatterySnapshot, battery_snapshot};
 pub use services::local_ai::{LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming};
 pub use services::storage as storage_service;
-pub use services::media::{MediaSnapshot, media_snapshot};
+pub use services::media::{MediaControl, MediaSnapshot, media_control, media_snapshot};
 pub use services::compositor::{WorkspaceSnapshot, workspace_snapshot};
 pub use services::network::{
     NetworkInterfaceSnapshot, NetworkSnapshot, VpnConnectionSnapshot, WifiNetworkSnapshot,
     net_speed_mbps, network_snapshot,
 };
-pub use services::notifications::{NotificationSnapshot, notification_snapshot};
+pub use services::notifications::{
+    NotificationAction, NotificationEntrySnapshot, NotificationSnapshot, clear_notifications,
+    close_notification, mark_server_active, notification_snapshot, push_notification, toggle_dnd,
+};
 pub use services::system_stats::{
     ProcessSummary, SystemSnapshot, system_snapshot, top_processes_by_memory,
 };

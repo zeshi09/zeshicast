@@ -1,20 +1,73 @@
 # zeshicast
 
-Raycast-like launcher for Linux, written in Rust. The CLI works without GUI
-dependencies; the GTK4 launcher is behind the `gui` feature.
+Raycast-like launcher for Wayland (built for niri), written in Rust + GTK4.
+The resident daemon is also a **self-contained service layer**: it is its own
+freedesktop **notification daemon** (no swaync/dunst needed), reads media via
+**MPRIS over D-Bus** (no playerctl), and records **text + image** clipboard
+history. The headless `zeshicast` CLI works without any GUI dependency; the
+GTK4 launcher and daemon are behind the `gui` feature.
 
 See [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the
-plan to evolve Zeshicast toward a Vicinae-like Rust/GTK application.
+roadmap.
 
-## Run
+## Install on NixOS (flake)
+
+The flake builds both binaries and ships a NixOS module that runs the daemon
+(warm index + notification server + clipboard capture) as a graphical-session
+systemd **user** service.
+
+```nix
+# flake.nix of your system config
+{
+  inputs.zeshicast.url = "github:zeshi09/zeshicast";
+
+  outputs = { nixpkgs, zeshicast, ... }: {
+    nixosConfigurations.mybox = nixpkgs.lib.nixosSystem {
+      modules = [
+        zeshicast.nixosModules.default
+        { services.zeshicast.enable = true; }
+      ];
+    };
+  };
+}
+```
+
+`nixos-rebuild switch`, then:
 
 ```bash
-cargo run --bin zeshicast -- firefox
-# With layer-shell overlay (Wayland, recommended):
-nix develop -f shell.nix --command cargo run --features gui,layer-shell --bin zeshicast-gtk
-# Without layer-shell (X11 or fallback):
-nix develop -f shell.nix --command cargo run --features gui --bin zeshicast-gtk
+systemctl --user status zeshicast        # the daemon (owns org.freedesktop.Notifications)
+systemctl --user restart zeshicast
 ```
+
+Bind a key in niri to pop the launcher (the daemon shows its window instantly):
+
+```kdl
+// ~/.config/niri/config.kdl
+binds { Mod+Space { spawn "zeshicast-gtk"; } }
+```
+
+> The notification server owns `org.freedesktop.Notifications` — **disable any
+> other notification daemon** (swaync / mako / dunst) or it won't acquire the
+> name. Only one process can own it.
+
+Without the module you can also just `nix run github:zeshi09/zeshicast`
+(launches the GTK launcher), or add `zeshicast.packages.${system}.default` to
+`environment.systemPackages` and bind/spawn the binaries yourself.
+
+## Run from a checkout
+
+```bash
+cargo run --bin zeshicast -- firefox          # headless CLI
+nix build && ./result/bin/zeshicast-gtk       # built GTK launcher
+# Dev (Wayland overlay):
+nix develop --command cargo run --features gui,layer-shell --bin zeshicast-gtk
+# Without layer-shell (fallback):
+nix develop --command cargo run --features gui --bin zeshicast-gtk
+```
+
+> The launcher defaults to `GSK_RENDERER=cairo` (the GTK Vulkan/NGL renderer
+> clips glyph tops on some drivers); override with `GSK_RENDERER=ngl` for GPU
+> rendering.
 
 Results carry Raycast-style metadata: title, subtitle, category, score and icon.
 The GTK launcher renders this as a compact command list with action buttons.
@@ -36,8 +89,8 @@ system power              Power off
 proc firefox              Search processes and build kill actions
 audio vol                 Volume up/down, mute, mic mute
 audio brightness          Brightness up/down
-media next                MPRIS playback controls through playerctl
-notify dnd                Notification/DND actions for swaync or dunst
+media next                MPRIS playback controls over D-Bus
+notify dnd                Notification history and DND (built-in D-Bus server)
 net wifi                  Toggle Wi-Fi, open network settings
 niri screenshot           Interactive screenshot (region)
 niri workspace            Focus next/previous workspace, move window
@@ -72,13 +125,24 @@ Ctrl+B       Extension browser — list all custom commands
 Ctrl+,       Preferences editor — AI endpoint, model, translate settings
 Ctrl+D       Dashboard — clock, system, network, audio, media, notifications
 Ctrl+T       System Monitor — load, memory, disk, temperatures, top processes
-Ctrl+N       Network view — interfaces, Wi-Fi, VPN, DNS
-Ctrl+M       Media view — playerctl/MPRIS playback
-Ctrl+U       Notifications view — DND, close all, dunst history when available
+Ctrl+N       Network view — Ethernet + Wi-Fi, connect/disconnect
+Ctrl+M       Media view — MPRIS over D-Bus, album art, scrubber, controls
+Ctrl+O       Audio mixer — output/input devices and volumes
+Ctrl+U       Notifications view — history, DND, clear all, per-item dismiss
 Ctrl+I       AI Chat — local prompt/answer view
-Ctrl+H       Clipboard history — copy, delete, clear recorded items
+Ctrl+H       Clipboard history — text + images, copy, delete, clear
 Esc          Hide (daemon mode) or quit
 Up/Down      Move selection
+```
+
+## Open a view directly
+
+Convenience flags jump straight to a view (works against the running daemon):
+
+```bash
+zeshicast-gtk --view clipboard      # or --clipboard
+zeshicast-gtk --view dashboard      # --dashboard, --network, --media, --audio,
+zeshicast-gtk --view media          # --ai, --system, --notifications, --emoji, --fonts
 ```
 
 ## CLI usage
@@ -92,16 +156,22 @@ zeshicast --import file.tar.gz  Import config from tar.gz
 
 ## Daemon mode
 
-A hidden resident GTK process keeps the launcher index warm for instant display
-and records text clipboard changes into the searchable clipboard history.
+A hidden resident GTK process keeps the launcher index warm for instant display,
+**owns `org.freedesktop.Notifications`** (records every notification into the
+history) and records clipboard changes (text + images). On NixOS use the flake
+module above; otherwise run it directly:
 
 ```bash
-nix develop -f shell.nix --command cargo run --features gui,layer-shell --bin zeshicast-gtk -- --daemon
-nix develop -f shell.nix --command cargo run --features gui,layer-shell --bin zeshicast-gtk
-nix develop -f shell.nix --command cargo run --features gui,layer-shell --bin zeshicast-gtk -- --quit
+zeshicast-gtk --daemon    # start the resident daemon
+zeshicast-gtk             # pop the launcher window (forwards to the daemon)
+zeshicast-gtk --quit      # stop the daemon
 ```
 
-## User install
+Clipboard/notification capture happens while the daemon holds the session; the
+launcher is a single GApplication instance, so re-invoking `zeshicast-gtk` just
+shows the existing daemon's window.
+
+## Non-Nix install
 
 ```bash
 scripts/install-user.sh --enable-daemon --start-daemon
@@ -148,7 +218,8 @@ settings.
 ~/.config/zeshicast/snippets.txt     lines: Name | tag1,tag2 = text to copy
 ~/.config/zeshicast/commands/*.toml  custom shell commands
 ~/.config/zeshicast/preferences.toml global extension preferences
-~/.config/zeshicast/clipboard.txt    updated automatically by GTK daemon
+~/.config/zeshicast/*.sqlite         clipboard/usage/app-index cache (auto)
+~/.cache/zeshicast/clipboard/        cached clipboard images (auto)
 ~/.config/zeshicast/aliases.txt      lines: ff = Firefox
 ~/.config/zeshicast/pins.txt         lines: App:Firefox or Firefox
 ~/.config/zeshicast/recent.txt       updated automatically
@@ -304,7 +375,7 @@ network_enabled    = "true"
 media_enabled      = "true"
 notifications_enabled = "true"
 ai_enabled         = "true"
-dashboard_poll_interval_ms = "2000"
+dashboard_poll_interval_ms = "1000"
 ollama_endpoint    = "http://localhost:11434"
 ollama_model       = "gemma4:e4b"
 ai_endpoint        = "http://localhost:11434/v1"   # used when ai_provider = "openai"
@@ -313,13 +384,6 @@ ai_api_key         = ""
 translate_endpoint = "https://libretranslate.com"
 translate_api_key  = ""
 translate_target   = "en"
-```
-
-## Nix package
-
-```bash
-nix build
-./result/bin/zeshicast-gtk
 ```
 
 ## Implemented features
@@ -331,7 +395,7 @@ Snippets           copy-to-clipboard text templates with placeholders
 Custom commands    shell and JSON modes, typed args, forms, env, preferences
 User memory        recent actions, pins, aliases
 Action UX          primary action, secondary actions, action panel (Ctrl+K)
-Clipboard history  GTK daemon records changes; searchable via clip prefix
+Clipboard history  GTK daemon records text + images; thumbnails, copy-back
 Placeholders       {{query}} {{arg:}} {{pref:}} {{clipboard}} {{date}} {{calc:}}
 System actions     lock, suspend, settings, restart, power off
 Process actions    search running processes, build kill actions
@@ -345,8 +409,8 @@ AI chat            Ollama-compatible local endpoint, OpenAI-compatible quick mod
 Dashboard          optional control view with clock, system, network, audio, media, notifications
 System monitor     /proc stats, thermal sensors, top process list, terminate selected process
 Network view       interfaces, IP/MAC copy, DNS, nmcli Wi-Fi/VPN snapshot and actions
-Media view         playerctl/MPRIS status and previous/play-pause/next controls
-Notifications      swaync/dunst state, DND/close-all actions, dunst history parsing
+Media view         MPRIS over D-Bus — album art, scrubber, prev/seek/play/next
+Notifications      built-in freedesktop D-Bus server — history, DND, dismiss/clear
 Translation        LibreTranslate with language suffix (trans hello in ru)
 GTK4 launcher      Layer-shell overlay (Wayland), daemon mode, clipboard monitor
 Command forms      GTK form panel for commands with missing required arguments
@@ -355,5 +419,5 @@ Preferences editor Ctrl+, — edit AI/translate settings without touching files
 Permission field   permissions = ["shell","network","filesystem"] in command TOML
 Import/export      zeshicast --export / --import for config backup and migration
 Example extensions packaging/examples/commands/ — github, weather, dict, docker, git
-Nix package        flake.nix packages.default for nix build
+Nix flake          packages, apps (nix run), NixOS module (systemd user service)
 ```

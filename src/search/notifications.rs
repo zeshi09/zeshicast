@@ -1,10 +1,10 @@
-use crate::{Action, ActionKind, ShellCommand, fuzzy_score};
+use crate::{Action, ActionKind, NotificationAction, fuzzy_score};
 
 #[derive(Debug, Clone)]
 struct NotificationActionEntry {
     title: &'static str,
     subtitle: &'static str,
-    command: &'static str,
+    action: NotificationAction,
     icon_name: &'static str,
 }
 
@@ -40,7 +40,7 @@ pub(crate) fn search_notification_actions(query: &str) -> Vec<Action> {
                 Action::new(
                     "Notifications",
                     entry.title,
-                    ActionKind::Shell(ShellCommand::new(entry.command)),
+                    ActionKind::Notification(entry.action),
                     score + if explicit { 260 } else { 30 },
                 )
                 .with_subtitle(entry.subtitle)
@@ -54,21 +54,15 @@ fn notification_action_entries() -> Vec<NotificationActionEntry> {
     vec![
         NotificationActionEntry {
             title: "Toggle Do Not Disturb",
-            subtitle: "Toggle DND in swaync or dunst",
-            command: "swaync-client --toggle-dnd || dunstctl set-paused toggle",
+            subtitle: "Pause or resume notifications",
+            action: NotificationAction::ToggleDnd,
             icon_name: "notifications-disabled-symbolic",
         },
         NotificationActionEntry {
-            title: "Close All Notifications",
-            subtitle: "Dismiss visible notifications in swaync or dunst",
-            command: "swaync-client --close-all || dunstctl close-all",
+            title: "Clear All Notifications",
+            subtitle: "Dismiss all notifications from history",
+            action: NotificationAction::ClearAll,
             icon_name: "edit-clear-all-symbolic",
-        },
-        NotificationActionEntry {
-            title: "Open Notification Panel",
-            subtitle: "Open notification panel when swaync is available",
-            command: "swaync-client --toggle-panel",
-            icon_name: "preferences-system-notifications-symbolic",
         },
     ]
 }

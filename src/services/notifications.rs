@@ -1,7 +1,4 @@
-use std::io;
-use std::process::Command;
-
-use serde_json::Value;
+use std::cell::RefCell;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NotificationSnapshot {
@@ -17,6 +14,13 @@ impl NotificationSnapshot {
     }
 }
 
+/// A notification command-center action routed to our own store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationAction {
+    ToggleDnd,
+    ClearAll,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationEntrySnapshot {
     pub id: Option<u32>,
@@ -26,199 +30,132 @@ pub struct NotificationEntrySnapshot {
     pub timestamp: Option<String>,
 }
 
-pub fn notification_snapshot() -> NotificationSnapshot {
-    swaync_snapshot()
-        .or_else(|_| dunst_snapshot())
+// ── Internal store ───────────────────────────────────────────────────────────
+//
+// zeshicast is the notification daemon: it owns `org.freedesktop.Notifications`
+// (see ui/notify_server.rs) and records every incoming notification here. No
+// external daemon (swaync/dunst) is involved. Everything lives on the GLib main
+// thread, so a thread-local store is enough.
+
+#[derive(Clone)]
+struct StoredNotification {
+    id: u32,
+    app_name: String,
+    summary: String,
+    body: String,
+    received_at: u64,
+}
+
+#[derive(Default)]
+struct NotificationState {
+    entries: Vec<StoredNotification>,
+    dnd: bool,
+    next_id: u32,
+    running: bool,
+}
+
+thread_local! {
+    static STATE: RefCell<NotificationState> = RefCell::new(NotificationState {
+        next_id: 1,
+        ..Default::default()
+    });
+}
+
+const MAX_HISTORY: usize = 100;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
+        .as_secs()
 }
 
-fn swaync_snapshot() -> io::Result<NotificationSnapshot> {
-    let count = command_stdout("swaync-client", &["--count"])
-        .ok()
-        .and_then(|output| parse_first_u32(&output));
-    let dnd = command_stdout("swaync-client", &["--get-dnd"])
-        .ok()
-        .and_then(|output| parse_boolish(&output));
-    let history = command_stdout("swaync-client", &["-l"])
-        .ok()
-        .and_then(|output| parse_swaync_history(&output).ok())
-        .unwrap_or_default();
-
-    if count.is_none() && dnd.is_none() && history.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "swaync-client unavailable",
-        ));
-    }
-
-    Ok(NotificationSnapshot {
-        backend: Some("swaync".to_string()),
-        count,
-        dnd,
-        history,
+/// Record an incoming notification. Reuses `replaces_id` when non-zero (the
+/// notification spec's replacement semantics); returns the resolved id.
+pub fn push_notification(app_name: &str, summary: &str, body: &str, replaces_id: u32) -> u32 {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let id = if replaces_id != 0 {
+            replaces_id
+        } else {
+            let id = state.next_id;
+            state.next_id = state.next_id.checked_add(1).unwrap_or(1);
+            id
+        };
+        state.entries.retain(|entry| entry.id != id);
+        state.entries.insert(
+            0,
+            StoredNotification {
+                id,
+                app_name: app_name.to_string(),
+                summary: summary.to_string(),
+                body: body.to_string(),
+                received_at: now_secs(),
+            },
+        );
+        state.entries.truncate(MAX_HISTORY);
+        id
     })
 }
 
-fn parse_swaync_history(output: &str) -> serde_json::Result<Vec<NotificationEntrySnapshot>> {
-    let value = serde_json::from_str::<Value>(output)?;
-    let mut history = Vec::new();
-    collect_swaync_notifications(&value, &mut history);
-    Ok(history)
+pub fn close_notification(id: u32) {
+    STATE.with(|state| state.borrow_mut().entries.retain(|entry| entry.id != id));
 }
 
-fn collect_swaync_notifications(value: &Value, history: &mut Vec<NotificationEntrySnapshot>) {
-    match value {
-        Value::Object(object) => {
-            // A notification object carries a summary (and usually an id).
-            if let Some(summary) = object.get("summary").and_then(variant_string) {
-                let timestamp = object
-                    .get("time")
-                    .or_else(|| object.get("timestamp"))
-                    .and_then(Value::as_u64)
-                    .map(format_notif_time);
-                history.push(NotificationEntrySnapshot {
-                    id: object.get("id").and_then(Value::as_u64).map(|v| v as u32),
-                    app_name: object
-                        .get("app_name")
-                        .or_else(|| object.get("appname"))
-                        .and_then(variant_string),
-                    summary,
-                    body: object.get("body").and_then(variant_string),
-                    timestamp,
-                });
-                return;
-            }
-
-            for child in object.values() {
-                collect_swaync_notifications(child, history);
-            }
-        }
-        Value::Array(items) => {
-            for child in items {
-                collect_swaync_notifications(child, history);
-            }
-        }
-        _ => {}
-    }
+pub fn clear_notifications() {
+    STATE.with(|state| state.borrow_mut().entries.clear());
 }
 
-fn dunst_snapshot() -> io::Result<NotificationSnapshot> {
-    let count = command_stdout("dunstctl", &["count", "history"])
-        .ok()
-        .and_then(|output| parse_first_u32(&output));
-    let dnd = command_stdout("dunstctl", &["is-paused"])
-        .ok()
-        .and_then(|output| parse_boolish(&output));
-    let history = command_stdout("dunstctl", &["history"])
-        .ok()
-        .and_then(|output| parse_dunst_history(&output).ok())
-        .unwrap_or_default();
-
-    if count.is_none() && dnd.is_none() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "dunstctl unavailable",
-        ));
-    }
-
-    Ok(NotificationSnapshot {
-        backend: Some("dunst".to_string()),
-        count,
-        dnd,
-        history,
+/// Flip Do-Not-Disturb; returns the new state.
+pub fn toggle_dnd() -> bool {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        state.dnd = !state.dnd;
+        state.dnd
     })
 }
 
-fn command_stdout(program: &str, args: &[&str]) -> io::Result<String> {
-    let output = Command::new(program).args(args).output()?;
-    if !output.status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "command failed"));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+/// Marks the D-Bus server as active so the UI reports a working backend.
+pub fn mark_server_active() {
+    STATE.with(|state| state.borrow_mut().running = true);
 }
 
-fn parse_first_u32(output: &str) -> Option<u32> {
-    output
-        .split(|character: char| !character.is_ascii_digit())
-        .find(|part| !part.is_empty())
-        .and_then(|part| part.parse().ok())
-}
-
-fn parse_boolish(output: &str) -> Option<bool> {
-    match output.trim().to_ascii_lowercase().as_str() {
-        "true" | "yes" | "on" | "1" => Some(true),
-        "false" | "no" | "off" | "0" => Some(false),
-        _ => None,
-    }
-}
-
-fn parse_dunst_history(output: &str) -> serde_json::Result<Vec<NotificationEntrySnapshot>> {
-    let value = serde_json::from_str::<Value>(output)?;
-    let mut history = Vec::new();
-    collect_dunst_notifications(&value, &mut history);
-    Ok(history)
-}
-
-fn collect_dunst_notifications(value: &Value, history: &mut Vec<NotificationEntrySnapshot>) {
-    match value {
-        Value::Object(object) => {
-            if let Some(summary) = object.get("summary").and_then(variant_string) {
-                let timestamp = object
-                    .get("timestamp")
-                    .and_then(|v| {
-                        v.as_u64()
-                            .or_else(|| v.get("data").and_then(Value::as_u64))
-                    })
-                    .map(format_notif_time);
-                history.push(NotificationEntrySnapshot {
-                    id: object
-                        .get("id")
-                        .and_then(|v| v.as_u64().or_else(|| v.get("data").and_then(Value::as_u64)))
-                        .map(|v| v as u32),
-                    app_name: object.get("appname").and_then(variant_string),
-                    summary,
-                    body: object.get("body").and_then(variant_string),
-                    timestamp,
-                });
-                return;
-            }
-
-            for child in object.values() {
-                collect_dunst_notifications(child, history);
-            }
+pub fn notification_snapshot() -> NotificationSnapshot {
+    STATE.with(|state| {
+        let state = state.borrow();
+        if !state.running {
+            return NotificationSnapshot::default();
         }
-        Value::Array(items) => {
-            for child in items {
-                collect_dunst_notifications(child, history);
-            }
+        NotificationSnapshot {
+            backend: Some("zeshicast".to_string()),
+            count: Some(state.entries.len() as u32),
+            dnd: Some(state.dnd),
+            history: state
+                .entries
+                .iter()
+                .map(|entry| NotificationEntrySnapshot {
+                    id: Some(entry.id),
+                    app_name: non_empty_string(&entry.app_name),
+                    summary: entry.summary.clone(),
+                    body: non_empty_string(&entry.body),
+                    timestamp: Some(format_notif_time(entry.received_at)),
+                })
+                .collect(),
         }
-        _ => {}
-    }
+    })
 }
 
 fn format_notif_time(unix_secs: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let diff = now.saturating_sub(unix_secs);
-    if diff < 60 { "now".to_string() }
-    else if diff < 3600 { format!("{}m", diff / 60) }
-    else if diff < 86400 { format!("{}h", diff / 3600) }
-    else { format!("{}d", diff / 86400) }
-}
-
-fn variant_string(value: &Value) -> Option<String> {
-    if let Some(text) = value.as_str() {
-        return non_empty_string(text);
+    let diff = now_secs().saturating_sub(unix_secs);
+    if diff < 60 {
+        "now".to_string()
+    } else if diff < 3600 {
+        format!("{}m", diff / 60)
+    } else if diff < 86400 {
+        format!("{}h", diff / 3600)
+    } else {
+        format!("{}d", diff / 86400)
     }
-
-    let object = value.as_object()?;
-    object
-        .get("data")
-        .and_then(Value::as_str)
-        .or_else(|| object.get("value").and_then(Value::as_str))
-        .and_then(non_empty_string)
 }
 
 fn non_empty_string(value: &str) -> Option<String> {
@@ -231,42 +168,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn count_parser_extracts_first_number() {
-        assert_eq!(parse_first_u32("12"), Some(12));
-        assert_eq!(parse_first_u32("count: 7 notifications"), Some(7));
-        assert_eq!(parse_first_u32("none"), None);
+    fn store_records_newest_first_and_closes() {
+        mark_server_active();
+        let _first = push_notification("Mail", "New message", "Project update", 0);
+        let second = push_notification("Chat", "Hi there", "", 0);
+
+        let snapshot = notification_snapshot();
+        assert_eq!(snapshot.backend.as_deref(), Some("zeshicast"));
+        assert_eq!(snapshot.count, Some(2));
+        assert_eq!(snapshot.history[0].summary, "Hi there");
+        assert_eq!(snapshot.history[0].body, None);
+        assert_eq!(snapshot.history[1].app_name.as_deref(), Some("Mail"));
+
+        close_notification(second);
+        let snapshot = notification_snapshot();
+        assert_eq!(snapshot.count, Some(1));
+        assert_eq!(snapshot.history[0].summary, "New message");
     }
 
     #[test]
-    fn boolish_parser_handles_common_outputs() {
-        assert_eq!(parse_boolish("true"), Some(true));
-        assert_eq!(parse_boolish("off"), Some(false));
-        assert_eq!(parse_boolish("unknown"), None);
+    fn replaces_id_updates_in_place() {
+        let id = push_notification("App", "First", "", 0);
+        let same = push_notification("App", "Second", "", id);
+        assert_eq!(id, same);
+        mark_server_active();
+        assert_eq!(notification_snapshot().count, Some(1));
+        assert_eq!(notification_snapshot().history[0].summary, "Second");
     }
 
     #[test]
-    fn dunst_history_parser_extracts_variant_objects() {
-        let history = parse_dunst_history(
-            r#"{
-              "type": "aa{sv}",
-              "data": [[{
-                "appname": {"type": "s", "data": "Mail"},
-                "summary": {"type": "s", "data": "New message"},
-                "body": {"type": "s", "data": "Project update"}
-              }]]
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            history,
-            vec![NotificationEntrySnapshot {
-                id: None,
-                app_name: Some("Mail".to_string()),
-                summary: "New message".to_string(),
-                body: Some("Project update".to_string()),
-                timestamp: None,
-            }]
-        );
+    fn dnd_toggles() {
+        assert!(toggle_dnd());
+        assert!(!toggle_dnd());
     }
 }

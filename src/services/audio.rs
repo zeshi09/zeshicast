@@ -5,6 +5,18 @@ pub struct AudioSnapshot {
     pub output: Option<AudioDeviceSnapshot>,
     pub input: Option<AudioDeviceSnapshot>,
     pub streams: Vec<AudioStreamSnapshot>,
+    /// All available output (sink) devices, default flagged.
+    pub output_devices: Vec<AudioDeviceOption>,
+    /// All available input (source) devices, default flagged.
+    pub input_devices: Vec<AudioDeviceOption>,
+}
+
+/// A selectable audio device (sink or source) from `wpctl status`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDeviceOption {
+    pub id: Option<u32>,
+    pub name: String,
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +46,48 @@ pub fn audio_snapshot() -> AudioSnapshot {
             device
         }),
         streams: parse_wpctl_streams(&status),
+        output_devices: parse_wpctl_status_devices(&status, "Sinks"),
+        input_devices: parse_wpctl_status_devices(&status, "Sources"),
     }
+}
+
+/// Parse all device rows under a `wpctl status` section (e.g. "Sinks" /
+/// "Sources"), flagging the default one (marked with `*`).
+fn parse_wpctl_status_devices(output: &str, section: &str) -> Vec<AudioDeviceOption> {
+    let mut devices = Vec::new();
+    let mut in_audio = false;
+    let mut in_section = false;
+
+    for line in output.lines() {
+        // Top-level headers ("Audio", "Video", …) sit flush-left. `wpctl status`
+        // repeats Sinks/Sources under Video, so scope strictly to the Audio tree.
+        if !line.is_empty() && !line.starts_with(|c: char| c.is_whitespace()) {
+            in_audio = line.trim() == "Audio";
+            in_section = false;
+            continue;
+        }
+
+        let trimmed = clean_wpctl_tree_prefix(line);
+        if trimmed.ends_with(':') {
+            in_section = in_audio && trimmed.trim_end_matches(':') == section;
+            continue;
+        }
+
+        if !in_section || trimmed.is_empty() || !trimmed.contains('.') {
+            continue;
+        }
+
+        let is_default = trimmed.starts_with('*');
+        if let Some((id, name, _, _)) = parse_wpctl_node_line(trimmed) {
+            devices.push(AudioDeviceOption {
+                id,
+                name,
+                is_default,
+            });
+        }
+    }
+
+    devices
 }
 
 fn read_wpctl_status() -> Option<String> {
@@ -178,6 +231,38 @@ mod tests {
                 muted: true,
             })
         );
+    }
+
+    #[test]
+    fn wpctl_status_parser_enumerates_all_devices() {
+        let output = r#"
+Audio
+ ├─ Sinks:
+ │  *   48. Creative Stage SE Pro [vol: 0.60]
+ │      50. HDMI Output [vol: 0.40]
+ ├─ Sources:
+ │  *   49. fifine Microphone Pro [vol: 1.00]
+ └─ Streams:
+        73. Zed [vol: 0.42]
+Video
+ ├─ Sinks:
+ ├─ Sources:
+ │  *   87. Web-camera DQ5MF3F1 (V4L2)
+"#;
+
+        let sinks = parse_wpctl_status_devices(output, "Sinks");
+        assert_eq!(sinks.len(), 2);
+        assert_eq!(sinks[0].name, "Creative Stage SE Pro");
+        assert!(sinks[0].is_default);
+        assert_eq!(sinks[0].id, Some(48));
+        assert_eq!(sinks[1].name, "HDMI Output");
+        assert!(!sinks[1].is_default);
+
+        // The Video tree's Sources (webcam) must NOT leak into audio inputs.
+        let sources = parse_wpctl_status_devices(output, "Sources");
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].name, "fifine Microphone Pro");
+        assert!(sources[0].is_default);
     }
 
     #[test]

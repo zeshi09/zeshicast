@@ -102,6 +102,7 @@ fn build_ui(
     let clipboard_items = Rc::new(RefCell::new(Vec::<ClipboardSummary>::new()));
     let snippet_items = Rc::new(RefCell::new(Vec::<SnippetSummary>::new()));
     install_clipboard_monitor(&launcher);
+    super::notify_server::install_notification_server();
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -493,26 +494,8 @@ fn build_ui(
         });
     }
 
-    {
-        let media_view = media_view.clone();
-        media_view.previous.clone().connect_clicked(move |_| {
-            crate::spawn_command("playerctl", &["previous"]);
-        });
-    }
-
-    {
-        let media_view = media_view.clone();
-        media_view.play_pause.clone().connect_clicked(move |_| {
-            crate::spawn_command("playerctl", &["play-pause"]);
-        });
-    }
-
-    {
-        let media_view = media_view.clone();
-        media_view.next.clone().connect_clicked(move |_| {
-            crate::spawn_command("playerctl", &["next"]);
-        });
-    }
+    // Media buttons (previous / play-pause / next) are wired to MPRIS over
+    // D-Bus inside `media_view`; no duplicate playerctl handlers here.
 
     {
         let navigation = navigation.clone();
@@ -521,7 +504,10 @@ fn build_ui(
         let dashboard_view = dashboard_view.clone();
         let status_strip = status_strip.clone();
         let launcher = Rc::clone(&launcher);
-        glib::timeout_add_seconds_local(5, move || {
+        // Re-render the audio device list only when it actually changed, so the
+        // 1s tick doesn't rebuild (and visibly flicker) the list every second.
+        let last_audio = Rc::new(RefCell::new(crate::AudioSnapshot::default()));
+        glib::timeout_add_seconds_local(1, move || {
             if preference_enabled(&launcher, "show_status_strip", true) {
                 status_strip.set_network_snapshot(&crate::network_snapshot());
                 status_strip.set_battery_snapshot(&crate::battery_snapshot());
@@ -531,7 +517,11 @@ fn build_ui(
             if navigation.current() == crate::ui::LauncherView::Media {
                 crate::ui::set_media_snapshot(&media_view, &crate::media_snapshot());
             } else if navigation.current() == crate::ui::LauncherView::Audio {
-                crate::ui::set_audio_snapshot(&audio_view, &crate::audio_snapshot());
+                let snapshot = crate::audio_snapshot();
+                if *last_audio.borrow() != snapshot {
+                    *last_audio.borrow_mut() = snapshot.clone();
+                    crate::ui::set_audio_snapshot(&audio_view, &snapshot);
+                }
             } else if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_media_snapshot(&dashboard_view, &crate::media_snapshot());
             }
@@ -544,9 +534,16 @@ fn build_ui(
         let network_list = network_view.list.clone();
         let dashboard_view = dashboard_view.clone();
         let notifications_view = notifications_view.clone();
-        glib::timeout_add_seconds_local(5, move || {
+        // Only rebuild these lists when their data changed (no per-second flicker).
+        let last_network = Rc::new(RefCell::new(crate::NetworkSnapshot::default()));
+        let last_notifications = Rc::new(RefCell::new(crate::NotificationSnapshot::default()));
+        glib::timeout_add_seconds_local(1, move || {
             if navigation.current() == crate::ui::LauncherView::Network {
-                crate::ui::set_network_snapshot(&network_list, &crate::network_snapshot());
+                let snapshot = crate::network_snapshot();
+                if *last_network.borrow() != snapshot {
+                    *last_network.borrow_mut() = snapshot.clone();
+                    crate::ui::set_network_snapshot(&network_list, &snapshot);
+                }
             } else if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_network_snapshot(
                     &dashboard_view,
@@ -562,10 +559,11 @@ fn build_ui(
                     &crate::notification_snapshot(),
                 );
             } else if navigation.current() == crate::ui::LauncherView::Notifications {
-                crate::ui::set_notification_snapshot(
-                    &notifications_view,
-                    &crate::notification_snapshot(),
-                );
+                let snapshot = crate::notification_snapshot();
+                if *last_notifications.borrow() != snapshot {
+                    *last_notifications.borrow_mut() = snapshot.clone();
+                    crate::ui::set_notification_snapshot(&notifications_view, &snapshot);
+                }
             }
             glib::ControlFlow::Continue
         });
@@ -576,7 +574,7 @@ fn build_ui(
         let dashboard_view = dashboard_view.clone();
         let system_monitor_view = system_monitor_view.clone();
         let dashboard_poll_interval =
-            preference_duration_ms(&launcher, "dashboard_poll_interval_ms", 2000);
+            preference_duration_ms(&launcher, "dashboard_poll_interval_ms", 1000);
         glib::timeout_add_local(dashboard_poll_interval, move || {
             if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_snapshot(&dashboard_view, &crate::system_snapshot());
@@ -665,9 +663,7 @@ fn build_ui(
 
     {
         dashboard_view.toggle_dnd.clone().connect_clicked(move |_| {
-            crate::spawn_shell(&crate::ShellCommand::new(
-                "swaync-client --toggle-dnd || dunstctl set-paused toggle",
-            ));
+            crate::toggle_dnd();
         });
     }
 
@@ -770,9 +766,7 @@ fn build_ui(
             .toggle_dnd
             .clone()
             .connect_clicked(move |_| {
-                crate::spawn_shell(&crate::ShellCommand::new(
-                    "swaync-client --toggle-dnd || dunstctl set-paused toggle",
-                ));
+                crate::toggle_dnd();
                 crate::ui::set_notification_snapshot(
                     &notifications_view,
                     &crate::notification_snapshot(),
@@ -786,22 +780,11 @@ fn build_ui(
             .close_all
             .clone()
             .connect_clicked(move |_| {
-                crate::spawn_shell(&crate::ShellCommand::new(
-                    "swaync-client --close-all || dunstctl close-all",
-                ));
+                crate::clear_notifications();
                 crate::ui::set_notification_snapshot(
                     &notifications_view,
                     &crate::notification_snapshot(),
                 );
-            });
-    }
-
-    {
-        notifications_view
-            .open_panel
-            .clone()
-            .connect_clicked(move |_| {
-                crate::spawn_command("swaync-client", &["--toggle-panel"]);
             });
     }
 
@@ -901,32 +884,20 @@ fn build_ui(
         });
     }
 
-    {
+    // Auto-save: persist each preference as its field changes (no Save button).
+    // Controls (Switch/Scale/Spin/toggle pills) all funnel their value into the
+    // bound entry, so listening on the entry covers every control type. Initial
+    // values are already set before this wiring, so no spurious save on open.
+    for (key, field) in &preferences_view.fields {
         let launcher = Rc::clone(&launcher);
-        let entry = entry.clone();
-        let action_bar = action_bar.clone();
-        let navigation = navigation.clone();
-        let fields = preferences_view.fields.clone();
         let status_strip = status_strip.clone();
-        preferences_view.save.connect_clicked(move |_| {
-            let mut borrow = launcher.borrow_mut();
-            for (key, field) in &fields {
-                let value = field.text().to_string();
-                if let Err(error) = borrow.set_preference(key.clone(), value) {
-                    eprintln!("failed to save preference {key}: {error}");
-                }
+        let key = key.clone();
+        field.connect_changed(move |field| {
+            let value = field.text().to_string();
+            if let Err(error) = launcher.borrow_mut().set_preference(key.clone(), value) {
+                eprintln!("failed to save preference {key}: {error}");
             }
             apply_status_strip_preferences(&status_strip, &launcher);
-            show_root_view(&navigation, &entry, &action_bar);
-        });
-    }
-
-    {
-        let entry = entry.clone();
-        let action_bar = action_bar.clone();
-        let navigation = navigation.clone();
-        preferences_view.cancel.connect_clicked(move |_| {
-            show_root_view(&navigation, &entry, &action_bar);
         });
     }
 
@@ -1043,13 +1014,68 @@ fn install_clipboard_monitor(launcher: &Rc<RefCell<Zeshicast>>) {
     };
 
     let clipboard = display.clipboard();
-    let last_text = Rc::new(RefCell::new(None::<String>));
+    let last = Rc::new(RefCell::new(None::<String>));
     let launcher = Rc::clone(launcher);
 
-    capture_clipboard_text(&clipboard, &launcher, &last_text);
+    capture_clipboard(&clipboard, &launcher, &last);
 
     clipboard.connect_changed(move |clipboard| {
-        capture_clipboard_text(clipboard, &launcher, &last_text);
+        capture_clipboard(clipboard, &launcher, &last);
+    });
+}
+
+/// Dispatch a clipboard change to image or text capture. Image copies rarely
+/// carry a usable text/plain fallback, so an image, when present, wins.
+fn capture_clipboard(
+    clipboard: &gdk::Clipboard,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    last: &Rc<RefCell<Option<String>>>,
+) {
+    let formats = clipboard.formats();
+    if formats.contain_mime_type("image/png")
+        || formats.contains_type(gdk::Texture::static_type())
+    {
+        capture_clipboard_image(clipboard, launcher, last);
+    } else {
+        capture_clipboard_text(clipboard, launcher, last);
+    }
+}
+
+fn capture_clipboard_image(
+    clipboard: &gdk::Clipboard,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    last: &Rc<RefCell<Option<String>>>,
+) {
+    use std::hash::{Hash, Hasher};
+    let launcher = Rc::clone(launcher);
+    let last = Rc::clone(last);
+    clipboard.read_texture_async(gio::Cancellable::NONE, move |result| {
+        let Ok(Some(texture)) = result else {
+            return;
+        };
+        let png = texture.save_to_png_bytes();
+        let bytes: &[u8] = &png;
+
+        // Content-addressed cache file so identical images dedupe naturally.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        let dir = crate::home_dir().join(".cache/zeshicast/clipboard");
+        let path = dir.join(format!("{:016x}.png", hasher.finish()));
+        if !path.exists()
+            && (std::fs::create_dir_all(&dir).is_err() || std::fs::write(&path, bytes).is_err())
+        {
+            return;
+        }
+
+        let path_str = path.to_string_lossy().into_owned();
+        let value = format!("{}{}", crate::CLIPBOARD_IMAGE_PREFIX, path_str);
+        if last.borrow().as_deref() == Some(value.as_str()) {
+            return;
+        }
+        *last.borrow_mut() = Some(value);
+        if let Err(error) = launcher.borrow_mut().add_clipboard_image(&path_str) {
+            eprintln!("failed to save clipboard image: {error}");
+        }
     });
 }
 
@@ -1395,6 +1421,10 @@ fn handle_key(
         }
         gdk::Key::m if state.contains(gdk::ModifierType::CONTROL_MASK) => {
             show_media_view(navigation, entry, action_bar, media_view);
+            glib::Propagation::Stop
+        }
+        gdk::Key::o if state.contains(gdk::ModifierType::CONTROL_MASK) => {
+            show_audio_view(navigation, entry, action_bar, audio_view);
             glib::Propagation::Stop
         }
         gdk::Key::n if state.contains(gdk::ModifierType::CONTROL_MASK) => {
@@ -1956,7 +1986,28 @@ fn copy_clipboard_row(
     };
     let index = row.index() as usize;
     if let Some(item) = clipboard_items.borrow().get(index) {
-        crate::copy_text(&item.value);
+        if let Some(path) = crate::clipboard_image_path(&item.value) {
+            copy_clipboard_image(path);
+        } else {
+            crate::copy_text(&item.value);
+        }
+    }
+}
+
+/// Put a cached image back on the clipboard as `image/png` (wl-clipboard, with
+/// an xclip fallback) — copying the sentinel string would be useless.
+fn copy_clipboard_image(path: &str) {
+    let spawned = std::fs::File::open(path).ok().and_then(|file| {
+        std::process::Command::new("wl-copy")
+            .args(["--type", "image/png"])
+            .stdin(std::process::Stdio::from(file))
+            .spawn()
+            .ok()
+    });
+    if spawned.is_none() {
+        let _ = std::process::Command::new("xclip")
+            .args(["-selection", "clipboard", "-t", "image/png", "-i", path])
+            .spawn();
     }
 }
 

@@ -101,7 +101,7 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
             ("media_enabled", "Media features"),
             ("notifications_enabled", "Notification features"),
             ("ai_enabled", "AI features"),
-            ("ai_provider", "AI provider (ollama/openai)"),
+            ("ai_provider", "AI provider"),
             ("ollama_endpoint", "Ollama endpoint"),
             ("ollama_model", "Ollama model"),
             ("ai_endpoint", "AI/OpenAI endpoint"),

@@ -71,12 +71,39 @@ pub fn move_selection(list: &ListBox, delta: i32) {
     while let Some(row) = list.row_at_index(next) {
         if row.is_selectable() {
             list.select_row(Some(&row));
+            scroll_row_into_view(list, &row);
             return;
         }
         if next == 0 && delta < 0 {
             return;
         }
         next = (next + delta.signum()).max(0);
+    }
+}
+
+/// Keep the selected row visible. The search entry keeps keyboard focus (so
+/// typing still works), so the ScrolledWindow won't auto-scroll on focus — we
+/// nudge its vertical adjustment manually instead.
+fn scroll_row_into_view(list: &ListBox, row: &ListBoxRow) {
+    let Some(scroller) = list
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .and_downcast::<gtk::ScrolledWindow>()
+    else {
+        return;
+    };
+    let Some(bounds) = row.compute_bounds(list) else {
+        return;
+    };
+    let vadj = scroller.vadjustment();
+    let row_top = bounds.y() as f64;
+    let row_bottom = row_top + bounds.height() as f64;
+    let view_top = vadj.value();
+    let view_bottom = view_top + vadj.page_size();
+
+    if row_top < view_top {
+        vadj.set_value(row_top);
+    } else if row_bottom > view_bottom {
+        vadj.set_value(row_bottom - vadj.page_size());
     }
 }
 
@@ -186,7 +213,8 @@ pub fn result_row(action: &Action) -> ListBoxRow {
 
     let icon = letter_icon(&action.title, 28);
 
-    let text = GtkBox::new(Orientation::Horizontal, 8);
+    // Title above subtitle (stacked), matching the mockup.
+    let text = GtkBox::new(Orientation::Vertical, 1);
     text.set_hexpand(true);
     text.set_valign(gtk::Align::Center);
 
@@ -194,17 +222,14 @@ pub fn result_row(action: &Action) -> ListBoxRow {
     title.add_css_class("result-title");
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     title.set_xalign(0.0);
-    title.set_hexpand(false);
-    title.set_margin_top(1);
-    title.set_margin_bottom(1);
+    title.set_hexpand(true);
 
     let subtitle = Label::new(Some(&action.subtitle));
     subtitle.add_css_class("result-subtitle");
     subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
     subtitle.set_xalign(0.0);
     subtitle.set_hexpand(true);
-    subtitle.set_margin_top(1);
-    subtitle.set_margin_bottom(1);
+    subtitle.set_visible(!action.subtitle.is_empty());
 
     text.append(&title);
     text.append(&subtitle);
@@ -276,13 +301,25 @@ pub fn control_card(title: &str, icon_name: &str) -> (GtkBox, Label, GtkBox) {
     icon_box.set_halign(gtk::Align::Start);
     icon_box.set_valign(gtk::Align::Center);
     icon_box.set_hexpand(false);
+    // Explicit false on BOTH axes so the inner image's expand (used to centre
+    // the glyph) can't propagate up and stretch the header / card.
+    icon_box.set_vexpand(false);
     icon_box.add_css_class("control-card-icon");
-    let icon = super::icons::fa_icon(icon_name, 13);
-    icon.set_halign(gtk::Align::Center);
-    icon.set_valign(gtk::Align::Center);
-    // Must NOT hexpand — it propagates to icon_box and stretches it full-width.
-    icon.set_hexpand(false);
-    icon.set_vexpand(false);
+    // Real Adwaita symbolic icon (recoloured by the theme/CSS) instead of a
+    // Font Awesome glyph — FA isn't installed, so the PUA codepoints fell back
+    // to whatever font happened to have them and rendered broken.
+    let icon = gtk::Image::from_icon_name(icon_name);
+    icon.set_pixel_size(15);
+    icon.add_css_class("control-card-glyph");
+    // Fill the 26×26 box so the icon is centred: a vertical GtkBox ignores a
+    // child's valign on its main (vertical) axis and would pin the image to the
+    // top. Letting the image expand to fill makes Gtk.Image draw the glyph
+    // centred within its allocation. The box has hexpand(false) + a fixed
+    // size_request, so this expansion can't propagate out and stretch it.
+    icon.set_halign(gtk::Align::Fill);
+    icon.set_valign(gtk::Align::Fill);
+    icon.set_hexpand(true);
+    icon.set_vexpand(true);
     icon_box.append(&icon);
 
     let title_label = Label::new(Some(title));

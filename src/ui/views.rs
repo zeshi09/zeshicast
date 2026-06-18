@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -12,9 +12,10 @@ use gtk::{
 };
 
 use crate::{
-    Action, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, BatterySnapshot,
-    ClipboardSummary, CommandSummary, MediaSnapshot, NetworkSnapshot, NotificationSnapshot,
-    ProcessSummary, SnippetSummary, SystemSnapshot, ThermalSnapshot,
+    Action, AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot,
+    BatterySnapshot,
+    ClipboardSummary, CommandSummary, MediaSnapshot, NetworkInterfaceSnapshot, NetworkSnapshot,
+    NotificationSnapshot, ProcessSummary, SnippetSummary, SystemSnapshot, ThermalSnapshot,
 };
 
 #[derive(Debug, Clone)]
@@ -59,6 +60,13 @@ pub struct AudioView {
     pub streams_list: ListBox,
     pub mute_output: Button,
     pub mute_input: Button,
+    pub output_devices: ListBox,
+    pub input_devices: ListBox,
+    pub output_scale: gtk::Scale,
+    pub input_scale: gtk::Scale,
+    /// Set while we push real volumes into the scales so their value-changed
+    /// handlers don't fire `wpctl set-volume` back at the device.
+    suppress_volume_cb: Rc<Cell<bool>>,
 }
 
 #[derive(Clone)]
@@ -87,6 +95,7 @@ pub struct ClipboardHistoryView {
     pub filter: DropDown,
     pub detail_title: Label,
     pub detail_preview: Label,
+    pub detail_image: gtk::Picture,
     pub detail_kind: Label,
     pub detail_size: Label,
     pub detail_mime: Label,
@@ -194,6 +203,10 @@ pub struct MediaView {
     pub scrubber: gtk::Scale,
     pub time_pos: Label,
     pub time_total: Label,
+    pub art_picture: Image,
+    pub art_icon: Label,
+    /// Last art URL we loaded, so we don't refetch on every refresh tick.
+    art_url: Rc<RefCell<Option<String>>>,
 }
 
 #[derive(Clone)]
@@ -221,10 +234,7 @@ pub struct EmojiPickerView {
 #[derive(Clone)]
 pub struct PreferencesView {
     pub root: GtkBox,
-    pub search: Entry,
     pub fields: Vec<(String, Entry)>,
-    pub save: Button,
-    pub cancel: Button,
 }
 
 pub fn action_panel_view() -> ActionPanelView {
@@ -504,13 +514,12 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     // ── Output section ───────────────────────────────────────────────────────
     root.append(&super::section_header("Output"));
 
+    let suppress_volume_cb = Rc::new(Cell::new(false));
+
     let output_devices = ListBox::new();
     output_devices.add_css_class("results-list");
     output_devices.set_activate_on_single_click(true);
-    for name in &["Built-in Speakers", "HDMI Output", "Headphones"] {
-        let row = audio_device_row(name, *name == "Built-in Speakers");
-        output_devices.append(&row);
-    }
+    // Populated from the real device list in set_audio_snapshot.
     root.append(&output_devices);
 
     let output_name = Label::new(Some("Built-in Speakers"));
@@ -530,10 +539,18 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     mute_output.set_valign(gtk::Align::Center);
 
     let output_bar_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
-    output_bar_scale.set_value(65.0);
     output_bar_scale.set_draw_value(false);
     output_bar_scale.set_hexpand(true);
     output_bar_scale.add_css_class("audio-volume-bar");
+    {
+        let suppress = Rc::clone(&suppress_volume_cb);
+        output_bar_scale.connect_value_changed(move |scale| {
+            if suppress.get() {
+                return;
+            }
+            set_default_volume("@DEFAULT_AUDIO_SINK@", scale.value());
+        });
+    }
 
     let output_volume = Label::new(Some("65%"));
     output_volume.add_css_class("audio-volume-value");
@@ -551,10 +568,7 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     let input_devices = ListBox::new();
     input_devices.add_css_class("results-list");
     input_devices.set_activate_on_single_click(true);
-    for name in &["Built-in Microphone", "USB Microphone"] {
-        let row = audio_device_row(name, *name == "Built-in Microphone");
-        input_devices.append(&row);
-    }
+    // Populated from the real device list in set_audio_snapshot.
     root.append(&input_devices);
 
     let input_name = Label::new(Some("Built-in Microphone"));
@@ -571,10 +585,18 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     mute_input.set_valign(gtk::Align::Center);
 
     let input_bar_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
-    input_bar_scale.set_value(80.0);
     input_bar_scale.set_draw_value(false);
     input_bar_scale.set_hexpand(true);
     input_bar_scale.add_css_class("audio-volume-bar");
+    {
+        let suppress = Rc::clone(&suppress_volume_cb);
+        input_bar_scale.connect_value_changed(move |scale| {
+            if suppress.get() {
+                return;
+            }
+            set_default_volume("@DEFAULT_AUDIO_SOURCE@", scale.value());
+        });
+    }
 
     let input_volume = Label::new(Some("80%"));
     input_volume.add_css_class("audio-volume-value");
@@ -609,6 +631,11 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
         streams_list,
         mute_output,
         mute_input,
+        output_devices,
+        input_devices,
+        output_scale: output_bar_scale,
+        input_scale: input_bar_scale,
+        suppress_volume_cb,
     };
     set_audio_snapshot(&view, snapshot);
     view
@@ -650,9 +677,16 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         let show_colon = Rc::new(RefCell::new(true));
         glib::timeout_add_seconds_local(1, move || {
             let now = Local::now();
-            let colon = if *show_colon.borrow() { ":" } else { " " };
-            clock_c.set_text(&format!("{}{}{}", now.format("%H"), colon, now.format("%M")));
-            date_c.set_text(&now.format("%A, %d %B %Y").to_string());
+            // Blink the colon via alpha only — the ':' glyph always stays so the
+            // digits never shift horizontally (constant width, matches mockup).
+            let colon_alpha = if *show_colon.borrow() { "65%" } else { "14%" };
+            clock_c.set_markup(&format!(
+                "{}<span alpha='{}'>:</span>{}",
+                now.format("%H"),
+                colon_alpha,
+                now.format("%M")
+            ));
+            date_c.set_text(&now.format("%A, %B %-d").to_string());
             *show_colon.borrow_mut() ^= true;
             glib::ControlFlow::Continue
         });
@@ -696,15 +730,12 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     let thermal_card = GtkBox::new(Orientation::Vertical, 6);
     thermal_card.add_css_class("metric-card");
     thermal_card.set_hexpand(true);
-    let thermal_header = GtkBox::new(Orientation::Horizontal, 6);
-    let thermal_icon = super::icons::fa_icon("weather-clear-symbolic", 14);
+    // No icon in the header — matches the CPU/Memory/Disk metric cards.
     let thermal_title = Label::new(Some("Temp"));
     thermal_title.add_css_class("metric-label");
     thermal_title.set_hexpand(true);
     thermal_title.set_xalign(0.0);
-    thermal_header.append(&thermal_icon);
-    thermal_header.append(&thermal_title);
-    thermal_card.append(&thermal_header);
+    thermal_card.append(&thermal_title);
 
     let thermal_value_row = GtkBox::new(Orientation::Horizontal, 3);
     thermal_value_row.set_valign(gtk::Align::Baseline);
@@ -1141,10 +1172,8 @@ pub fn network_view(snapshot: &NetworkSnapshot) -> NetworkView {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
 
-    // Section header
-    let hdr = super::section_header("Wi-Fi");
-    root.append(&hdr);
-
+    // Section headers ("Ethernet", "Wi-Fi") live inside the list so their order
+    // is data-driven (Ethernet is shown first when a wired link is present).
     let list = super::results_list();
     set_network_snapshot(&list, snapshot);
 
@@ -1193,20 +1222,13 @@ pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView 
     toggle_dnd.add_css_class("action-bar-more");
     let close_all = Button::with_label("Clear All");
     close_all.add_css_class("action-bar-more");
+    // We're the notification daemon ourselves — there's no external panel to
+    // open, so the Settings button is kept (struct compat) but hidden.
     let open_panel = Button::with_label("Settings");
     open_panel.add_css_class("action-bar-more");
+    open_panel.set_visible(false);
 
-    toggle_dnd.connect_clicked(|_| {
-        // Try swaync first, fallback to dunst
-        if std::process::Command::new("swaync-client").arg("--toggle-dnd").spawn().is_err() {
-            let _ = std::process::Command::new("dunstctl").arg("set-paused").arg("toggle").spawn();
-        }
-    });
-    close_all.connect_clicked(|_| {
-        if std::process::Command::new("swaync-client").arg("--close-all").spawn().is_err() {
-            let _ = std::process::Command::new("dunstctl").arg("history-clear").spawn();
-        }
-    });
+    // DND / Clear All are wired in launcher.rs (so they can refresh the view).
 
     top_bar.append(&toggle_dnd);
     top_bar.append(&close_all);
@@ -1259,25 +1281,38 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     root.set_margin_end(14);
 
     // ── Album art + track info ───────────────────────────────────────────────
-    let info_row = GtkBox::new(Orientation::Horizontal, 14);
-    info_row.set_margin_bottom(18);
+    let info_row = GtkBox::new(Orientation::Horizontal, 16);
+    info_row.set_margin_bottom(20);
 
     let art = GtkBox::new(Orientation::Vertical, 0);
-    art.set_width_request(80);
-    art.set_height_request(80);
-    art.add_css_class("control-card");
-    art.set_valign(gtk::Align::End);
+    art.set_width_request(96);
+    art.set_height_request(96);
+    art.add_css_class("media-art");
+    art.set_valign(gtk::Align::Start);
+    art.set_halign(gtk::Align::Start);
+    // Block the inner icon's expand (used to centre the glyph) from propagating
+    // out and stretching the art box / info row.
+    art.set_hexpand(false);
+    art.set_vexpand(false);
     let art_icon = Label::new(Some("♪"));
     art_icon.set_vexpand(true);
     art_icon.set_hexpand(true);
     art_icon.set_valign(gtk::Align::Center);
     art_icon.set_halign(gtk::Align::Center);
-    art_icon.add_css_class("metric-value");
+    art_icon.add_css_class("media-art-icon");
     art.append(&art_icon);
+
+    // Real album art (shown instead of the ♪ glyph once loaded). A fixed-size
+    // Image scales the (large) cover texture down to 96px.
+    let art_picture = Image::new();
+    art_picture.set_pixel_size(96);
+    art_picture.add_css_class("media-art-image");
+    art_picture.set_visible(false);
+    art.append(&art_picture);
     info_row.append(&art);
 
     let track_info = GtkBox::new(Orientation::Vertical, 4);
-    track_info.set_valign(gtk::Align::End);
+    track_info.set_valign(gtk::Align::Center);
     track_info.set_hexpand(true);
 
     let title = Label::new(Some("No active player"));
@@ -1285,14 +1320,17 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     title.set_xalign(0.0);
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
 
+    // Artist line.
     let player = Label::new(None);
-    player.add_css_class("result-subtitle");
+    player.add_css_class("media-artist");
     player.set_xalign(0.0);
     player.set_ellipsize(gtk::pango::EllipsizeMode::End);
 
+    // "album · player" meta line.
     let status = Label::new(None);
-    status.add_css_class("result-subtitle");
+    status.add_css_class("media-meta");
     status.set_xalign(0.0);
+    status.set_ellipsize(gtk::pango::EllipsizeMode::End);
 
     track_info.append(&title);
     track_info.append(&player);
@@ -1327,22 +1365,22 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     controls.set_halign(gtk::Align::Center);
     controls.set_margin_top(14);
 
-    let previous = media_ctrl_btn("⏮", "Previous", "media-btn-skip");
-    let seek_back = media_ctrl_btn("⏪", "Seek back 10s", "media-btn-seek");
+    let previous = media_ctrl_btn("media-skip-backward-symbolic", "Previous", "media-btn-skip");
+    let seek_back = media_ctrl_btn("media-seek-backward-symbolic", "Seek back 10s", "media-btn-seek");
     let play_pause = media_play_btn("media-playback-start-symbolic");
-    let seek_fwd = media_ctrl_btn("⏩", "Seek forward 10s", "media-btn-seek");
-    let next = media_ctrl_btn("⏭", "Next", "media-btn-skip");
+    let seek_fwd = media_ctrl_btn("media-seek-forward-symbolic", "Seek forward 10s", "media-btn-seek");
+    let next = media_ctrl_btn("media-skip-forward-symbolic", "Next", "media-btn-skip");
 
-    // Wire playerctl commands
-    previous.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").arg("previous").spawn(); });
-    next.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").arg("next").spawn(); });
-    play_pause.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").arg("play-pause").spawn(); });
-    seek_back.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").args(["position", "10-"]).spawn(); });
-    seek_fwd.connect_clicked(|_| { let _ = std::process::Command::new("playerctl").args(["position", "10+"]).spawn(); });
-    scrubber.connect_change_value(|_, _, val| {
-        let _ = std::process::Command::new("playerctl")
-            .args(["position", &format!("{val:.1}")])
-            .spawn();
+    // Wire MPRIS controls (direct D-Bus, no playerctl).
+    previous.connect_clicked(|_| crate::media_control(crate::MediaControl::Previous));
+    next.connect_clicked(|_| crate::media_control(crate::MediaControl::Next));
+    play_pause.connect_clicked(|_| crate::media_control(crate::MediaControl::PlayPause));
+    seek_back.connect_clicked(|_| crate::media_control(crate::MediaControl::SeekBy(-10_000_000)));
+    seek_fwd.connect_clicked(|_| crate::media_control(crate::MediaControl::SeekBy(10_000_000)));
+    scrubber.connect_change_value(|scale, _, val| {
+        // Relative seek by the delta between the dragged value and the current one.
+        let offset = ((val - scale.value()) * 1_000_000.0).round() as i64;
+        crate::media_control(crate::MediaControl::SeekBy(offset));
         glib::Propagation::Proceed
     });
 
@@ -1352,6 +1390,12 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     controls.append(&seek_fwd);
     controls.append(&next);
     root.append(&controls);
+
+    // Absorbs the remaining height so the player stays pinned to the top
+    // (matching the mockup) instead of centring/floating in the page.
+    let spacer = GtkBox::new(Orientation::Vertical, 0);
+    spacer.set_vexpand(true);
+    root.append(&spacer);
 
     let view = MediaView {
         root,
@@ -1364,22 +1408,111 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
         scrubber,
         time_pos,
         time_total,
+        art_picture,
+        art_icon,
+        art_url: Rc::new(RefCell::new(None)),
     };
     set_media_snapshot(&view, snapshot);
     view
 }
 
-fn media_ctrl_btn(label: &str, tooltip: &str, css_class: &str) -> Button {
-    let btn = Button::with_label(label);
+fn media_ctrl_btn(icon_name: &str, tooltip: &str, css_class: &str) -> Button {
+    // Symbolic icons (not emoji glyphs) so buttons stay crisp and recolour via
+    // CSS. A square size_request keeps them perfectly round (border-radius 50%)
+    // — otherwise a wide icon + button padding makes them oval.
+    let btn = Button::from_icon_name(icon_name);
     btn.add_css_class(css_class);
     btn.set_tooltip_text(Some(tooltip));
+    let size = if css_class == "media-btn-seek" { 36 } else { 32 };
+    btn.set_size_request(size, size);
+    btn.set_halign(gtk::Align::Center);
+    btn.set_valign(gtk::Align::Center);
     btn
 }
 
 fn media_play_btn(_icon: &str) -> Button {
-    let btn = Button::with_label("⏸");
+    let btn = Button::from_icon_name("media-playback-pause-symbolic");
     btn.add_css_class("media-btn-primary");
+    btn.set_size_request(48, 48);
+    btn.set_halign(gtk::Align::Center);
+    btn.set_valign(gtk::Align::Center);
     btn
+}
+
+/// Swap the album art when the URL changes. `file://` loads synchronously;
+/// `http(s)://` is fetched on a background thread (cached by URL so we don't
+/// refetch on every refresh tick). Falls back to the ♪ glyph when absent.
+fn update_media_art(view: &MediaView, art_url: Option<&str>) {
+    if view.art_url.borrow().as_deref() == art_url {
+        return; // unchanged — nothing to do
+    }
+    *view.art_url.borrow_mut() = art_url.map(str::to_string);
+
+    let show_placeholder = |view: &MediaView| {
+        view.art_picture.clear();
+        view.art_picture.set_visible(false);
+        view.art_icon.set_visible(true);
+    };
+
+    let Some(url) = art_url else {
+        show_placeholder(view);
+        return;
+    };
+
+    let set_texture = |view: &MediaView, texture: &gtk::gdk::Texture| {
+        view.art_picture.set_property("paintable", texture);
+        view.art_picture.set_visible(true);
+        view.art_icon.set_visible(false);
+    };
+
+    if url.starts_with("file://") {
+        match gtk::gdk::Texture::from_file(&gtk::gio::File::for_uri(url)) {
+            Ok(texture) => set_texture(view, &texture),
+            Err(_) => show_placeholder(view),
+        }
+        return;
+    }
+
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        show_placeholder(view);
+        return;
+    }
+
+    // Remote art: fetch off-thread, deliver bytes back to the UI thread.
+    let (tx, rx) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
+    let fetch_url = url.to_string();
+    std::thread::spawn(move || {
+        let bytes = ureq::get(&fetch_url).call().ok().and_then(|resp| {
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut resp.into_reader(), &mut buf)
+                .ok()
+                .map(|_| buf)
+        });
+        let _ = tx.send(bytes);
+    });
+
+    let picture = view.art_picture.clone();
+    let icon = view.art_icon.clone();
+    let expected = url.to_string();
+    let art_url = Rc::clone(&view.art_url);
+    glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
+        match rx.try_recv() {
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Ok(Some(bytes)) => {
+                // Ignore if the track already moved on while we were fetching.
+                if art_url.borrow().as_deref() == Some(expected.as_str()) {
+                    let glib_bytes = glib::Bytes::from_owned(bytes);
+                    if let Ok(texture) = gtk::gdk::Texture::from_bytes(&glib_bytes) {
+                        picture.set_property("paintable", &texture);
+                        picture.set_visible(true);
+                        icon.set_visible(false);
+                    }
+                }
+                glib::ControlFlow::Break
+            }
+            _ => glib::ControlFlow::Break,
+        }
+    });
 }
 
 fn fmt_secs(s: f64) -> String {
@@ -1389,17 +1522,29 @@ fn fmt_secs(s: f64) -> String {
 
 pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
     if snapshot.is_active() {
-        let title = match (&snapshot.artist, &snapshot.title) {
-            (Some(artist), Some(title)) => format!("{artist} — {title}"),
-            (_, Some(title)) => title.clone(),
-            (Some(artist), _) => artist.clone(),
-            _ => "Unknown track".to_string(),
+        // Title (bold) · artist · "album · player" — matches the mockup.
+        view.title
+            .set_text(snapshot.title.as_deref().unwrap_or("Unknown track"));
+        view.player.set_text(snapshot.artist.as_deref().unwrap_or(""));
+
+        let player = snapshot.player.as_deref().unwrap_or("");
+        let meta = match snapshot.album.as_deref() {
+            Some(album) if !album.is_empty() && !player.is_empty() => {
+                format!("{album}  ·  {player}")
+            }
+            Some(album) if !album.is_empty() => album.to_string(),
+            _ => player.to_string(),
         };
-        view.title.set_text(&title);
-        view.player.set_text(snapshot.player.as_deref().unwrap_or(""));
+        view.status.set_text(&meta);
+
+        update_media_art(view, snapshot.art_url.as_deref());
+
         let is_playing = snapshot.status.as_deref() == Some("Playing");
-        view.play_pause.set_label(if is_playing { "⏸" } else { "▶" });
-        view.status.set_text(snapshot.status.as_deref().unwrap_or(""));
+        view.play_pause.set_icon_name(if is_playing {
+            "media-playback-pause-symbolic"
+        } else {
+            "media-playback-start-symbolic"
+        });
 
         if let Some(len) = snapshot.length_secs {
             view.scrubber.set_range(0.0, len);
@@ -1412,9 +1557,10 @@ pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
         view.scrubber.set_sensitive(snapshot.length_secs.is_some());
     } else {
         view.title.set_text("No active player");
-        view.player.set_text("Install playerctl for MPRIS media status");
+        view.player.set_text("Start a media player to see MPRIS status");
         view.status.set_text("");
-        view.play_pause.set_label("▶");
+        update_media_art(view, None);
+        view.play_pause.set_icon_name("media-playback-start-symbolic");
         view.scrubber.set_sensitive(false);
         view.time_pos.set_text("0:00");
         view.time_total.set_text("0:00");
@@ -1426,8 +1572,25 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         list.remove(&child);
     }
 
-    // Wi-Fi only — Ethernet interfaces and DNS servers are intentionally hidden
-    // to match the target design (a single WI-FI section).
+    // ── Ethernet section (shown first when a wired link exists) ───────────────
+    // Not in the mockup, but requested: surface wired interfaces in the same
+    // style above Wi-Fi. `snapshot.interfaces` is already filtered to physical
+    // en*/eth*/wl* devices, so we just keep the non-wireless ones here.
+    let wired: Vec<&NetworkInterfaceSnapshot> = snapshot
+        .interfaces
+        .iter()
+        .filter(|iface| !iface.is_wireless)
+        .collect();
+
+    if !wired.is_empty() {
+        list.append(&super::section_header("Ethernet"));
+        for iface in wired {
+            list.append(&ethernet_row(iface));
+        }
+    }
+
+    // ── Wi-Fi section ─────────────────────────────────────────────────────────
+    list.append(&super::section_header("Wi-Fi"));
     for network in &snapshot.wifi_networks {
         let row = gtk::ListBoxRow::new();
         row.add_css_class("result-row");
@@ -1470,7 +1633,11 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         layout.append(&text);
 
         let btn = Button::with_label(if network.active { "Disconnect" } else { "Connect" });
-        btn.add_css_class("action-bar-more");
+        btn.add_css_class(if network.active {
+            "network-disconnect-btn"
+        } else {
+            "network-connect-btn"
+        });
         btn.set_valign(gtk::Align::Center);
         layout.append(&btn);
 
@@ -1633,16 +1800,7 @@ fn notification_history_row(
     if let Some(id) = entry.id {
         let row_weak = row.downgrade();
         dismiss.connect_clicked(move |_| {
-            let id = id.to_string();
-            if std::process::Command::new("swaync-client")
-                .args(["-C", &id])
-                .spawn()
-                .is_err()
-            {
-                let _ = std::process::Command::new("dunstctl")
-                    .args(["history-rm", &id])
-                    .spawn();
-            }
+            crate::close_notification(id);
             if let Some(row) = row_weak.upgrade() {
                 row.set_visible(false);
             }
@@ -1658,15 +1816,23 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     let now = Local::now();
     // Clock is updated by a per-second blinking timer; just set date here if not ticking yet
     if view.clock.text().is_empty() {
-        view.clock.set_text(&now.format("%H:%M").to_string());
-        view.date.set_text(&now.format("%A, %d %B %Y").to_string());
+        view.clock.set_markup(&format!(
+            "{}<span alpha='65%'>:</span>{}",
+            now.format("%H"),
+            now.format("%M")
+        ));
+        view.date.set_text(&now.format("%A, %B %-d").to_string());
     }
     // Update workspace chip
     let ws = crate::workspace_snapshot();
-    let ws_label = ws.label();
+    // The pill already says "Workspace"; show just the index/name (mockup: "2").
+    let ws_short = ws
+        .active_name
+        .clone()
+        .unwrap_or_else(|| ws.active_idx.to_string());
     view.workspace.set_markup(&format!(
         "<span alpha='40%'>Workspace</span>  {}",
-        glib::markup_escape_text(&ws_label)
+        glib::markup_escape_text(&ws_short)
     ));
     view.workspace.set_visible(true);
     let uptime_val = snapshot.uptime_seconds.map(format_duration).unwrap_or_else(|| "—".to_string());
@@ -1785,7 +1951,12 @@ pub fn set_dashboard_audio_snapshot(view: &DashboardView, snapshot: &AudioSnapsh
         let status = if output.muted { "Muted".to_string() } else { format!("{}%", output.volume_percent) };
         view.audio.set_text(&status);
         let name = output.name.as_deref().unwrap_or("Built-in Output");
-        let short_name = if name.len() > 22 { &name[..20] } else { name };
+        // Char-safe truncation (byte slicing panics on multi-byte UTF-8).
+        let short_name = if name.chars().count() > 22 {
+            name.chars().take(20).collect::<String>()
+        } else {
+            name.to_string()
+        };
         let mic_info = snapshot.input.as_ref()
             .map(|i| format!("  ·  mic {}%", i.volume_percent))
             .unwrap_or_default();
@@ -1811,7 +1982,68 @@ pub fn set_audio_snapshot(view: &AudioView, snapshot: &AudioSnapshot) {
         snapshot.input.as_ref(),
         "Input device unavailable",
     );
+
+    // Real device lists (click a row to make it the default device).
+    populate_audio_device_list(&view.output_devices, &snapshot.output_devices, "Sinks");
+    populate_audio_device_list(&view.input_devices, &snapshot.input_devices, "Sources");
+
+    // Reflect real volumes on the sliders without re-triggering set-volume.
+    view.suppress_volume_cb.set(true);
+    if let Some(output) = snapshot.output.as_ref() {
+        view.output_scale.set_value(output.volume_percent as f64);
+    }
+    if let Some(input) = snapshot.input.as_ref() {
+        view.input_scale.set_value(input.volume_percent as f64);
+    }
+    view.suppress_volume_cb.set(false);
+
     set_audio_stream_rows(&view.streams_list, &snapshot.streams);
+}
+
+/// `wpctl set-volume <target> <percent>%` — clamped to a sane 0–150 range.
+fn set_default_volume(target: &str, percent: f64) {
+    let pct = percent.round().clamp(0.0, 150.0) as u32;
+    let _ = std::process::Command::new("wpctl")
+        .args(["set-volume", target, &format!("{pct}%")])
+        .status();
+}
+
+/// Fill a device ListBox from real devices; clicking a row sets it as the
+/// system default (`wpctl set-default <id>`) and repopulates in place.
+fn populate_audio_device_list(list: &ListBox, devices: &[AudioDeviceOption], section: &'static str) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+
+    if devices.is_empty() {
+        list.append(&super::secondary_action_row(
+            "audio-card-symbolic",
+            "No devices found",
+        ));
+        return;
+    }
+
+    for device in devices {
+        let row = audio_device_row(&device.name, device.is_default);
+        if let Some(id) = device.id {
+            let gesture = gtk::GestureClick::new();
+            let list = list.clone();
+            gesture.connect_released(move |_, _, _, _| {
+                let _ = std::process::Command::new("wpctl")
+                    .args(["set-default", &id.to_string()])
+                    .status();
+                let snapshot = crate::audio_snapshot();
+                let devices = if section == "Sinks" {
+                    snapshot.output_devices
+                } else {
+                    snapshot.input_devices
+                };
+                populate_audio_device_list(&list, &devices, section);
+            });
+            row.add_controller(gesture);
+        }
+        list.append(&row);
+    }
 }
 
 pub fn set_dashboard_media_snapshot(view: &DashboardView, snapshot: &MediaSnapshot) {
@@ -2373,6 +2605,9 @@ pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryVie
         .vexpand(true)
         .build();
 
+    // Content area holds either the text label or an image preview.
+    let content_box = GtkBox::new(Orientation::Vertical, 0);
+
     let detail_preview = Label::new(None);
     detail_preview.add_css_class("clipboard-text");
     detail_preview.set_xalign(0.0);
@@ -2384,7 +2619,19 @@ pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryVie
     detail_preview.set_margin_bottom(10);
     detail_preview.set_margin_start(12);
     detail_preview.set_margin_end(12);
-    content_scroll.set_child(Some(&detail_preview));
+    content_box.append(&detail_preview);
+
+    // Fills the preview pane width; height follows the image aspect ratio.
+    let detail_image = gtk::Picture::new();
+    detail_image.set_can_shrink(true);
+    detail_image.set_hexpand(true);
+    detail_image.set_halign(gtk::Align::Fill);
+    detail_image.set_valign(gtk::Align::Start);
+    detail_image.add_css_class("clipboard-image");
+    detail_image.set_visible(false);
+    content_box.append(&detail_image);
+
+    content_scroll.set_child(Some(&content_box));
     right_panel.append(&content_scroll);
 
     // Invisible compat label for detail_title
@@ -2415,6 +2662,7 @@ pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryVie
         filter,
         detail_title,
         detail_preview,
+        detail_image,
         detail_kind,
         detail_size,
         detail_mime,
@@ -2477,6 +2725,8 @@ pub fn set_clipboard_history_items(list: &ListBox, items: &[ClipboardSummary]) {
 
 pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&ClipboardSummary>) {
     let Some(item) = item else {
+        view.detail_preview.set_visible(true);
+        view.detail_image.set_visible(false);
         view.detail_preview.set_text("No item selected");
         view.detail_kind.set_text("–");
         view.detail_size.set_text("");
@@ -2484,14 +2734,38 @@ pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&Clipboard
         return;
     };
 
-    view.detail_preview.set_text(&clipboard_detail_text(&item.value));
     view.detail_kind.set_text(item.kind.label());
-    view.detail_size.set_text(&format_bytes(item.size_bytes));
     if let Some(ts) = item.timestamp {
-        view.detail_mime.set_text(&crate::config::format_time_ago(ts));
+        view.detail_mime
+            .set_text(&format!("·  {}", crate::config::format_time_ago(ts)));
     } else {
         view.detail_mime.set_text("");
     }
+
+    // Image entry → show the picture; otherwise the text label.
+    if let Some(path) = crate::clipboard_image_path(&item.value) {
+        view.detail_preview.set_visible(false);
+        view.detail_image.set_visible(true);
+        match gtk::gdk::Texture::from_filename(path) {
+            Ok(texture) => {
+                view.detail_image.set_paintable(Some(&texture));
+                view.detail_size
+                    .set_text(&format!("{}×{}", texture.width(), texture.height()));
+            }
+            Err(_) => {
+                view.detail_image.set_paintable(gtk::gdk::Paintable::NONE);
+                view.detail_size.set_text("missing");
+            }
+        }
+        return;
+    }
+
+    view.detail_preview.set_visible(true);
+    view.detail_image.set_visible(false);
+    view.detail_preview.set_text(&clipboard_detail_text(&item.value));
+    // Character count (matches the mockup's "N ch"), not raw byte size.
+    view.detail_size
+        .set_text(&format!("{} ch", item.value.chars().count()));
 
     // Code/URL → monospace style
     let is_code = matches!(
@@ -2797,33 +3071,46 @@ fn populate_emoji_flow(flow: &gtk::FlowBox, category: &str, query: &str, confirm
     }
 }
 
+/// A linked segmented toggle (radio) for a fixed set of `(value, label)`
+/// choices, writing the chosen value into the bound preference `entry`.
+fn segmented_choice(options: &[(&str, &str)], current: &str, entry: &Entry) -> GtkBox {
+    let btn_box = GtkBox::new(Orientation::Horizontal, 0);
+    btn_box.add_css_class("linked");
+    btn_box.set_valign(gtk::Align::Center);
+
+    let has_match = options.iter().any(|(value, _)| *value == current);
+    let mut anchor: Option<gtk::ToggleButton> = None;
+
+    for (i, (value, label)) in options.iter().enumerate() {
+        let btn = gtk::ToggleButton::with_label(label);
+        match &anchor {
+            Some(group) => btn.set_group(Some(group)),
+            None => anchor = Some(btn.clone()),
+        }
+        let entry_c = entry.clone();
+        let value_owned = value.to_string();
+        btn.connect_toggled(move |b| {
+            if b.is_active() {
+                entry_c.set_text(&value_owned);
+            }
+        });
+        // Activate the matching option (or the first when the stored value is
+        // unknown). Done after wiring so the entry reflects the selection.
+        btn.set_active(*value == current || (!has_match && i == 0));
+        btn_box.append(&btn);
+    }
+
+    btn_box
+}
+
 pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
 
     let outer = super::panel_root(0, 0);
     outer.set_vexpand(true);
     outer.set_hexpand(true);
 
-    let header_box = GtkBox::new(Orientation::Horizontal, 0);
-    header_box.set_margin_top(12);
-    header_box.set_margin_start(14);
-    header_box.set_margin_end(14);
-    header_box.set_margin_bottom(8);
-    let header = super::panel_title("Preferences");
-    header_box.append(&header);
-    outer.append(&header_box);
-
-    let search = Entry::builder()
-        .placeholder_text("Search preferences…")
-        .hexpand(true)
-        .build();
-    search.add_css_class("search-entry");
-    let search_row = GtkBox::new(Orientation::Horizontal, 0);
-    search_row.set_margin_start(14);
-    search_row.set_margin_end(14);
-    search_row.set_margin_bottom(6);
-    search_row.append(&search);
-    outer.append(&search_row);
-
+    // No in-view title/search: the nav header already shows "‹ Preferences",
+    // and the design goes straight to the sidebar + content panes.
     let paned = Paned::new(Orientation::Horizontal);
     paned.set_vexpand(true);
     paned.set_hexpand(true);
@@ -2895,6 +3182,7 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                     ("Ctrl+T", "System Monitor"),
                     ("Ctrl+I", "AI Chat"),
                     ("Ctrl+M", "Media"),
+                    ("Ctrl+O", "Audio"),
                     ("Ctrl+N", "Network"),
                     ("Ctrl+H", "Clipboard"),
                     ("Ctrl+B", "Extensions"),
@@ -2996,25 +3284,23 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                         });
                         row.append(&scale);
                     } else if *key == "ui_density" {
-                        let btn_box = GtkBox::new(Orientation::Horizontal, 0);
-                        btn_box.add_css_class("linked");
-                        btn_box.set_valign(gtk::Align::Center);
-                        let compact_btn = gtk::ToggleButton::with_label("Compact");
-                        let comfort_btn = gtk::ToggleButton::with_label("Comfortable");
-                        comfort_btn.set_group(Some(&compact_btn));
-                        if effective_val == "comfortable" { comfort_btn.set_active(true); }
-                        else { compact_btn.set_active(true); }
-                        let entry_c = entry.clone();
-                        compact_btn.connect_toggled(move |b| {
-                            if b.is_active() { entry_c.set_text("compact"); }
-                        });
-                        let entry_c = entry.clone();
-                        comfort_btn.connect_toggled(move |b| {
-                            if b.is_active() { entry_c.set_text("comfortable"); }
-                        });
-                        btn_box.append(&compact_btn);
-                        btn_box.append(&comfort_btn);
-                        row.append(&btn_box);
+                        row.append(&segmented_choice(
+                            &[("compact", "Compact"), ("comfortable", "Comfortable")],
+                            effective_val,
+                            &entry,
+                        ));
+                    } else if *key == "ui_theme" {
+                        row.append(&segmented_choice(
+                            &[("system", "System"), ("dark", "Dark"), ("light", "Light")],
+                            effective_val,
+                            &entry,
+                        ));
+                    } else if *key == "ai_provider" {
+                        row.append(&segmented_choice(
+                            &[("ollama", "Ollama"), ("openai", "OpenAI")],
+                            effective_val,
+                            &entry,
+                        ));
                     } else if *key == "dashboard_poll_interval_ms" {
                         let spin = gtk::SpinButton::with_range(500.0, 5000.0, 100.0);
                         spin.add_css_class("pref-entry");
@@ -3029,6 +3315,16 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                         entry.set_input_purpose(gtk::InputPurpose::Digits);
                         row.append(&entry);
                     } else {
+                        // Text values (lists, endpoints…) can be long: let the
+                        // field take the row's free width so they aren't clipped.
+                        label.set_hexpand(false);
+                        entry.set_hexpand(true);
+                        entry.set_width_chars(0);
+                        // Mask secrets.
+                        if key.ends_with("_api_key") {
+                            entry.set_visibility(false);
+                            entry.set_input_purpose(gtk::InputPurpose::Password);
+                        }
                         row.append(&entry);
                     }
 
@@ -3065,36 +3361,6 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
         let _ = &sidebar_clone;
     });
 
-    {
-        let sidebar2 = sidebar.clone();
-        let stack2 = content_stack.clone();
-        search.connect_changed(move |entry| {
-            let query = entry.text().to_lowercase();
-            let mut first_match: Option<usize> = None;
-            for (i, section) in super::preferences::PREFERENCE_SECTIONS.iter().enumerate() {
-                let visible = query.is_empty()
-                    || section.name.to_lowercase().contains(&query)
-                    || section.keys.iter().any(|(_, desc)| {
-                        desc.to_lowercase().contains(&query)
-                    });
-                if let Some(row) = sidebar2.row_at_index(i as i32) {
-                    row.set_visible(visible);
-                }
-                if visible && first_match.is_none() {
-                    first_match = Some(i);
-                }
-            }
-            if let Some(idx) = first_match {
-                if let Some(row) = sidebar2.row_at_index(idx as i32) {
-                    sidebar2.select_row(Some(&row));
-                    if let Some(section) = super::preferences::PREFERENCE_SECTIONS.get(idx) {
-                        stack2.set_visible_child_name(section.name);
-                    }
-                }
-            }
-        });
-    }
-
     if let Some(row) = sidebar.row_at_index(0) {
         sidebar.select_row(Some(&row));
     }
@@ -3106,25 +3372,11 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
     paned.set_end_child(Some(&content_stack));
     outer.append(&paned);
 
-    let buttons = GtkBox::new(Orientation::Horizontal, 8);
-    buttons.set_halign(gtk::Align::End);
-    buttons.set_margin_top(6);
-    buttons.set_margin_end(14);
-    buttons.set_margin_bottom(10);
-
-    let cancel = Button::with_label("Cancel");
-    let save = Button::with_label("Save");
-    save.add_css_class("suggested-action");
-    buttons.append(&cancel);
-    buttons.append(&save);
-    outer.append(&buttons);
-
+    // No Save/Cancel buttons (not in the mockup): changes auto-save, wired in
+    // launcher.rs against each field's `changed` signal.
     PreferencesView {
         root: outer,
-        search,
         fields,
-        save,
-        cancel,
     }
 }
 
@@ -3137,7 +3389,7 @@ fn clipboard_row(item: &ClipboardSummary) -> gtk::ListBoxRow {
     layout.set_margin_end(12);
     layout.set_valign(gtk::Align::Center);
 
-    // Type icon (16×16 with colored border when selected)
+    // Type icon (16×16; image entries use the generic image icon).
     let icon = gtk::Image::from_icon_name(item.kind.icon_name());
     icon.set_pixel_size(16);
     icon.add_css_class("result-icon");
@@ -3187,16 +3439,6 @@ fn clipboard_detail_text(value: &str) -> String {
     let mut detail = value.chars().take(MAX_DETAIL_CHARS).collect::<String>();
     detail.push_str("\n...");
     detail
-}
-
-fn format_bytes(bytes: usize) -> String {
-    if bytes < 1024 {
-        format!("{bytes} bytes")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / 1024.0 / 1024.0)
-    }
 }
 
 fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
@@ -3277,6 +3519,64 @@ fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
 }
 
 /// 4-bar Wi-Fi signal indicator (heights 4/7/10/13px)
+/// A wired-interface row, styled to match the Wi-Fi rows (icon · name ·
+/// status), with the purple active treatment when the link is up.
+fn ethernet_row(iface: &NetworkInterfaceSnapshot) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    row.add_css_class("result-row");
+
+    let connected =
+        iface.state.eq_ignore_ascii_case("up") && !iface.ipv4_addresses.is_empty();
+    if connected {
+        row.add_css_class("network-active");
+    }
+
+    let layout = GtkBox::new(Orientation::Horizontal, 10);
+    layout.set_margin_start(14);
+    layout.set_margin_end(14);
+    layout.set_margin_top(8);
+    layout.set_margin_bottom(8);
+    layout.set_valign(gtk::Align::Center);
+
+    let icon = gtk::Image::from_icon_name("network-wired-symbolic");
+    icon.set_pixel_size(16);
+    icon.set_size_request(18, -1);
+    icon.add_css_class("network-wired-icon");
+    layout.append(&icon);
+
+    let text = GtkBox::new(Orientation::Vertical, 2);
+    text.set_hexpand(true);
+    text.set_valign(gtk::Align::Center);
+
+    let title = Label::new(Some(&iface.name));
+    title.add_css_class("result-title");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+
+    let subtitle = Label::new(None);
+    subtitle.set_xalign(0.0);
+    subtitle.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    if connected {
+        let ip = iface.ipv4_addresses[0]
+            .split('/')
+            .next()
+            .unwrap_or(&iface.ipv4_addresses[0]);
+        subtitle.set_text(&format!("Connected  ·  {ip}"));
+        subtitle.add_css_class("network-status-connected");
+    } else {
+        subtitle.set_text("Disconnected");
+        subtitle.add_css_class("result-subtitle");
+    }
+
+    text.append(&title);
+    text.append(&subtitle);
+    layout.append(&text);
+
+    row.set_child(Some(&layout));
+    row
+}
+
 fn signal_bars(signal_percent: u32) -> GtkBox {
     let container = GtkBox::new(Orientation::Horizontal, 2);
     container.set_valign(gtk::Align::Center);

@@ -6,7 +6,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetworkSnapshot {
     pub interfaces: Vec<NetworkInterfaceSnapshot>,
     pub wifi_networks: Vec<WifiNetworkSnapshot>,
@@ -14,7 +14,7 @@ pub struct NetworkSnapshot {
     pub dns_servers: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkInterfaceSnapshot {
     pub name: String,
     pub state: String,

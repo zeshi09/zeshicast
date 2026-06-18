@@ -5,6 +5,7 @@ mod launcher;
 mod launcher_helpers;
 mod launcher_views;
 mod navigation;
+mod notify_server;
 mod panels;
 mod preferences;
 mod status_strip;

@@ -191,8 +191,8 @@ Queries:
   system lock               Search built-in system actions
   proc firefox              Search processes and build kill actions
   audio vol                 Audio actions: volume up/down, mute, mic mute, brightness
-  media next                MPRIS playback controls through playerctl
-  notify dnd                Notification/DND actions for swaync or dunst
+  media next                MPRIS playback controls over D-Bus
+  notify dnd                Notification history and DND (built-in D-Bus server)
   net wifi                  Network actions: toggle wifi, network settings
   niri screenshot           Niri compositor actions: screenshot, workspaces, windows
   hypr fullscreen           Hyprland compositor actions: screenshot, workspaces, windows

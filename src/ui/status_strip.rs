@@ -173,8 +173,11 @@ impl StatusStrip {
                 .unwrap_or("Media");
             let playing = snapshot.status.as_deref() == Some("Playing");
             let icon = if playing { "▶" } else { "⏸" };
-            let short_title = if title.len() > 18 {
-                format!("{}…", &title[..16])
+            // Truncate by chars, not bytes — byte slicing panics on multi-byte
+            // UTF-8 (e.g. Cyrillic track titles).
+            let short_title = if title.chars().count() > 18 {
+                let head: String = title.chars().take(16).collect();
+                format!("{head}…")
             } else {
                 title.to_string()
             };

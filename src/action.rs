@@ -181,6 +181,13 @@ impl Action {
             }
             ActionKind::Launcher(_) => {}
             ActionKind::Form(_) => {}
+            ActionKind::Media(control) => crate::media_control(*control),
+            ActionKind::Notification(action) => match action {
+                crate::NotificationAction::ToggleDnd => {
+                    crate::toggle_dnd();
+                }
+                crate::NotificationAction::ClearAll => crate::clear_notifications(),
+            },
             ActionKind::None => {}
         }
     }
@@ -216,6 +223,8 @@ impl Action {
             },
             ActionKind::Launcher(_) => self.title.clone(),
             ActionKind::Form(form) => form.command.clone(),
+            ActionKind::Media(_) => self.title.clone(),
+            ActionKind::Notification(_) => self.title.clone(),
             ActionKind::None => self.title.clone(),
         }
     }
@@ -248,6 +257,10 @@ pub(crate) enum ActionKind {
     HttpCopy(HttpRequest),
     Launcher(LauncherCommand),
     Form(ActionForm),
+    /// Playback control routed to the active MPRIS player over D-Bus.
+    Media(crate::MediaControl),
+    /// Notification action routed to our own notification store.
+    Notification(crate::NotificationAction),
     None,
 }
 

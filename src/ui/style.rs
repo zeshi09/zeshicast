@@ -300,6 +300,14 @@ entry, entry:focus, entry:focus-visible {
   color: rgba(255,255,255,0.40);
   letter-spacing: 0.010em;
   min-height: 18px;
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+
+/* Type badge only on the active row (mockup behaviour). */
+.result-row:selected .result-badge,
+.result-row.selected .result-badge {
+  opacity: 1;
 }
 
 /* ── Letter icon square (colored app icon) ── */
@@ -656,71 +664,71 @@ entry, entry:focus, entry:focus-visible {
 .metric-bar-temp progress { background: #8B7CF8; }
 
 /* ── Media player buttons ── */
-.media-btn-primary {
+/* Circular icon buttons. The element+class selector and zeroed min/padding
+   override the theme's button padding (which otherwise makes a fixed-height
+   button wider than tall → oval); the square size comes from size_request. */
+button.media-btn-primary {
   background: @accent_color;
   border: none;
   border-radius: 50%;
-  min-width: 48px;
-  min-height: 48px;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
   color: white;
-  font-size: 18px;
   transition: background 120ms ease;
 }
 
-.media-btn-primary:hover {
+button.media-btn-primary:hover {
   background: alpha(@accent_color, 0.850);
 }
 
-.media-btn-secondary {
+button.media-btn-secondary {
   background: alpha(@window_fg_color, 0.080);
   border: none;
   border-radius: 50%;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
   color: alpha(@window_fg_color, 0.650);
-  font-size: 16px;
   transition: background 120ms ease;
 }
 
-.media-btn-secondary:hover {
+button.media-btn-secondary:hover {
   background: alpha(@window_fg_color, 0.130);
 }
 
-/* Outer skip buttons (⏮ ⏭): small, no fill */
-.media-btn-skip {
+/* Outer skip buttons (⏮ ⏭): no fill */
+button.media-btn-skip {
   background: transparent;
   border: none;
   border-radius: 50%;
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
   color: alpha(@window_fg_color, 0.450);
-  font-size: 14px;
   transition: background 120ms ease, color 120ms ease;
 }
 
-.media-btn-skip:hover {
+button.media-btn-skip:hover {
   background: alpha(@window_fg_color, 0.080);
   color: alpha(@window_fg_color, 0.700);
 }
 
-/* Inner seek buttons (⏪ ⏩): amber-tinted circles */
-.media-btn-seek {
-  background: alpha(@ac_amber, 0.150);
+/* Inner seek buttons (10s ⏪ ⏩): neutral subtle circles */
+button.media-btn-seek {
+  background: alpha(@window_fg_color, 0.080);
   border: none;
   border-radius: 50%;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
-  color: @ac_amber;
-  font-size: 15px;
-  transition: background 120ms ease;
+  color: alpha(@window_fg_color, 0.650);
+  transition: background 120ms ease, color 120ms ease;
 }
 
-.media-btn-seek:hover {
-  background: alpha(@ac_amber, 0.260);
+button.media-btn-seek:hover {
+  background: alpha(@window_fg_color, 0.130);
+  color: alpha(@window_fg_color, 0.850);
 }
 
 /* ── Process kill button (hidden until row hovered/selected) ── */
@@ -986,6 +994,12 @@ entry, entry:focus, entry:focus-visible {
   color: alpha(@window_fg_color, 0.280);
 }
 
+/* Image clipboard preview. */
+.clipboard-image {
+  border-radius: 8px;
+  border: 1px solid alpha(@window_fg_color, 0.120);
+}
+
 /* ════════════════════════════════════════════════════════════
    AUDIO VIEW
    ════════════════════════════════════════════════════════════ */
@@ -1043,10 +1057,36 @@ entry, entry:focus, entry:focus-visible {
    ════════════════════════════════════════════════════════════ */
 
 .media-title {
-  font-size: __FONT_SIZE__px;
+  font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.015em;
-  color: alpha(@window_fg_color, 0.930);
+  color: alpha(@window_fg_color, 0.940);
+}
+
+.media-artist {
+  font-size: 14px;
+  color: alpha(@window_fg_color, 0.620);
+}
+
+.media-meta {
+  font-size: 12px;
+  color: alpha(@window_fg_color, 0.380);
+}
+
+/* Album-art placeholder: neutral tinted square. */
+.media-art {
+  border-radius: 12px;
+  background: alpha(@window_fg_color, 0.060);
+  border: 1px solid alpha(@window_fg_color, 0.090);
+}
+
+.media-art-icon {
+  font-size: 30px;
+  color: alpha(@window_fg_color, 0.400);
+}
+
+.media-art-image {
+  border-radius: 12px;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1182,6 +1222,47 @@ scrollbar slider:hover {
 .network-status-connected {
   color: @accent_color;
   font-weight: 500;
+}
+
+.network-wired-icon {
+  color: alpha(@window_fg_color, 0.450);
+}
+
+.network-active .network-wired-icon {
+  color: @accent_color;
+}
+
+/* Connect: purple outline pill. Disconnect: subtle grey filled pill. */
+.network-connect-btn {
+  padding: 4px 12px;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid alpha(@accent_color, 0.400);
+  color: @accent_color;
+  font-size: 11px;
+  font-weight: 500;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.network-connect-btn:hover {
+  background: alpha(@accent_color, 0.120);
+  border-color: alpha(@accent_color, 0.600);
+}
+
+.network-disconnect-btn {
+  padding: 4px 12px;
+  border-radius: 7px;
+  background: alpha(@window_fg_color, 0.075);
+  border: 1px solid transparent;
+  color: alpha(@window_fg_color, 0.600);
+  font-size: 11px;
+  font-weight: 500;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.network-disconnect-btn:hover {
+  background: alpha(@window_fg_color, 0.110);
+  color: alpha(@window_fg_color, 0.800);
 }
 
 /* ── Preferences text inputs ── */

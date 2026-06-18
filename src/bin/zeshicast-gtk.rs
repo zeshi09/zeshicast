@@ -39,6 +39,14 @@ fn configure_layer_shell(window: &ApplicationWindow) {
 fn configure_layer_shell(_window: &ApplicationWindow) {}
 
 fn main() -> glib::ExitCode {
+    // GTK4's Vulkan/NGL renderer randomly clips the tops of glyphs on some
+    // GPU/driver setups; the cairo (software) renderer is glitch-free and plenty
+    // fast for a launcher. Default to it, but let the user override.
+    if std::env::var_os("GSK_RENDERER").is_none() {
+        // Safe: runs at the very start of main, before any threads or GTK init.
+        unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
+    }
+
     let state = Rc::new(RefCell::new(None::<zeshicast::ui::GuiState>));
     let hold = Rc::new(RefCell::new(None::<gio::ApplicationHoldGuard>));
 
@@ -154,6 +162,7 @@ In the window:
   Ctrl+D                  Open dashboard
   Ctrl+I                  Open local AI chat
   Ctrl+M                  Open media status
+  Ctrl+O                  Open audio mixer (output/input devices and volumes)
   Ctrl+N                  Open network status
   Ctrl+B                  Open extension browser (list all custom commands)
   Ctrl+,                  Open preferences editor (AI endpoint, model, translate settings)
@@ -166,8 +175,8 @@ Prefix searches:
   shell <cmd>             Run an arbitrary shell command
   system / sys            System actions (lock, suspend, reboot, power off)
   audio / vol / volume    Audio/brightness actions
-  media / player / mpris   MPRIS playback controls through playerctl
-  notify / dnd            Notification/DND actions for swaync or dunst
+  media / player / mpris   MPRIS playback controls over D-Bus
+  notify / dnd            Notification history and DND (built-in D-Bus server)
   net / wifi / network    Network actions
   niri                    Niri compositor actions
   clip / clipboard        Search clipboard history
