@@ -10,6 +10,19 @@ GTK4 launcher and daemon are behind the `gui` feature.
 See [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the
 roadmap.
 
+## Screenshots
+
+![Dashboard](docs/img/dashboard.png)
+
+| | |
+|---|---|
+| **Media** — MPRIS over D-Bus, album art, scrubber | **Audio** — output/input devices and volumes |
+| ![Media](docs/img/media.png) | ![Audio](docs/img/audio.png) |
+| **Notifications** — built-in freedesktop D-Bus server | **Network** — Ethernet + Wi-Fi |
+| ![Notifications](docs/img/notifications.png) | ![Network](docs/img/network.png) |
+| **Preferences** — sidebar + auto-saving fields | |
+| ![Preferences](docs/img/preferences.png) | |
+
 ## Install on NixOS (flake)
 
 The flake builds both binaries and ships a NixOS module that runs the daemon
