@@ -39,6 +39,17 @@
             mainProgram = "zeshicast-gtk";
           };
         };
+
+      zeshicastModuleOptions = { lib, pkgs }: {
+        enable = lib.mkEnableOption
+          "zeshicast launcher daemon and notification server";
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          defaultText = lib.literalExpression "zeshicast.packages.\${system}.default";
+          description = "The zeshicast package to use.";
+        };
+      };
     in
     {
       devShells = forAllSystems (system:
@@ -87,16 +98,7 @@
       nixosModules.default = { config, lib, pkgs, ... }:
         let cfg = config.services.zeshicast;
         in {
-          options.services.zeshicast = {
-            enable = lib.mkEnableOption
-              "zeshicast launcher daemon and notification server";
-            package = lib.mkOption {
-              type = lib.types.package;
-              default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-              defaultText = lib.literalExpression "zeshicast.packages.\${system}.default";
-              description = "The zeshicast package to use.";
-            };
-          };
+          options.services.zeshicast = zeshicastModuleOptions { inherit lib pkgs; };
 
           config = lib.mkIf cfg.enable {
             environment.systemPackages = [ cfg.package ];
@@ -113,6 +115,34 @@
                 Restart = "on-failure";
                 RestartSec = 2;
               };
+            };
+          };
+        };
+
+      # Home Manager module: installs the package and defines the same daemon as
+      # a systemd user service using Home Manager's unit-file schema.
+      homeManagerModules.default = { config, lib, pkgs, ... }:
+        let cfg = config.services.zeshicast;
+        in {
+          options.services.zeshicast = zeshicastModuleOptions { inherit lib pkgs; };
+
+          config = lib.mkIf cfg.enable {
+            home.packages = [ cfg.package ];
+
+            systemd.user.services.zeshicast = {
+              Unit = {
+                Description = "zeshicast launcher daemon + notification server";
+                Documentation = [ "https://github.com/zeshi09/zeshicast" ];
+                PartOf = [ "graphical-session.target" ];
+                After = [ "graphical-session.target" ];
+              };
+              Service = {
+                ExecStart = "${lib.getExe cfg.package} --daemon";
+                ExecStop = "${lib.getExe cfg.package} --quit";
+                Restart = "on-failure";
+                RestartSec = 2;
+              };
+              Install.WantedBy = [ "graphical-session.target" ];
             };
           };
         };

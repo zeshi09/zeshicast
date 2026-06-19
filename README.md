@@ -67,6 +67,44 @@ Without the module you can also just `nix run github:zeshi09/zeshicast`
 (launches the GTK launcher), or add `zeshicast.packages.${system}.default` to
 `environment.systemPackages` and bind/spawn the binaries yourself.
 
+## Install with Home Manager (flake)
+
+Use the Home Manager module, not the NixOS module:
+
+```nix
+# flake.nix of your Home Manager config
+{
+  inputs.zeshicast.url = "github:zeshi09/zeshicast";
+
+  outputs = { nixpkgs, home-manager, zeshicast, ... }: {
+    homeConfigurations.myuser = home-manager.lib.homeManagerConfiguration {
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      modules = [
+        zeshicast.homeManagerModules.default
+        { services.zeshicast.enable = true; }
+      ];
+    };
+  };
+}
+```
+
+If your Home Manager config is imported from a NixOS flake, put the same import
+inside `home-manager.users.<name>`:
+
+```nix
+{
+  home-manager.users.myuser = {
+    imports = [ inputs.zeshicast.homeManagerModules.default ];
+    services.zeshicast.enable = true;
+  };
+}
+```
+
+`homeManagerModules.default` installs the package through `home.packages` and
+creates the `zeshicast` systemd user service. Do not import
+`zeshicast.nixosModules.default` in a pure Home Manager configuration: that
+module uses NixOS-only options such as `environment.systemPackages`.
+
 ## Run from a checkout
 
 ```bash
