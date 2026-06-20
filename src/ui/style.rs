@@ -1290,6 +1290,29 @@ spinbutton.pref-entry entry {
   font-size: 12px;
 }
 
+/* ════════════════════════════════════════════════════════════
+   OSD (keyboard-layout pill, etc.)
+   ════════════════════════════════════════════════════════════ */
+
+.osd-window { background-color: transparent; }
+
+.osd-pill {
+  background-color: rgba(20, 20, 28, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 28px;
+  padding: 26px 44px;
+  box-shadow:
+    0 4px 12px  rgba(0, 0, 0, 0.30),
+    0 18px 52px rgba(0, 0, 0, 0.45);
+}
+
+.osd-pill-label {
+  font-size: 52px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #ffffff;
+}
+
 "
     .replace("__FONT_FAMILY__", &font_family)
     .replace("__FONT_SIZE__", &font_size.to_string())

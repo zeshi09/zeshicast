@@ -10,12 +10,13 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use crate::{AudioSnapshot, NetworkSnapshot, audio_snapshot, network_snapshot};
+use crate::{AudioSnapshot, NetworkSnapshot, audio_snapshot, keyboard_layout, network_snapshot};
 
 #[derive(Default)]
 struct Cache {
     network: NetworkSnapshot,
     audio: AudioSnapshot,
+    keyboard_layout: Option<String>,
 }
 
 static CACHE: OnceLock<Arc<Mutex<Cache>>> = OnceLock::new();
@@ -30,12 +31,15 @@ pub fn start() {
     std::thread::spawn(move || {
         let mut tick: u64 = 0;
         loop {
-            // Audio reacts to volume keys, so refresh it every tick. Network
-            // state rarely changes, so refresh it less often to save power.
+            // Audio reacts to volume keys and the keyboard layout to the switch
+            // hotkey, so refresh both every tick. Network state rarely changes,
+            // so refresh it less often to save power.
             let audio = audio_snapshot();
+            let layout = keyboard_layout();
             let network = (tick % 3 == 0).then(network_snapshot);
             if let Ok(mut cache) = cache.lock() {
                 cache.audio = audio;
+                cache.keyboard_layout = layout;
                 if let Some(network) = network {
                     cache.network = network;
                 }
@@ -54,6 +58,7 @@ fn cache() -> Arc<Mutex<Cache>> {
             Arc::new(Mutex::new(Cache {
                 network: network_snapshot(),
                 audio: audio_snapshot(),
+                keyboard_layout: keyboard_layout(),
             }))
         })
         .clone()
@@ -67,4 +72,9 @@ pub fn cached_network_snapshot() -> NetworkSnapshot {
 /// Latest cached audio snapshot (never blocks on a subprocess).
 pub fn cached_audio_snapshot() -> AudioSnapshot {
     cache().lock().map(|c| c.audio.clone()).unwrap_or_default()
+}
+
+/// Latest cached keyboard-layout code (e.g. "en"/"ru"), or `None` if unknown.
+pub fn cached_keyboard_layout() -> Option<String> {
+    cache().lock().ok().and_then(|c| c.keyboard_layout.clone())
 }

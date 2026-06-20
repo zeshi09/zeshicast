@@ -418,7 +418,11 @@ fn build_ui(
         let snippet_list = snippet_view.list.clone();
         let snippet_items = Rc::clone(&snippet_items);
         let key_controller = EventControllerKey::new();
-        key_controller.connect_key_pressed(move |_, key, _, state| {
+        key_controller.connect_key_pressed(move |_, key, keycode, state| {
+            // Match shortcuts against the Latin-layout keyval so Ctrl+O etc. work
+            // when the active keyboard layout is non-Latin (e.g. Cyrillic). The
+            // real event still reaches the entry unchanged, so typing is intact.
+            let key = latin_keyval(keycode).unwrap_or(key);
             handle_key(
                 &controller_window,
                 &launcher,
@@ -450,6 +454,12 @@ fn build_ui(
                 state,
             )
         });
+        // Capture phase: intercept navigation keys (Return, Up/Down, Ctrl-shortcuts)
+        // before the focused search Entry consumes them. Otherwise GtkText eats
+        // Return whenever the entry has focus, so Enter only worked when focus
+        // happened to sit on the result list. Unhandled keys return `Proceed`, so
+        // typing still reaches the entry.
+        key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         window.add_controller(key_controller);
     }
 
@@ -521,6 +531,20 @@ fn build_ui(
     // so the per-second UI timers below never fork on the main loop.
     crate::start_poll_cache();
 
+    // Flash a centered pill when the keyboard layout changes (works while the
+    // launcher is hidden — it's a separate layer-shell surface). The watcher
+    // pushes from niri's event stream; we drain it on the main loop.
+    {
+        let layout_rx = crate::layout_change_receiver();
+        let app = app.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(120), move || {
+            while let Ok(code) = layout_rx.try_recv() {
+                crate::ui::osd::show_layout_osd(&app, &code);
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
     {
         let navigation = navigation.clone();
         let media_view = media_view.clone();
@@ -537,6 +561,7 @@ fn build_ui(
                 status_strip.set_battery_snapshot(&crate::battery_snapshot());
                 status_strip.set_audio_snapshot(&crate::cached_audio_snapshot());
                 status_strip.set_media_snapshot(&crate::media_snapshot());
+                status_strip.set_keyboard_layout(crate::cached_keyboard_layout().as_deref());
             }
             if navigation.current() == crate::ui::LauncherView::Media {
                 crate::ui::set_media_snapshot(&media_view, &crate::media_snapshot());
@@ -1316,6 +1341,15 @@ fn root_action_section(
         "App" => "Applications",
         _ => "Library",
     }
+}
+
+/// Resolve a hardware keycode to its keyval in the primary (Latin) layout group,
+/// independent of the currently active keyboard layout. Lets Ctrl-shortcuts
+/// match on e.g. a Cyrillic layout where the produced keyval would be Cyrillic.
+fn latin_keyval(keycode: u32) -> Option<gdk::Key> {
+    gdk::Display::default()
+        .and_then(|display| display.translate_key(keycode, gdk::ModifierType::empty(), 0))
+        .map(|(keyval, _, _, _)| keyval)
 }
 
 fn handle_key(
@@ -2114,7 +2148,7 @@ fn apply_status_strip_preferences(
     let items = preference_list(
         launcher,
         "status_items",
-        &["clock", "date", "network", "battery", "audio", "media"],
+        &["clock", "date", "network", "battery", "audio", "media", "layout"],
     );
     status_strip.set_items(&items);
 }

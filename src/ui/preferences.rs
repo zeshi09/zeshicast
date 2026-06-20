@@ -4,7 +4,7 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("ui_density", "compact"),
     ("ui_theme", "system"),
     ("show_status_strip", "true"),
-    ("status_items", "clock,date,network,battery,audio,media"),
+    ("status_items", "clock,date,network,battery,audio,media,layout"),
     ("dashboard_enabled", "true"),
     ("dashboard_poll_interval_ms", "1000"),
     ("network_enabled", "true"),
@@ -31,7 +31,7 @@ pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
     ("show_status_strip", "Show status strip (true/false)"),
     (
         "status_items",
-        "Status strip items (clock,date,network,battery,audio,media)",
+        "Status strip items (clock,date,network,battery,audio,media,layout)",
     ),
     ("dashboard_enabled", "Dashboard views enabled (true/false)"),
     ("network_enabled", "Network features enabled (true/false)"),

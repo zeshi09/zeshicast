@@ -64,16 +64,30 @@ pub(crate) fn load_apps(home: &Path) -> Vec<AppEntry> {
 }
 
 fn parse_desktop_file(path: &Path) -> Option<AppEntry> {
-    let content = fs::read_to_string(path).ok()?;
+    parse_desktop_content(&fs::read_to_string(path).ok()?)
+}
+
+pub(crate) fn parse_desktop_content(content: &str) -> Option<AppEntry> {
     let mut name = None;
     let mut exec = None;
     let mut comment = None;
     let mut icon = None;
     let mut no_display = false;
     let mut hidden = false;
+    // Only the `[Desktop Entry]` group describes the app itself. Later
+    // `[Desktop Action …]` groups carry their own Name=/Exec= which must not
+    // overwrite the app's (otherwise e.g. LibreWolf becomes "Profile Manager").
+    let mut in_desktop_entry = false;
 
     for line in content.lines().map(str::trim) {
         if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_desktop_entry = line == "[Desktop Entry]";
+            continue;
+        }
+        if !in_desktop_entry {
             continue;
         }
         if let Some(value) = line.strip_prefix("Name=") {
@@ -159,4 +173,34 @@ pub(crate) fn app_action(app: &AppEntry, score: i32) -> Action {
             .unwrap_or(&app.exec),
     )
     .with_icon(&app.icon_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_actions_do_not_override_main_entry() {
+        // Mirrors librewolf.desktop: a [Desktop Entry] followed by action groups
+        // whose Name=/Exec= must not leak into the app itself.
+        let app = parse_desktop_content(
+            "[Desktop Entry]\n\
+             Name=LibreWolf\n\
+             Exec=librewolf --name librewolf %U\n\
+             Type=Application\n\
+             \n\
+             [Desktop Action new-private-window]\n\
+             Exec=librewolf --private-window %U\n\
+             Name=New Private Window\n\
+             \n\
+             [Desktop Action profile-manager-window]\n\
+             Exec=librewolf --ProfileManager\n\
+             Name=Profile Manager\n",
+        )
+        .expect("desktop entry parses");
+
+        assert_eq!(app.name, "LibreWolf");
+        assert_eq!(app.exec, "librewolf --name librewolf");
+        assert!(fuzzy_score("LibreWolf librewolf", "librewolf").is_some());
+    }
 }

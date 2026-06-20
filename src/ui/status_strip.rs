@@ -15,6 +15,7 @@ pub struct StatusStrip {
     battery: Label,
     audio: Label,
     media: Label,
+    layout: Label,
 }
 
 impl StatusStrip {
@@ -51,11 +52,13 @@ impl StatusStrip {
         let battery = status_chip();
         let audio = status_chip();
         let media = status_chip();
+        let layout = status_chip();
 
         right.append(&network);
         right.append(&battery);
         right.append(&audio);
         right.append(&media);
+        right.append(&layout);
 
         root.append(&left);
         root.append(&spacer);
@@ -69,6 +72,7 @@ impl StatusStrip {
             battery,
             audio,
             media,
+            layout,
         };
         strip.refresh();
         strip.start_clock();
@@ -87,6 +91,7 @@ impl StatusStrip {
         self.battery.set_visible(enabled.contains("battery"));
         self.audio.set_visible(enabled.contains("audio"));
         self.media.set_visible(enabled.contains("media"));
+        self.layout.set_visible(enabled.contains("layout"));
     }
 
     fn refresh(&self) {
@@ -191,6 +196,16 @@ impl StatusStrip {
         } else {
             self.media.set_visible(false);
         }
+    }
+
+    pub fn set_keyboard_layout(&self, code: Option<&str>) {
+        let Some(code) = code.filter(|c| !c.is_empty()) else {
+            self.layout.set_visible(false);
+            return;
+        };
+        self.layout.set_text(&format!("⌨  {}", code.to_uppercase()));
+        self.layout.set_visible(true);
+        self.layout.add_css_class("active");
     }
 }
 
