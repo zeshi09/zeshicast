@@ -1294,23 +1294,27 @@ spinbutton.pref-entry entry {
    OSD (keyboard-layout pill, etc.)
    ════════════════════════════════════════════════════════════ */
 
-.osd-window { background-color: transparent; }
+window.osd-window,
+.osd-window { background-color: transparent; box-shadow: none; }
 
 .osd-pill {
-  background-color: rgba(20, 20, 28, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 28px;
-  padding: 26px 44px;
-  box-shadow:
-    0 4px 12px  rgba(0, 0, 0, 0.30),
-    0 18px 52px rgba(0, 0, 0, 0.45);
+  /* Margin keeps the drop shadow inside the (transparent) window so it isn't
+     clipped to a square at the corners — it must exceed the shadow's reach. */
+  margin: 34px;
+  /* Opaque Adwaita surface — a translucent fill would let the content behind
+     bleed through and tint the pill. */
+  background-color: @window_bg_color;
+  border: 1px solid alpha(@window_fg_color, 0.10);
+  border-radius: 26px;
+  padding: 24px 44px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.50);
 }
 
 .osd-pill-label {
   font-size: 52px;
   font-weight: 700;
   letter-spacing: 2px;
-  color: #ffffff;
+  color: alpha(@window_fg_color, 0.95);
 }
 
 "
