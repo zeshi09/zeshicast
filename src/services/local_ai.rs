@@ -7,6 +7,31 @@ pub struct LocalAiConfig {
     pub model: String,
 }
 
+/// List the models installed on an Ollama server (`GET {endpoint}/api/tags`).
+/// Blocking — call off the UI thread. Returns an empty list if unreachable.
+pub fn list_models(endpoint: &str) -> Vec<String> {
+    let endpoint = endpoint.trim_end_matches('/');
+    let url = format!("{endpoint}/api/tags");
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(5))
+        .build();
+    let Ok(response) = agent.get(&url).call() else {
+        return Vec::new();
+    };
+    let Ok(value) = response.into_json::<serde_json::Value>() else {
+        return Vec::new();
+    };
+    value["models"]
+        .as_array()
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model["name"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn ask_local_ai(config: &LocalAiConfig, prompt: &str) -> io::Result<String> {
     if config.model.trim().is_empty() {
         return Err(io::Error::new(

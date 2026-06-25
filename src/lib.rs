@@ -74,7 +74,9 @@ pub use services::audio::{
     AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
 };
 pub use services::battery::{BatteryDeviceSnapshot, BatterySnapshot, battery_snapshot};
-pub use services::local_ai::{LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming};
+pub use services::local_ai::{
+    LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming, list_models,
+};
 pub use services::storage as storage_service;
 pub use services::media::{MediaControl, MediaSnapshot, media_control, media_snapshot};
 pub use services::compositor::{

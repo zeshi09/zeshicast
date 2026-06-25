@@ -49,13 +49,13 @@ pub(super) fn ask_ai_from_view(
                     ai_chat_view.output.set_text(&format!("{}▋", *accumulated.borrow()));
                 }
                 Ok(StreamChunk::Done) => {
-                    // Remove cursor on completion
-                    ai_chat_view.output.set_text(&*accumulated.borrow());
+                    // Streaming done — re-render the full reply as Markdown.
+                    render_ai_markdown(&ai_chat_view, &accumulated.borrow());
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }
                 Ok(StreamChunk::Cancelled) => {
-                    ai_chat_view.output.set_text(&*accumulated.borrow());
+                    render_ai_markdown(&ai_chat_view, &accumulated.borrow());
                     ai_chat_view.status.set_text("Cancelled");
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
@@ -67,13 +67,19 @@ pub(super) fn ask_ai_from_view(
                 }
                 Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    ai_chat_view.output.set_text(&*accumulated.borrow());
+                    render_ai_markdown(&ai_chat_view, &accumulated.borrow());
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }
             }
         }
     });
+}
+
+/// Render the completed reply as Markdown. We stream plain text (partial
+/// Markdown would produce invalid Pango markup mid-response), then format once.
+fn render_ai_markdown(view: &crate::ui::AiChatView, text: &str) {
+    view.output.set_markup(&super::markdown::to_pango_markup(text));
 }
 
 fn finish_ai_view(view: &crate::ui::AiChatView) {

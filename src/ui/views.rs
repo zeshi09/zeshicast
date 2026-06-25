@@ -46,6 +46,10 @@ pub struct AiChatView {
     pub copy: Button,
     pub use_clipboard: Button,
     pub save: Button,
+    /// Container the dynamic model buttons are filled into.
+    pub model_list: GtkBox,
+    /// Re-fetch the model list from Ollama.
+    pub refresh_models: Button,
 }
 
 #[derive(Clone)]
@@ -300,14 +304,17 @@ pub fn ai_chat_view() -> AiChatView {
     model_label.set_valign(gtk::Align::Center);
     model_bar.append(&model_label);
 
-    for model in &["llama3.2:3b", "mistral:7b", "phi3:mini"] {
-        let btn = Button::with_label(model);
-        btn.add_css_class("ai-model-btn");
-        if *model == "llama3.2:3b" {
-            btn.add_css_class("active");
-        }
-        model_bar.append(&btn);
-    }
+    // Filled at runtime from the Ollama server (see populate_ai_models).
+    let model_list = GtkBox::new(Orientation::Horizontal, 6);
+    model_list.set_hexpand(true);
+    model_bar.append(&model_list);
+
+    let refresh_models = Button::with_label("⟳");
+    refresh_models.add_css_class("ai-model-btn");
+    refresh_models.set_valign(gtk::Align::Center);
+    refresh_models.set_tooltip_text(Some("Refresh models"));
+    model_bar.append(&refresh_models);
+
     root.append(&model_bar);
 
     // ── Messages scroll area ─────────────────────────────────────────────────
@@ -395,6 +402,8 @@ pub fn ai_chat_view() -> AiChatView {
         copy,
         use_clipboard,
         save,
+        model_list,
+        refresh_models,
     }
 }
 

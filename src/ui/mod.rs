@@ -4,6 +4,7 @@ pub(crate) mod icons;
 mod launcher;
 mod launcher_helpers;
 mod launcher_views;
+mod markdown;
 mod navigation;
 mod notify_server;
 mod osd;

@@ -122,6 +122,7 @@ fn build_ui(
     let clipboard_items = Rc::new(RefCell::new(Vec::<ClipboardSummary>::new()));
     let snippet_items = Rc::new(RefCell::new(Vec::<SnippetSummary>::new()));
     install_clipboard_monitor(&launcher);
+    install_clipboard_background_watcher(&launcher);
     super::notify_server::install_notification_server();
 
     let window = ApplicationWindow::builder()
@@ -476,6 +477,17 @@ fn build_ui(
         let ai_chat_view = ai_chat_view.clone();
         ai_chat_view.ask.clone().connect_clicked(move |_| {
             ask_ai_from_view(&launcher, &ai_chat_view);
+        });
+    }
+
+    // Fetch the installed Ollama models into the selector bar, and re-fetch on
+    // demand via the refresh button.
+    populate_ai_models(&launcher, &ai_chat_view);
+    {
+        let launcher = Rc::clone(&launcher);
+        let ai_chat_view = ai_chat_view.clone();
+        ai_chat_view.refresh_models.clone().connect_clicked(move |_| {
+            populate_ai_models(&launcher, &ai_chat_view);
         });
     }
 
@@ -1074,6 +1086,198 @@ fn install_clipboard_monitor(launcher: &Rc<RefCell<Zeshicast>>) {
     clipboard.connect_changed(move |clipboard| {
         capture_clipboard(clipboard, &launcher, &last);
     });
+}
+
+/// Fetch the Ollama model list off the main thread and fill the AI model bar.
+fn populate_ai_models(launcher: &Rc<RefCell<Zeshicast>>, view: &crate::ui::AiChatView) {
+    let endpoint = {
+        let app = launcher.borrow();
+        let prefs = app.get_preferences();
+        prefs
+            .get("ollama_endpoint")
+            .or_else(|| prefs.get("local_ai_endpoint"))
+            .cloned()
+            .unwrap_or_else(|| "http://localhost:11434".to_string())
+    };
+
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::list_models(&endpoint));
+    });
+
+    let launcher = Rc::clone(launcher);
+    let view = view.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(80), move || {
+        match rx.try_recv() {
+            Ok(models) => {
+                fill_ai_model_bar(&launcher, &view, &models);
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+}
+
+/// Rebuild the model buttons; clicking one switches the active model live and
+/// persists it to the `ollama_model` preference (no config editing needed).
+fn fill_ai_model_bar(
+    launcher: &Rc<RefCell<Zeshicast>>,
+    view: &crate::ui::AiChatView,
+    models: &[String],
+) {
+    let list = &view.model_list;
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+
+    if models.is_empty() {
+        let note = gtk::Label::new(Some("No models — is Ollama running?"));
+        note.add_css_class("result-subtitle");
+        note.set_valign(gtk::Align::Center);
+        list.append(&note);
+        return;
+    }
+
+    let current = {
+        let app = launcher.borrow();
+        let prefs = app.get_preferences();
+        prefs
+            .get("ollama_model")
+            .or_else(|| prefs.get("local_ai_model"))
+            .or_else(|| prefs.get("ai_model"))
+            .cloned()
+            .unwrap_or_default()
+    };
+    // Fall back to the first model if the configured one isn't installed, and
+    // persist it so the next query uses something real.
+    let active = if models.iter().any(|m| *m == current) {
+        current
+    } else {
+        let first = models[0].clone();
+        if let Err(error) = launcher
+            .borrow_mut()
+            .set_preference("ollama_model".to_string(), first.clone())
+        {
+            eprintln!("failed to set default model: {error}");
+        }
+        first
+    };
+
+    for model in models {
+        let btn = Button::with_label(model);
+        btn.add_css_class("ai-model-btn");
+        if *model == active {
+            btn.add_css_class("active");
+        }
+        let launcher = Rc::clone(launcher);
+        let siblings = list.clone();
+        let model = model.clone();
+        btn.connect_clicked(move |btn| {
+            let mut sibling = siblings.first_child();
+            while let Some(widget) = sibling {
+                widget.remove_css_class("active");
+                sibling = widget.next_sibling();
+            }
+            btn.add_css_class("active");
+            if let Err(error) = launcher
+                .borrow_mut()
+                .set_preference("ollama_model".to_string(), model.clone())
+            {
+                eprintln!("failed to switch model: {error}");
+            }
+        });
+        list.append(&btn);
+    }
+}
+
+/// Background clipboard capture via `wl-paste --watch`. The gdk
+/// `connect_changed` monitor only fires while the launcher window is focused —
+/// on Wayland a client receives clipboard events only when focused — so
+/// everything copied while the launcher is hidden collapses to just the latest
+/// value on next focus, and rapid copies race (the async read sees the newest
+/// content). `wl-paste --watch` fires for *every* change in the background.
+/// Text only; image copies stay on the gdk path.
+fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshicast>>) {
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || watch_clipboard_text(tx));
+
+    let launcher = Rc::clone(launcher);
+    glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
+        while let Ok(text) = rx.try_recv() {
+            if let Err(error) = launcher.borrow_mut().add_clipboard_text(&text) {
+                eprintln!("failed to save clipboard history: {error}");
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
+fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
+    use std::io::BufRead;
+    loop {
+        // Each selection change runs the command with the new content on stdin;
+        // we frame entries with a trailing NUL (clipboard text never contains
+        // one) so multi-line values stay intact.
+        let mut child = match std::process::Command::new("wl-paste")
+            .args(["--watch", "sh", "-c", "cat; printf '\\0'"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            // wl-clipboard not installed — leave the gdk monitor as the only path.
+            Err(_) => return,
+        };
+        let Some(stdout) = child.stdout.take() else {
+            return;
+        };
+
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            buf.clear();
+            match reader.read_until(0, &mut buf) {
+                Ok(0) => break, // wl-paste exited
+                Ok(_) => {
+                    if buf.last() == Some(&0) {
+                        buf.pop();
+                    }
+                    if let Some(text) = decode_clipboard_text(&buf) {
+                        if tx.send(text).is_err() {
+                            return; // receiver gone, stop the thread
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        let _ = child.wait();
+        // wl-paste died (e.g. compositor restart); reconnect shortly, unless the
+        // receiver is gone (empty probe doubles as a liveness check).
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if tx.send(String::new()).is_err() {
+            return;
+        }
+    }
+}
+
+/// Accept a clipboard chunk only if it's valid UTF-8 text without binary control
+/// characters — filters out image/binary fragments `wl-paste` delivers for
+/// non-text content.
+fn decode_clipboard_text(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    if text
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+    {
+        return None;
+    }
+    Some(text.to_string())
 }
 
 /// Dispatch a clipboard change to image or text capture. Image copies rarely
@@ -2490,5 +2694,28 @@ fn select_first_action_row(list: &ListBox) {
             return;
         }
         index += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_clipboard_text;
+
+    #[test]
+    fn clipboard_text_accepts_plain_and_multiline() {
+        assert_eq!(decode_clipboard_text(b"hello").as_deref(), Some("hello"));
+        assert_eq!(
+            decode_clipboard_text(b"line one\nline two").as_deref(),
+            Some("line one\nline two")
+        );
+    }
+
+    #[test]
+    fn clipboard_text_rejects_blank_and_binary() {
+        assert!(decode_clipboard_text(b"   \n").is_none());
+        // Invalid UTF-8 (e.g. an image fragment).
+        assert!(decode_clipboard_text(&[0xff, 0xfe, 0x00]).is_none());
+        // Valid UTF-8 but carrying binary control bytes.
+        assert!(decode_clipboard_text(b"PNG\x01\x02data").is_none());
     }
 }
