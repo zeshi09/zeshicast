@@ -1,8 +1,8 @@
 pub(crate) mod apps;
-pub(crate) mod emoji;
 pub(crate) mod calculator;
 pub(crate) mod clipboard;
 pub(crate) mod commands;
+pub(crate) mod emoji;
 pub(crate) mod files;
 pub(crate) mod media;
 pub(crate) mod named_values;

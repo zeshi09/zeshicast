@@ -111,12 +111,19 @@ fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (f64, f64, f64) {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let h1 = h / 60.0;
     let x = c * (1.0 - (h1 % 2.0 - 1.0).abs());
-    let (r1, g1, b1) = if h1 < 1.0 { (c, x, 0.0) }
-        else if h1 < 2.0 { (x, c, 0.0) }
-        else if h1 < 3.0 { (0.0, c, x) }
-        else if h1 < 4.0 { (0.0, x, c) }
-        else if h1 < 5.0 { (x, 0.0, c) }
-        else { (c, 0.0, x) };
+    let (r1, g1, b1) = if h1 < 1.0 {
+        (c, x, 0.0)
+    } else if h1 < 2.0 {
+        (x, c, 0.0)
+    } else if h1 < 3.0 {
+        (0.0, c, x)
+    } else if h1 < 4.0 {
+        (0.0, x, c)
+    } else if h1 < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
     let m = l - c / 2.0;
     (r1 + m, g1 + m, b1 + m)
 }
@@ -124,7 +131,11 @@ fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (f64, f64, f64) {
 fn app_icon_color(name: &str) -> (f64, f64, f64) {
     let lower = name.to_lowercase();
     // Named overrides for well-known apps (match main_maket.png)
-    if lower.contains("terminal") || lower.contains("alacritty") || lower.contains("kitty") || lower.contains("foot") {
+    if lower.contains("terminal")
+        || lower.contains("alacritty")
+        || lower.contains("kitty")
+        || lower.contains("foot")
+    {
         return (0.118, 0.302, 0.227); // #1E4D3A
     }
     if lower.contains("code") || lower.contains("vscode") || lower.contains("vscodium") {
@@ -149,7 +160,9 @@ fn app_icon_color(name: &str) -> (f64, f64, f64) {
         return (0.267, 0.655, 0.322);
     }
     // Hash-based: deterministic hue from name, fixed saturation/lightness
-    let hash = name.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
+    let hash = name
+        .bytes()
+        .fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
     let hue = (hash % 360) as f64;
     hsl_to_rgb(hue, 0.55, 0.32)
 }
@@ -175,8 +188,20 @@ pub fn letter_icon(title: &str, size: i32) -> DrawingArea {
         cr.new_sub_path();
         cr.arc(wf - r, r, r, -std::f64::consts::FRAC_PI_2, 0.0);
         cr.arc(wf - r, hf - r, r, 0.0, std::f64::consts::FRAC_PI_2);
-        cr.arc(r, hf - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-        cr.arc(r, r, r, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
+        cr.arc(
+            r,
+            hf - r,
+            r,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+        );
+        cr.arc(
+            r,
+            r,
+            r,
+            std::f64::consts::PI,
+            3.0 * std::f64::consts::FRAC_PI_2,
+        );
         cr.close_path();
         cr.set_source_rgb(color.0, color.1, color.2);
         let _ = cr.fill();

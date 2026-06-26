@@ -48,9 +48,6 @@ pub fn ensure_fonts() {
     if wrote {
         // Refresh fontconfig for this directory so the new families are
         // discoverable immediately (and on every subsequent launch).
-        let _ = Command::new("fc-cache")
-            .arg("-f")
-            .arg(&dir)
-            .status();
+        let _ = Command::new("fc-cache").arg("-f").arg(&dir).status();
     }
 }

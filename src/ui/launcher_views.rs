@@ -34,7 +34,9 @@ pub(super) fn show_dashboard_view(
     crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
     crate::ui::set_dashboard_thermal(
         dashboard_view,
-        crate::thermal_snapshot().hottest_zone().map(|z| z.temperature_c),
+        crate::thermal_snapshot()
+            .hottest_zone()
+            .map(|z| z.temperature_c),
     );
     crate::ui::set_dashboard_network_snapshot(dashboard_view, &crate::network_snapshot());
     crate::ui::set_dashboard_battery_snapshot(dashboard_view, &crate::battery_snapshot());
@@ -168,9 +170,7 @@ pub(super) fn run_launcher_command(
         crate::LauncherCommand::Dashboard => {
             show_dashboard_view(navigation, entry, action_bar, dashboard_view)
         }
-        crate::LauncherCommand::Emoji => {
-            show_emoji_view(navigation, entry, action_bar, emoji_view)
-        }
+        crate::LauncherCommand::Emoji => show_emoji_view(navigation, entry, action_bar, emoji_view),
         crate::LauncherCommand::Fonts => {
             show_font_browser_view(navigation, entry, action_bar, font_view)
         }

@@ -1,5 +1,8 @@
 use std::io::{self, BufRead, BufReader};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[derive(Debug, Clone)]
 pub struct LocalAiConfig {

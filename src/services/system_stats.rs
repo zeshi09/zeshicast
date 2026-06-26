@@ -66,7 +66,10 @@ fn read_cpu_count() -> io::Result<usize> {
         .filter(|line| line.starts_with("processor"))
         .count();
     if count == 0 {
-        Err(io::Error::new(io::ErrorKind::InvalidData, "no processors found"))
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "no processors found",
+        ))
     } else {
         Ok(count)
     }

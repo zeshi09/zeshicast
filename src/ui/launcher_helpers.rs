@@ -46,7 +46,9 @@ pub(super) fn ask_ai_from_view(
                 Ok(StreamChunk::Token(token)) => {
                     accumulated.borrow_mut().push_str(&token);
                     // Show streaming cursor at end of text
-                    ai_chat_view.output.set_text(&format!("{}▋", *accumulated.borrow()));
+                    ai_chat_view
+                        .output
+                        .set_text(&format!("{}▋", *accumulated.borrow()));
                 }
                 Ok(StreamChunk::Done) => {
                     // Streaming done — re-render the full reply as Markdown.
@@ -79,7 +81,8 @@ pub(super) fn ask_ai_from_view(
 /// Render the completed reply as Markdown. We stream plain text (partial
 /// Markdown would produce invalid Pango markup mid-response), then format once.
 fn render_ai_markdown(view: &crate::ui::AiChatView, text: &str) {
-    view.output.set_markup(&super::markdown::to_pango_markup(text));
+    view.output
+        .set_markup(&super::markdown::to_pango_markup(text));
 }
 
 fn finish_ai_view(view: &crate::ui::AiChatView) {

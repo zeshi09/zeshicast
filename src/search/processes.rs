@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-use crate::{Action, ActionKind, MAX_RESULTS, ShellCommand, clipboard_preview, fuzzy_score};
+use crate::{
+    Action, ActionKind, ActionRisk, MAX_RESULTS, ShellCommand, clipboard_preview, fuzzy_score,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProcessEntry {
@@ -47,6 +49,7 @@ fn process_action(process: &ProcessEntry, score: i32) -> Action {
     )
     .with_subtitle(process_subtitle(process))
     .with_icon("application-x-executable-symbolic")
+    .with_risk(ActionRisk::ProcessKill)
 }
 
 fn process_subtitle(process: &ProcessEntry) -> String {

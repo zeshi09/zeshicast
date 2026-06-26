@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{
-    Action, ActionForm, ActionFormField, ActionKind, CommandArgumentKind, MAX_RESULTS,
-    PlaceholderContext, ShellCommand, expand_placeholders, expand_placeholders_shell, fuzzy_score,
-    normalize_alias,
-    tagged_subtitle, toml_value_string,
+    Action, ActionForm, ActionFormField, ActionKind, ActionRisk, Capability, CommandArgumentKind,
+    MAX_RESULTS, PlaceholderContext, ShellCommand, expand_placeholders, expand_placeholders_shell,
+    fuzzy_score, normalize_alias, tagged_subtitle, toml_value_string,
 };
 
 #[derive(Debug, Clone)]
@@ -26,6 +25,7 @@ pub(crate) struct CommandEntry {
     pub(crate) icon_name: String,
     pub(crate) description: String,
     pub(crate) permissions: Vec<String>,
+    pub(crate) capabilities: Vec<Capability>,
 }
 
 impl CommandEntry {
@@ -120,6 +120,7 @@ pub(crate) fn parse_command_entry(input: &str) -> Option<CommandEntry> {
     let description = toml_optional_string(&table, "description").unwrap_or_default();
     let tags = toml_string_array(&table, "tags");
     let permissions = toml_string_array(&table, "permissions");
+    let capabilities = parse_capabilities(&permissions);
 
     Some(CommandEntry {
         name,
@@ -135,6 +136,44 @@ pub(crate) fn parse_command_entry(input: &str) -> Option<CommandEntry> {
         icon_name,
         description,
         permissions,
+        capabilities,
+    })
+}
+
+fn parse_capabilities(permissions: &[String]) -> Vec<Capability> {
+    let mut capabilities = Vec::new();
+    for permission in permissions {
+        let Some(capability) = parse_capability(permission) else {
+            continue;
+        };
+        if !capabilities.contains(&capability) {
+            capabilities.push(capability);
+        }
+    }
+    capabilities
+}
+
+fn parse_capability(permission: &str) -> Option<Capability> {
+    match permission.trim().to_lowercase().replace('-', "_").as_str() {
+        "shell" | "run" => Some(Capability::Shell),
+        "network" | "net" => Some(Capability::Network),
+        "filesystem" | "fs" => Some(Capability::Filesystem),
+        "clipboard_read" | "clipboardread" => Some(Capability::ClipboardRead),
+        "clipboard_write" | "clipboardwrite" | "clipboard" => Some(Capability::ClipboardWrite),
+        "open_url" | "openurl" | "url" => Some(Capability::OpenUrl),
+        "open_path" | "openpath" | "path" => Some(Capability::OpenPath),
+        _ => None,
+    }
+}
+
+fn has_capability(capabilities: &[Capability], required: Capability) -> bool {
+    capabilities.iter().any(|capability| {
+        *capability == required
+            || matches!(
+                (*capability, required),
+                (Capability::Network, Capability::OpenUrl)
+                    | (Capability::Filesystem, Capability::OpenPath)
+            )
     })
 }
 
@@ -270,9 +309,15 @@ pub(crate) fn search_commands(
             }
 
             let command = shell_command.command.clone();
-            let subtitle = command_subtitle(entry, &command, &command_match.missing);
+            let mut subtitle = command_subtitle(entry, &command, &command_match.missing);
             let (kind, icon_name) = if command_match.missing.is_empty() {
-                (ActionKind::Shell(shell_command), entry.icon_name.as_str())
+                if has_capability(&entry.capabilities, Capability::Shell) {
+                    (ActionKind::Shell(shell_command), entry.icon_name.as_str())
+                } else {
+                    subtitle =
+                        "Blocked: command manifest lacks permissions = [\"shell\"]".to_string();
+                    (ActionKind::None, "dialog-warning-symbolic")
+                }
             } else {
                 let fields = entry
                     .arguments
@@ -303,19 +348,35 @@ pub(crate) fn search_commands(
                 (ActionKind::Form(form), "dialog-question-symbolic")
             };
 
-            Some(vec![
+            let mut action =
                 Action::new(&entry.category, &entry.name, kind, command_match.score + 85)
                     .with_subtitle(subtitle)
-                    .with_icon(icon_name),
-            ])
+                    .with_icon(icon_name);
+            if command_match.missing.is_empty()
+                && has_capability(&entry.capabilities, Capability::Shell)
+            {
+                action = action.with_risk(ActionRisk::Shell);
+            }
+
+            Some(vec![action])
         })
         .flatten()
         .collect()
 }
 
 fn search_json_command(entry: &CommandEntry, command: ShellCommand, score: i32) -> Vec<Action> {
+    if !has_capability(&entry.capabilities, Capability::Shell) {
+        return vec![
+            Action::new(&entry.category, &entry.name, ActionKind::None, score + 1)
+                .with_subtitle("Blocked: command manifest lacks permissions = [\"shell\"]")
+                .with_icon("dialog-warning-symbolic"),
+        ];
+    }
+
     match run_json_command(&command) {
-        Ok(stdout) => parse_json_actions(&stdout, &entry.category, score + 100),
+        Ok(stdout) => {
+            parse_json_actions(&stdout, &entry.category, score + 100, &entry.capabilities)
+        }
         Err(error) => vec![
             Action::new(&entry.category, &entry.name, ActionKind::None, score + 1)
                 .with_subtitle(format!("JSON command failed: {error}"))
@@ -374,7 +435,12 @@ fn run_json_command(command: &ShellCommand) -> io::Result<String> {
     Ok(stdout)
 }
 
-pub(crate) fn parse_json_actions(input: &str, category: &str, base_score: i32) -> Vec<Action> {
+pub(crate) fn parse_json_actions(
+    input: &str,
+    category: &str,
+    base_score: i32,
+    capabilities: &[Capability],
+) -> Vec<Action> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(input) else {
         return vec![
             Action::new(
@@ -400,29 +466,70 @@ pub(crate) fn parse_json_actions(input: &str, category: &str, base_score: i32) -
         .iter()
         .take(MAX_RESULTS)
         .enumerate()
-        .filter_map(|(index, value)| parse_json_action(value, category, base_score - index as i32))
+        .filter_map(|(index, value)| {
+            parse_json_action(value, category, base_score - index as i32, capabilities)
+        })
         .collect()
 }
 
-fn parse_json_action(value: &serde_json::Value, category: &str, score: i32) -> Option<Action> {
+fn parse_json_action(
+    value: &serde_json::Value,
+    category: &str,
+    score: i32,
+    capabilities: &[Capability],
+) -> Option<Action> {
     let title = json_string(value, "title")?;
-    let subtitle = json_string(value, "subtitle").unwrap_or_default();
+    let mut subtitle = json_string(value, "subtitle").unwrap_or_default();
     let icon_name = json_string(value, "icon").unwrap_or_else(|| "system-run-symbolic".to_string());
-    let kind = parse_json_action_kind(value);
+    let parsed = parse_json_action_kind(value, capabilities);
+    if let Some(denial) = parsed.denial {
+        subtitle = if subtitle.is_empty() {
+            denial
+        } else {
+            format!("{denial} - {subtitle}")
+        };
+    }
+    let risk = if matches!(&parsed.kind, ActionKind::Shell(_)) {
+        ActionRisk::Shell
+    } else {
+        ActionRisk::Normal
+    };
 
     Some(
         Action::new(
             json_string(value, "category").unwrap_or_else(|| category.to_string()),
             title,
-            kind,
+            parsed.kind,
             score,
         )
         .with_subtitle(subtitle)
-        .with_icon(icon_name),
+        .with_icon(icon_name)
+        .with_risk(risk),
     )
 }
 
-fn parse_json_action_kind(value: &serde_json::Value) -> ActionKind {
+struct ParsedJsonActionKind {
+    kind: ActionKind,
+    denial: Option<String>,
+}
+
+impl ParsedJsonActionKind {
+    fn allowed(kind: ActionKind) -> Self {
+        Self { kind, denial: None }
+    }
+
+    fn blocked(reason: impl Into<String>) -> Self {
+        Self {
+            kind: ActionKind::None,
+            denial: Some(reason.into()),
+        }
+    }
+}
+
+fn parse_json_action_kind(
+    value: &serde_json::Value,
+    capabilities: &[Capability],
+) -> ParsedJsonActionKind {
     let action = value.get("action").unwrap_or(value);
     let action_type = json_string(action, "type")
         .or_else(|| json_string(value, "action_type"))
@@ -432,16 +539,51 @@ fn parse_json_action_kind(value: &serde_json::Value) -> ActionKind {
         .unwrap_or_default();
 
     match action_type.as_str() {
-        "open_url" | "url" if !action_value.is_empty() => ActionKind::OpenUrl(action_value),
+        "open_url" | "url" if !action_value.is_empty() => {
+            if json_url_requires_capability(&action_value)
+                && !has_capability(capabilities, Capability::OpenUrl)
+            {
+                ParsedJsonActionKind::blocked(
+                    "Blocked: JSON action requires permissions = [\"network\"] or [\"open_url\"]",
+                )
+            } else {
+                ParsedJsonActionKind::allowed(ActionKind::OpenUrl(action_value))
+            }
+        }
         "open_path" | "path" if !action_value.is_empty() => {
-            ActionKind::OpenPath(PathBuf::from(action_value))
+            if has_capability(capabilities, Capability::OpenPath) {
+                ParsedJsonActionKind::allowed(ActionKind::OpenPath(PathBuf::from(action_value)))
+            } else {
+                ParsedJsonActionKind::blocked(
+                    "Blocked: JSON action requires permissions = [\"filesystem\"] or [\"open_path\"]",
+                )
+            }
         }
-        "copy" | "copy_text" if !action_value.is_empty() => ActionKind::Copy(action_value),
+        "copy" | "copy_text" if !action_value.is_empty() => {
+            if has_capability(capabilities, Capability::ClipboardWrite) {
+                ParsedJsonActionKind::allowed(ActionKind::Copy(action_value))
+            } else {
+                ParsedJsonActionKind::blocked(
+                    "Blocked: JSON action requires permissions = [\"clipboard_write\"]",
+                )
+            }
+        }
         "shell" | "run" if !action_value.is_empty() => {
-            ActionKind::Shell(ShellCommand::new(action_value))
+            if has_capability(capabilities, Capability::Shell) {
+                ParsedJsonActionKind::allowed(ActionKind::Shell(ShellCommand::new(action_value)))
+            } else {
+                ParsedJsonActionKind::blocked(
+                    "Blocked: JSON action requires permissions = [\"shell\"]",
+                )
+            }
         }
-        _ => ActionKind::None,
+        "none" => ParsedJsonActionKind::allowed(ActionKind::None),
+        _ => ParsedJsonActionKind::blocked(format!("Unsupported JSON action type: {action_type}")),
     }
+}
+
+fn json_url_requires_capability(value: &str) -> bool {
+    !value.trim().to_lowercase().starts_with("file://")
 }
 
 fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {

@@ -148,14 +148,9 @@ pub(crate) fn search_emoji(query: &str) -> Vec<Action> {
 }
 
 fn emoji_action(emoji: &str, name: &str, category: &str, score: i32) -> Action {
-    crate::Action::new(
-        "Emoji",
-        emoji,
-        ActionKind::Copy(emoji.to_string()),
-        score,
-    )
-    .with_subtitle(format!("{name}  ·  {category}"))
-    .with_icon("face-smile-symbolic")
+    crate::Action::new("Emoji", emoji, ActionKind::Copy(emoji.to_string()), score)
+        .with_subtitle(format!("{name}  ·  {category}"))
+        .with_icon("face-smile-symbolic")
 }
 
 #[cfg(feature = "gui")]

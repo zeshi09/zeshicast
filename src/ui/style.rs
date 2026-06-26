@@ -1323,7 +1323,10 @@ window.osd-window,
     .replace("__SUBTITLE_SIZE__", &subtitle_size.to_string())
     .replace("__SEARCH_SIZE__", &search_size.to_string())
     .replace("__PANEL_TITLE_SIZE__", &panel_title_size.to_string())
-    .replace("__DASHBOARD_CLOCK_SIZE__", &dashboard_clock_size.to_string())
+    .replace(
+        "__DASHBOARD_CLOCK_SIZE__",
+        &dashboard_clock_size.to_string(),
+    )
     .replace("__ROW_HEIGHT__", &row_height.to_string());
 
     let provider = CssProvider::new();

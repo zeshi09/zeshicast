@@ -354,7 +354,11 @@ until the input is complete. Commands run through `sh -c`.
 `[env]` values are expanded with the same placeholders as `command` and injected
 only into that command process.
 
-`permissions` is informational: `"shell"`, `"network"`, `"filesystem"`.
+`permissions` is enforced. Shell-mode commands require `"shell"` or they are
+shown as blocked actions. JSON-mode commands also require `"shell"` to execute
+their producer command, and returned actions require matching capabilities:
+`"shell"`, `"network"`/`"open_url"`, `"filesystem"`/`"open_path"`, and
+`"clipboard_write"`.
 
 ### Custom commands (JSON mode)
 
@@ -365,6 +369,7 @@ mode = "json"
 keyword = "docs"
 argument_hint = "<query>"
 command = "my-doc-search {{query}}"
+permissions = ["shell", "network", "clipboard_write"]
 arguments = [
   { name = "query", type = "text", required = true }
 ]
@@ -388,6 +393,8 @@ The command stdout must be a JSON array (or `{"results": [...]}`) of objects:
 ```
 
 Supported action types: `open_url`, `open_path`, `copy`, `shell`, `none`.
+Actions whose capabilities are not declared are shown as blocked warning
+results instead of being executable.
 JSON commands execute only on direct keyword invocation, e.g. `docs gtk listbox`.
 
 ### Example extension pack
@@ -472,7 +479,7 @@ GTK4 launcher      Layer-shell overlay (Wayland), daemon mode, clipboard monitor
 Command forms      GTK form panel for commands with missing required arguments
 Extension browser  Ctrl+B — list and inspect all custom commands
 Preferences editor Ctrl+, — edit AI/translate settings without touching files
-Permission field   permissions = ["shell","network","filesystem"] in command TOML
+Permission field   enforced capabilities: shell, network/open_url, filesystem/open_path, clipboard_write
 Import/export      zeshicast --export / --import for config backup and migration
 Example extensions packaging/examples/commands/ — github, weather, dict, docker, git
 Nix flake          packages, apps (nix run), NixOS module (systemd user service)

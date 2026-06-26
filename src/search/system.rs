@@ -1,4 +1,4 @@
-use crate::{Action, ActionKind, ShellCommand, fuzzy_score};
+use crate::{Action, ActionKind, ActionRisk, ShellCommand, fuzzy_score};
 
 #[derive(Debug, Clone)]
 pub(crate) struct SystemActionEntry {
@@ -31,16 +31,18 @@ pub(crate) fn search_system_actions(query: &str) -> Vec<Action> {
             } else {
                 fuzzy_score(&haystack, needle)?
             };
-            Some(
-                Action::new(
-                    "System",
-                    entry.title,
-                    ActionKind::Shell(ShellCommand::new(entry.command)),
-                    score + if explicit { 260 } else { 30 },
-                )
-                .with_subtitle(entry.subtitle)
-                .with_icon(entry.icon_name),
+            let mut action = Action::new(
+                "System",
+                entry.title,
+                ActionKind::Shell(ShellCommand::new(entry.command)),
+                score + if explicit { 260 } else { 30 },
             )
+            .with_subtitle(entry.subtitle)
+            .with_icon(entry.icon_name);
+            if entry.hazardous {
+                action = action.with_risk(ActionRisk::SystemPower);
+            }
+            Some(action)
         })
         .collect()
 }

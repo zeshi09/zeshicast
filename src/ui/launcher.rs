@@ -6,12 +6,12 @@ use crate::ui::launcher_helpers::{
 };
 use crate::ui::launcher_views::{
     run_launcher_command, show_ai_chat_view, show_audio_view, show_dashboard_view, show_emoji_view,
-    show_font_browser_view, show_media_view,
-    show_network_view, show_notifications_view, show_script_output_view, show_system_monitor_view,
+    show_font_browser_view, show_media_view, show_network_view, show_notifications_view,
+    show_script_output_view, show_system_monitor_view,
 };
 use crate::{
-    Action, ActionKind, ActionPanelSection, ClipboardKind, ClipboardSummary, SecondaryActionKind,
-    SnippetSummary, Zeshicast, ui::ActionPanelDisplayItem,
+    Action, ActionKind, ActionPanelSection, ActionRisk, ClipboardKind, ClipboardSummary,
+    SecondaryActionKind, SnippetSummary, Zeshicast, ui::ActionPanelDisplayItem,
 };
 use gtk::gdk;
 use gtk::gio;
@@ -31,10 +31,16 @@ struct ActionPanelItem {
     kind: ActionPanelItemKind,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActionPanelItemKind {
     Secondary(SecondaryActionKind),
     SetAlias,
+}
+
+#[derive(Clone)]
+enum DisplayedActionPanelRow {
+    Header(ActionPanelSection),
+    Action(ActionPanelItem),
 }
 
 #[derive(Clone, Copy)]
@@ -104,21 +110,23 @@ fn build_ui(
             let _ = sender.send(Zeshicast::build_file_index());
         });
         let launcher = Rc::clone(&launcher);
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            match receiver.try_recv() {
+        glib::timeout_add_local(
+            std::time::Duration::from_millis(100),
+            move || match receiver.try_recv() {
                 Ok(files) => {
                     launcher.borrow_mut().set_file_index(files);
                     glib::ControlFlow::Break
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-            }
-        });
+            },
+        );
     }
     let results = Rc::new(RefCell::new(Vec::<Action>::new()));
     let current_action = Rc::new(RefCell::new(None::<Action>));
     let action_panel_items = Rc::new(RefCell::new(Vec::<ActionPanelItem>::new()));
     let filtered_action_panel_items = Rc::new(RefCell::new(Vec::<ActionPanelItem>::new()));
+    let displayed_action_panel_rows = Rc::new(RefCell::new(Vec::<DisplayedActionPanelRow>::new()));
     let clipboard_items = Rc::new(RefCell::new(Vec::<ClipboardSummary>::new()));
     let snippet_items = Rc::new(RefCell::new(Vec::<SnippetSummary>::new()));
     install_clipboard_monitor(&launcher);
@@ -208,7 +216,10 @@ fn build_ui(
         &notifications_view.root,
     );
     navigation.add_page(crate::ui::LauncherView::Preferences, &preferences_view.root);
-    navigation.add_page(crate::ui::LauncherView::ScriptOutput, &script_output_view.root);
+    navigation.add_page(
+        crate::ui::LauncherView::ScriptOutput,
+        &script_output_view.root,
+    );
     navigation.add_page(crate::ui::LauncherView::Snippets, &snippet_view.root);
     navigation.add_page(
         crate::ui::LauncherView::SystemMonitor,
@@ -227,6 +238,7 @@ fn build_ui(
         &current_action,
         &action_panel_items,
         &filtered_action_panel_items,
+        &displayed_action_panel_rows,
         &ai_chat_view,
         &audio_view,
         &dashboard_view,
@@ -308,7 +320,13 @@ fn build_ui(
             } else {
                 mode_badge.set_visible(false);
             }
-            update_results(&launcher.borrow(), &results, &list, q, Some(&result_counter));
+            update_results(
+                &launcher.borrow(),
+                &results,
+                &list,
+                q,
+                Some(&result_counter),
+            );
         });
     }
 
@@ -380,12 +398,10 @@ fn build_ui(
                             &stdout,
                         );
                     } else {
-                        launcher.borrow_mut().run_action(&action);
-                        finish_interaction(&window, &hold);
+                        run_action_or_confirm(&window, &launcher, &hold, action);
                     }
                 } else {
-                    launcher.borrow_mut().run_action(&action);
-                    finish_interaction(&window, &hold);
+                    run_action_or_confirm(&window, &launcher, &hold, action);
                 }
             }
         });
@@ -413,6 +429,7 @@ fn build_ui(
         let current_action = Rc::clone(&current_action);
         let action_panel_items = Rc::clone(&action_panel_items);
         let filtered_action_panel_items = Rc::clone(&filtered_action_panel_items);
+        let displayed_action_panel_rows = Rc::clone(&displayed_action_panel_rows);
         let clipboard_view = clipboard_view.clone();
         let extension_list = extension_view.list.clone();
         let clipboard_items = Rc::clone(&clipboard_items);
@@ -446,6 +463,7 @@ fn build_ui(
                 &current_action,
                 &action_panel_items,
                 &filtered_action_panel_items,
+                &displayed_action_panel_rows,
                 &clipboard_view,
                 &clipboard_items,
                 &extension_list,
@@ -486,9 +504,12 @@ fn build_ui(
     {
         let launcher = Rc::clone(&launcher);
         let ai_chat_view = ai_chat_view.clone();
-        ai_chat_view.refresh_models.clone().connect_clicked(move |_| {
-            populate_ai_models(&launcher, &ai_chat_view);
-        });
+        ai_chat_view
+            .refresh_models
+            .clone()
+            .connect_clicked(move |_| {
+                populate_ai_models(&launcher, &ai_chat_view);
+            });
     }
 
     {
@@ -644,7 +665,9 @@ fn build_ui(
                 crate::ui::set_dashboard_snapshot(&dashboard_view, &crate::system_snapshot());
                 crate::ui::set_dashboard_thermal(
                     &dashboard_view,
-                    crate::thermal_snapshot().hottest_zone().map(|z| z.temperature_c),
+                    crate::thermal_snapshot()
+                        .hottest_zone()
+                        .map(|z| z.temperature_c),
                 );
             } else if navigation.current() == crate::ui::LauncherView::SystemMonitor {
                 crate::ui::set_system_monitor_snapshot(
@@ -699,9 +722,10 @@ fn build_ui(
     }
 
     {
+        let window = window.clone();
         let system_monitor_view = system_monitor_view.clone();
         system_monitor_view.kill.clone().connect_clicked(move |_| {
-            terminate_selected_system_process(&system_monitor_view);
+            terminate_selected_system_process_or_confirm(&window, &system_monitor_view, || {});
         });
     }
 
@@ -856,11 +880,13 @@ fn build_ui(
         let action_panel_list = action_panel_view.list.clone();
         let action_panel_items = Rc::clone(&action_panel_items);
         let filtered_action_panel_items = Rc::clone(&filtered_action_panel_items);
+        let displayed_action_panel_rows = Rc::clone(&displayed_action_panel_rows);
         action_panel_view.search.connect_changed(move |search| {
             filter_action_panel_items(
                 search.text().as_str(),
                 &action_panel_items,
                 &filtered_action_panel_items,
+                &displayed_action_panel_rows,
                 &action_panel_list,
             );
         });
@@ -875,7 +901,7 @@ fn build_ui(
         let action_bar = action_bar.clone();
         let navigation = navigation.clone();
         let current_action = Rc::clone(&current_action);
-        let filtered_action_panel_items = Rc::clone(&filtered_action_panel_items);
+        let displayed_action_panel_rows = Rc::clone(&displayed_action_panel_rows);
         action_panel_view.list.connect_row_activated(move |_, row| {
             run_action_panel_row(
                 &window,
@@ -886,7 +912,7 @@ fn build_ui(
                 &navigation,
                 &action_bar,
                 &current_action,
-                &filtered_action_panel_items,
+                &displayed_action_panel_rows,
                 row.index() as usize,
             );
         });
@@ -1016,18 +1042,12 @@ fn build_ui(
                 "media" => show_media_view(&navigation, &entry, &action_bar, &media_view),
                 "audio" => show_audio_view(&navigation, &entry, &action_bar, &audio_view),
                 "ai" => show_ai_chat_view(&navigation, &entry, &action_bar, &ai_chat_view),
-                "system" => show_system_monitor_view(
-                    &navigation,
-                    &entry,
-                    &action_bar,
-                    &system_monitor_view,
-                ),
-                "notifications" => show_notifications_view(
-                    &navigation,
-                    &entry,
-                    &action_bar,
-                    &notifications_view,
-                ),
+                "system" => {
+                    show_system_monitor_view(&navigation, &entry, &action_bar, &system_monitor_view)
+                }
+                "notifications" => {
+                    show_notifications_view(&navigation, &entry, &action_bar, &notifications_view)
+                }
                 "emoji" => show_emoji_view(&navigation, &entry, &action_bar, &emoji_view),
                 "fonts" => show_font_browser_view(&navigation, &entry, &action_bar, &font_view),
                 _ => return false,
@@ -1288,8 +1308,7 @@ fn capture_clipboard(
     last: &Rc<RefCell<Option<String>>>,
 ) {
     let formats = clipboard.formats();
-    if formats.contain_mime_type("image/png")
-        || formats.contains_type(gdk::Texture::static_type())
+    if formats.contain_mime_type("image/png") || formats.contains_type(gdk::Texture::static_type())
     {
         capture_clipboard_image(clipboard, launcher, last);
     } else {
@@ -1445,7 +1464,11 @@ fn calc_result_row(expr: &str) -> gtk::ListBoxRow {
     text_col.set_hexpand(true);
     text_col.set_valign(gtk::Align::Center);
 
-    let expr_lbl = Label::new(Some(if expr.is_empty() { "Enter expression…" } else { expr }));
+    let expr_lbl = Label::new(Some(if expr.is_empty() {
+        "Enter expression…"
+    } else {
+        expr
+    }));
     expr_lbl.add_css_class("result-subtitle");
     expr_lbl.set_xalign(0.0);
     text_col.append(&expr_lbl);
@@ -1492,12 +1515,16 @@ fn append_grouped_root_actions(
     list: &ListBox,
     actions: Vec<Action>,
 ) -> Vec<Action> {
-    let recent_top: std::collections::HashSet<String> = launcher
-        .recent_top_identities(8)
-        .into_iter()
-        .collect();
+    let recent_top: std::collections::HashSet<String> =
+        launcher.recent_top_identities(8).into_iter().collect();
 
-    let sections = ["Favourites", "Recent", "Command Center", "Applications", "Library"];
+    let sections = [
+        "Favourites",
+        "Recent",
+        "Command Center",
+        "Applications",
+        "Library",
+    ];
     let mut buckets = sections
         .iter()
         .map(|section| (*section, Vec::<Action>::new()))
@@ -1578,6 +1605,7 @@ fn handle_key(
     current_action: &Rc<RefCell<Option<Action>>>,
     action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
     filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
+    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
     clipboard_view: &crate::ui::ClipboardHistoryView,
     clipboard_items: &Rc<RefCell<Vec<ClipboardSummary>>>,
     extension_list: &ListBox,
@@ -1604,7 +1632,7 @@ fn handle_key(
             network_list,
             notifications_view,
             current_action,
-            filtered_action_panel_items,
+            displayed_action_panel_rows,
             clipboard_view,
             clipboard_items,
             extension_list,
@@ -1655,6 +1683,7 @@ fn handle_key(
                 current_action,
                 action_panel_items,
                 filtered_action_panel_items,
+                displayed_action_panel_rows,
                 launcher,
                 list,
                 results,
@@ -1756,7 +1785,7 @@ fn handle_view_key(
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
     current_action: &Rc<RefCell<Option<Action>>>,
-    filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
+    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
     clipboard_view: &crate::ui::ClipboardHistoryView,
     clipboard_items: &Rc<RefCell<Vec<ClipboardSummary>>>,
     extension_list: &ListBox,
@@ -1788,7 +1817,7 @@ fn handle_view_key(
                         navigation,
                         action_bar,
                         current_action,
-                        filtered_action_panel_items,
+                        displayed_action_panel_rows,
                         row.index() as usize,
                     );
                 }
@@ -1940,9 +1969,12 @@ fn handle_view_key(
         },
         gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::Clipboard => {
             if state.contains(gdk::ModifierType::CONTROL_MASK) {
-                if let Err(error) = launcher.borrow_mut().clear_clipboard_history() {
-                    eprintln!("failed to clear clipboard history: {error}");
-                }
+                let launcher_for_done = Rc::clone(launcher);
+                let clipboard_view = clipboard_view.clone();
+                let clipboard_items = Rc::clone(clipboard_items);
+                clear_clipboard_history_or_confirm(window, launcher, move || {
+                    refresh_clipboard_view(&launcher_for_done, &clipboard_view, &clipboard_items);
+                });
             } else if let Some(row) = clipboard_view.list.selected_row() {
                 if let Some(item) = clipboard_items.borrow().get(row.index() as usize) {
                     if let Err(error) = launcher.borrow_mut().delete_clipboard_value(&item.value) {
@@ -1950,7 +1982,9 @@ fn handle_view_key(
                     }
                 }
             }
-            refresh_clipboard_view(launcher, clipboard_view, clipboard_items);
+            if !state.contains(gdk::ModifierType::CONTROL_MASK) {
+                refresh_clipboard_view(launcher, clipboard_view, clipboard_items);
+            }
             glib::Propagation::Stop
         }
         gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::Snippets => {
@@ -1968,11 +2002,17 @@ fn handle_view_key(
             glib::Propagation::Stop
         }
         gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::SystemMonitor => {
-            terminate_selected_system_process(system_monitor_view);
-            crate::ui::set_system_monitor_snapshot(
-                system_monitor_view,
-                &crate::system_snapshot(),
-                &crate::top_processes_by_memory(8),
+            let system_monitor_view = system_monitor_view.clone();
+            terminate_selected_system_process_or_confirm(
+                window,
+                &system_monitor_view.clone(),
+                move || {
+                    crate::ui::set_system_monitor_snapshot(
+                        &system_monitor_view,
+                        &crate::system_snapshot(),
+                        &crate::top_processes_by_memory(8),
+                    );
+                },
             );
             glib::Propagation::Stop
         }
@@ -1988,6 +2028,7 @@ fn show_action_panel_view(
     current_action: &Rc<RefCell<Option<Action>>>,
     action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
     filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
+    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
     launcher: &Rc<RefCell<Zeshicast>>,
     list: &ListBox,
     results: &Rc<RefCell<Vec<Action>>>,
@@ -2026,7 +2067,9 @@ fn show_action_panel_view(
     *action_panel_items.borrow_mut() = items.clone();
     *filtered_action_panel_items.borrow_mut() = items;
     action_panel_view.search.set_text("");
-    let displays = action_panel_displays(&filtered_action_panel_items.borrow());
+    let rows = action_panel_display_rows(&filtered_action_panel_items.borrow());
+    let displays = action_panel_display_items(&rows);
+    *displayed_action_panel_rows.borrow_mut() = rows;
     crate::ui::set_action_panel_items(action_panel_view, &action, &displays);
 
     entry.set_visible(false);
@@ -2039,6 +2082,7 @@ fn filter_action_panel_items(
     query: &str,
     action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
     filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
+    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
     action_panel_list: &ListBox,
 ) {
     let query = query.trim().to_lowercase();
@@ -2048,12 +2092,14 @@ fn filter_action_panel_items(
         .filter(|item| query.is_empty() || item.display.title.to_lowercase().contains(&query))
         .cloned()
         .collect::<Vec<_>>();
-    let displays = action_panel_displays(&filtered);
+    let rows = action_panel_display_rows(&filtered);
+    let displays = action_panel_display_items(&rows);
     *filtered_action_panel_items.borrow_mut() = filtered;
+    *displayed_action_panel_rows.borrow_mut() = rows;
     crate::ui::set_action_panel_list(action_panel_list, &displays);
 }
 
-fn action_panel_displays(items: &[ActionPanelItem]) -> Vec<ActionPanelDisplayItem> {
+fn action_panel_display_rows(items: &[ActionPanelItem]) -> Vec<DisplayedActionPanelRow> {
     const SECTION_ORDER: &[ActionPanelSection] = &[
         ActionPanelSection::Primary,
         ActionPanelSection::Manage,
@@ -2070,17 +2116,26 @@ fn action_panel_displays(items: &[ActionPanelItem]) -> Vec<ActionPanelDisplayIte
         if section_items.is_empty() {
             continue;
         }
-        result.push(ActionPanelDisplayItem {
-            title: section.title().to_string(),
-            icon_name: String::new(),
-            is_section_header: true,
-            is_destructive: false,
-        });
+        result.push(DisplayedActionPanelRow::Header(section));
         for item in section_items {
-            result.push(item.display.clone());
+            result.push(DisplayedActionPanelRow::Action(item.clone()));
         }
     }
     result
+}
+
+fn action_panel_display_items(rows: &[DisplayedActionPanelRow]) -> Vec<ActionPanelDisplayItem> {
+    rows.iter()
+        .map(|row| match row {
+            DisplayedActionPanelRow::Header(section) => ActionPanelDisplayItem {
+                title: section.title().to_string(),
+                icon_name: String::new(),
+                is_section_header: true,
+                is_destructive: false,
+            },
+            DisplayedActionPanelRow::Action(item) => item.display.clone(),
+        })
+        .collect()
 }
 
 fn run_action_panel_row(
@@ -2092,28 +2147,42 @@ fn run_action_panel_row(
     navigation: &crate::ui::NavigationStack,
     action_bar: &GtkBox,
     current_action: &Rc<RefCell<Option<Action>>>,
-    filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
+    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
     index: usize,
 ) {
     let Some(action) = current_action.borrow().clone() else {
         return;
     };
-    let Some(item) = filtered_action_panel_items.borrow().get(index).cloned() else {
+    let Some(DisplayedActionPanelRow::Action(item)) =
+        displayed_action_panel_rows.borrow().get(index).cloned()
+    else {
         return;
     };
 
     match item.kind {
         ActionPanelItemKind::Secondary(kind) => {
-            if let Err(error) = launcher.borrow_mut().run_secondary_action(&action, kind) {
-                eprintln!("failed to run action: {error}");
-            }
-            update_results(&launcher.borrow(), results, list, entry.text().as_str(), None);
+            let entry = entry.clone();
+            let list = list.clone();
+            let results = Rc::clone(results);
+            let navigation = navigation.clone();
+            let action_bar = action_bar.clone();
+            let launcher_for_done = Rc::clone(launcher);
+            run_secondary_action_or_confirm(window, launcher, action, kind, move || {
+                update_results(
+                    &launcher_for_done.borrow(),
+                    &results,
+                    &list,
+                    entry.text().as_str(),
+                    None,
+                );
+                show_root_view(&navigation, &entry, &action_bar);
+            });
         }
         ActionPanelItemKind::SetAlias => {
             crate::ui::show_alias_panel(window, launcher, &action);
+            show_root_view(navigation, entry, action_bar);
         }
     }
-    show_root_view(navigation, entry, action_bar);
 }
 
 fn show_clipboard_view(
@@ -2172,7 +2241,13 @@ fn clipboard_filter_matches(filter: ClipboardFilter, item: &ClipboardSummary) ->
     }
 }
 
-fn terminate_selected_system_process(system_monitor_view: &crate::ui::SystemMonitorView) {
+fn terminate_selected_system_process_or_confirm<F>(
+    window: &ApplicationWindow,
+    system_monitor_view: &crate::ui::SystemMonitorView,
+    on_done: F,
+) where
+    F: Fn() + 'static,
+{
     let Some(row) = system_monitor_view.list.selected_row() else {
         return;
     };
@@ -2183,7 +2258,17 @@ fn terminate_selected_system_process(system_monitor_view: &crate::ui::SystemMoni
         return;
     };
 
-    crate::spawn_command("kill", &[&process.pid.to_string()]);
+    let detail = format!("Kill process {} ({})", process.name, process.pid);
+    crate::ui::show_confirmation_panel(
+        window,
+        ActionRisk::ProcessKill.label(),
+        &detail,
+        "Confirm",
+        move || {
+            crate::spawn_command("kill", &[&process.pid.to_string()]);
+            on_done();
+        },
+    );
 }
 
 fn copy_selected_network_value(list: &ListBox, value: NetworkCopyValue) {
@@ -2352,7 +2437,9 @@ fn apply_status_strip_preferences(
     let items = preference_list(
         launcher,
         "status_items",
-        &["clock", "date", "network", "battery", "audio", "media", "layout"],
+        &[
+            "clock", "date", "network", "battery", "audio", "media", "layout",
+        ],
     );
     status_strip.set_items(&items);
 }
@@ -2369,6 +2456,7 @@ fn action_bar(
     current_action: &Rc<RefCell<Option<Action>>>,
     action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
     filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
+    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
     ai_chat_view: &crate::ui::AiChatView,
     audio_view: &crate::ui::AudioView,
     dashboard_view: &crate::ui::DashboardView,
@@ -2448,6 +2536,7 @@ fn action_bar(
         let current_action = Rc::clone(current_action);
         let action_panel_items = Rc::clone(action_panel_items);
         let filtered_action_panel_items = Rc::clone(filtered_action_panel_items);
+        let displayed_action_panel_rows = Rc::clone(displayed_action_panel_rows);
         let launcher = Rc::clone(launcher);
         let list = list.clone();
         let results = Rc::clone(results);
@@ -2460,6 +2549,7 @@ fn action_bar(
                 &current_action,
                 &action_panel_items,
                 &filtered_action_panel_items,
+                &displayed_action_panel_rows,
                 &launcher,
                 &list,
                 &results,
@@ -2544,7 +2634,13 @@ fn show_form_for_action(
 
     crate::ui::show_form_panel(&parent_window, action, move |action, values| {
         launcher.borrow_mut().run_form_action(&action, values);
-        update_results(&launcher.borrow(), &results, &list, entry.text().as_str(), None);
+        update_results(
+            &launcher.borrow(),
+            &results,
+            &list,
+            entry.text().as_str(),
+            None,
+        );
         finish_interaction(&finish_window, &hold);
     });
 }
@@ -2588,10 +2684,118 @@ fn run_selected_with_views(
         } else if action.form_data().is_some() {
             show_form_for_action(window, launcher, hold, entry, list, results, action);
         } else {
-            launcher.borrow_mut().run_action(&action);
-            finish_interaction(window, hold);
+            run_action_or_confirm(window, launcher, hold, action);
         }
     }
+}
+
+fn run_action_or_confirm(
+    window: &ApplicationWindow,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    action: Action,
+) {
+    if !action.risk.requires_confirmation() {
+        launcher.borrow_mut().run_action(&action);
+        finish_interaction(window, hold);
+        return;
+    }
+
+    let title = action.risk.label().to_string();
+    let detail = action_confirmation_detail(&action);
+    let launcher = Rc::clone(launcher);
+    let hold = Rc::clone(hold);
+    let finish_window = window.clone();
+    crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
+        launcher.borrow_mut().run_action(&action);
+        finish_interaction(&finish_window, &hold);
+    });
+}
+
+fn action_confirmation_detail(action: &Action) -> String {
+    let value = action.value();
+    if value == action.title {
+        format!("{}: {}", action.category, action.title)
+    } else {
+        format!("{}: {}\n{}", action.category, action.title, value)
+    }
+}
+
+fn run_secondary_action_or_confirm<F>(
+    window: &ApplicationWindow,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    action: Action,
+    kind: SecondaryActionKind,
+    on_done: F,
+) where
+    F: Fn() + 'static,
+{
+    let risk = secondary_action_risk(kind);
+    if !risk.requires_confirmation() {
+        run_secondary_action(launcher, &action, kind);
+        on_done();
+        return;
+    }
+
+    let title = risk.label().to_string();
+    let detail = secondary_action_confirmation_detail(&action, kind);
+    let launcher = Rc::clone(launcher);
+    crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
+        run_secondary_action(&launcher, &action, kind);
+        on_done();
+    });
+}
+
+fn run_secondary_action(
+    launcher: &Rc<RefCell<Zeshicast>>,
+    action: &Action,
+    kind: SecondaryActionKind,
+) {
+    if let Err(error) = launcher.borrow_mut().run_secondary_action(action, kind) {
+        eprintln!("failed to run secondary action: {error}");
+    }
+}
+
+fn secondary_action_risk(kind: SecondaryActionKind) -> ActionRisk {
+    match kind {
+        SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
+        SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
+        _ => ActionRisk::Normal,
+    }
+}
+
+fn secondary_action_confirmation_detail(action: &Action, kind: SecondaryActionKind) -> String {
+    match kind {
+        SecondaryActionKind::DeleteClipboardItem => {
+            format!("Delete clipboard item:\n{}", action.value())
+        }
+        SecondaryActionKind::ClearClipboardHistory => {
+            "This clears all local clipboard history stored by Zeshicast.".to_string()
+        }
+        _ => action_confirmation_detail(action),
+    }
+}
+
+fn clear_clipboard_history_or_confirm<F>(
+    window: &ApplicationWindow,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    on_done: F,
+) where
+    F: Fn() + 'static,
+{
+    let launcher = Rc::clone(launcher);
+    crate::ui::show_confirmation_panel(
+        window,
+        ActionRisk::ClipboardClear.label(),
+        "This clears all local clipboard history stored by Zeshicast.",
+        "Confirm",
+        move || {
+            if let Err(error) = launcher.borrow_mut().clear_clipboard_history() {
+                eprintln!("failed to clear clipboard history: {error}");
+            }
+            on_done();
+        },
+    );
 }
 
 fn finish_interaction(
@@ -2699,7 +2903,11 @@ fn select_first_action_row(list: &ListBox) {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_clipboard_text;
+    use super::{
+        ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, action_panel_display_items,
+        action_panel_display_rows, decode_clipboard_text, secondary_action_risk,
+    };
+    use crate::{ActionPanelSection, ActionRisk, SecondaryActionKind, ui::ActionPanelDisplayItem};
 
     #[test]
     fn clipboard_text_accepts_plain_and_multiline() {
@@ -2717,5 +2925,124 @@ mod tests {
         assert!(decode_clipboard_text(&[0xff, 0xfe, 0x00]).is_none());
         // Valid UTF-8 but carrying binary control bytes.
         assert!(decode_clipboard_text(b"PNG\x01\x02data").is_none());
+    }
+
+    #[test]
+    fn action_panel_row_index_ignores_section_headers() {
+        let rows = action_panel_display_rows(&[
+            action_panel_item(
+                "Run",
+                ActionPanelSection::Primary,
+                ActionPanelItemKind::Secondary(SecondaryActionKind::Run),
+            ),
+            action_panel_item(
+                "Copy Value",
+                ActionPanelSection::Primary,
+                ActionPanelItemKind::Secondary(SecondaryActionKind::CopyValue),
+            ),
+            action_panel_item(
+                "Set Alias",
+                ActionPanelSection::Manage,
+                ActionPanelItemKind::SetAlias,
+            ),
+            action_panel_item(
+                "Clear Clipboard History",
+                ActionPanelSection::Danger,
+                ActionPanelItemKind::Secondary(SecondaryActionKind::ClearClipboardHistory),
+            ),
+        ]);
+
+        assert!(matches!(
+            rows.first(),
+            Some(DisplayedActionPanelRow::Header(ActionPanelSection::Primary))
+        ));
+        assert_row_kind(
+            &rows,
+            1,
+            ActionPanelItemKind::Secondary(SecondaryActionKind::Run),
+        );
+        assert_row_kind(
+            &rows,
+            2,
+            ActionPanelItemKind::Secondary(SecondaryActionKind::CopyValue),
+        );
+        assert!(matches!(
+            rows.get(3),
+            Some(DisplayedActionPanelRow::Header(ActionPanelSection::Manage))
+        ));
+        assert_row_kind(&rows, 4, ActionPanelItemKind::SetAlias);
+        assert!(matches!(
+            rows.get(5),
+            Some(DisplayedActionPanelRow::Header(ActionPanelSection::Danger))
+        ));
+        assert_row_kind(
+            &rows,
+            6,
+            ActionPanelItemKind::Secondary(SecondaryActionKind::ClearClipboardHistory),
+        );
+    }
+
+    #[test]
+    fn action_panel_filter_preserves_row_mapping() {
+        let filtered = vec![action_panel_item(
+            "Copy Value",
+            ActionPanelSection::Primary,
+            ActionPanelItemKind::Secondary(SecondaryActionKind::CopyValue),
+        )];
+        let rows = action_panel_display_rows(&filtered);
+        let displays = action_panel_display_items(&rows);
+
+        assert_eq!(displays.len(), 2);
+        assert!(displays[0].is_section_header);
+        assert_eq!(displays[0].title, "Primary");
+        assert_eq!(displays[1].title, "Copy Value");
+        assert_row_kind(
+            &rows,
+            1,
+            ActionPanelItemKind::Secondary(SecondaryActionKind::CopyValue),
+        );
+    }
+
+    #[test]
+    fn clipboard_clear_secondary_action_is_marked_clipboard_clear() {
+        assert_eq!(
+            secondary_action_risk(SecondaryActionKind::ClearClipboardHistory),
+            ActionRisk::ClipboardClear
+        );
+        assert!(
+            secondary_action_risk(SecondaryActionKind::ClearClipboardHistory)
+                .requires_confirmation()
+        );
+    }
+
+    fn action_panel_item(
+        title: &str,
+        section: ActionPanelSection,
+        kind: ActionPanelItemKind,
+    ) -> ActionPanelItem {
+        ActionPanelItem {
+            display: ActionPanelDisplayItem {
+                title: title.to_string(),
+                icon_name: "system-run-symbolic".to_string(),
+                is_section_header: false,
+                is_destructive: section.is_danger(),
+            },
+            section,
+            kind,
+        }
+    }
+
+    fn assert_row_kind(
+        rows: &[DisplayedActionPanelRow],
+        index: usize,
+        expected: ActionPanelItemKind,
+    ) {
+        match rows.get(index) {
+            Some(DisplayedActionPanelRow::Action(item)) => assert_eq!(item.kind, expected),
+            Some(DisplayedActionPanelRow::Header(section)) => {
+                panic!("expected action row at {index}, got {section:?} header")
+            }
+            None => panic!("expected action row at {index}, got no row"),
+        }
     }
 }

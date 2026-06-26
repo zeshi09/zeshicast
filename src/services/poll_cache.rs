@@ -66,7 +66,10 @@ fn cache() -> Arc<Mutex<Cache>> {
 
 /// Latest cached network snapshot (never blocks on a subprocess).
 pub fn cached_network_snapshot() -> NetworkSnapshot {
-    cache().lock().map(|c| c.network.clone()).unwrap_or_default()
+    cache()
+        .lock()
+        .map(|c| c.network.clone())
+        .unwrap_or_default()
 }
 
 /// Latest cached audio snapshot (never blocks on a subprocess).

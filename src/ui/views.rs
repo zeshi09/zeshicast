@@ -13,9 +13,9 @@ use gtk::{
 
 use crate::{
     Action, AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot,
-    BatterySnapshot,
-    ClipboardSummary, CommandSummary, MediaSnapshot, NetworkInterfaceSnapshot, NetworkSnapshot,
-    NotificationSnapshot, ProcessSummary, SnippetSummary, SystemSnapshot, ThermalSnapshot,
+    BatterySnapshot, ClipboardSummary, CommandSummary, MediaSnapshot, NetworkInterfaceSnapshot,
+    NetworkSnapshot, NotificationSnapshot, ProcessSummary, SnippetSummary, SystemSnapshot,
+    ThermalSnapshot,
 };
 
 #[derive(Debug, Clone)]
@@ -325,9 +325,7 @@ pub fn ai_chat_view() -> AiChatView {
         .build();
     answer_scroll.add_css_class("results-scroll");
 
-    let output = Label::new(Some(
-        "Hi! Running on Ollama. Ask me anything.",
-    ));
+    let output = Label::new(Some("Hi! Running on Ollama. Ask me anything."));
     output.add_css_class("ai-message-assistant");
     output.set_wrap(true);
     output.set_xalign(0.0);
@@ -484,7 +482,11 @@ pub fn script_output_view() -> ScriptOutputView {
     scroll.set_child(Some(&output));
     root.append(&scroll);
 
-    ScriptOutputView { root, title, output }
+    ScriptOutputView {
+        root,
+        title,
+        output,
+    }
 }
 
 pub fn set_script_output(view: &ScriptOutputView, script_title: &str, stdout: &str) {
@@ -770,9 +772,9 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     let memory_graph = metric_graph();
     let disk_graph = metric_graph();
 
-    metric_grid.attach(&load_card,    0, 0, 1, 1);
-    metric_grid.attach(&memory_card,  1, 0, 1, 1);
-    metric_grid.attach(&disk_card,    0, 1, 1, 1);
+    metric_grid.attach(&load_card, 0, 0, 1, 1);
+    metric_grid.attach(&memory_card, 1, 0, 1, 1);
+    metric_grid.attach(&disk_card, 0, 1, 1, 1);
     metric_grid.attach(&thermal_card, 1, 1, 1, 1);
     root.append(&metric_grid);
 
@@ -782,8 +784,7 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
 
     let (network_card, network, network_row) =
         super::control_card("Network", "network-wireless-symbolic");
-    let (audio_card, audio, audio_row) =
-        super::control_card("Audio", "audio-volume-high-symbolic");
+    let (audio_card, audio, audio_row) = super::control_card("Audio", "audio-volume-high-symbolic");
     let (media_card, media, media_row) =
         super::control_card("Media", "media-playback-start-symbolic");
     // Keep notifications_card for struct compat (hidden)
@@ -968,9 +969,13 @@ pub fn system_monitor_view(
                 cr.rectangle(x, 0.0, bar_w - 2.0, h as f64);
                 let _ = cr.fill();
                 // fill (accent color ≈ #8B7CF8)
-                let col = if v > 0.8 { (1.0, 0.42, 0.37, 1.0) }
-                          else if v > 0.6 { (0.96, 0.65, 0.14, 1.0) }
-                          else { (0.545, 0.486, 0.973, 1.0) };
+                let col = if v > 0.8 {
+                    (1.0, 0.42, 0.37, 1.0)
+                } else if v > 0.6 {
+                    (0.96, 0.65, 0.14, 1.0)
+                } else {
+                    (0.545, 0.486, 0.973, 1.0)
+                };
                 cr.set_source_rgba(col.0, col.1, col.2, col.3);
                 cr.rectangle(x, y, bar_w - 2.0, bar_h);
                 let _ = cr.fill();
@@ -1017,9 +1022,13 @@ pub fn system_monitor_view(
             cr.rectangle(0.0, 0.0, wf, hf);
             let _ = cr.fill();
             // Used segment (red >85%, orange >65%, accent otherwise)
-            let col = if used > 0.85 { (1.0_f64, 0.42, 0.37, 1.0) }
-                      else if used > 0.65 { (0.96, 0.65, 0.14, 1.0) }
-                      else { (0.545, 0.486, 0.973, 1.0) };
+            let col = if used > 0.85 {
+                (1.0_f64, 0.42, 0.37, 1.0)
+            } else if used > 0.65 {
+                (0.96, 0.65, 0.14, 1.0)
+            } else {
+                (0.545, 0.486, 0.973, 1.0)
+            };
             cr.set_source_rgba(col.0, col.1, col.2, col.3);
             let used_w = wf * used.clamp(0.0, 1.0);
             cr.rectangle(0.0, 0.0, used_w, hf);
@@ -1375,9 +1384,17 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     controls.set_margin_top(14);
 
     let previous = media_ctrl_btn("media-skip-backward-symbolic", "Previous", "media-btn-skip");
-    let seek_back = media_ctrl_btn("media-seek-backward-symbolic", "Seek back 10s", "media-btn-seek");
+    let seek_back = media_ctrl_btn(
+        "media-seek-backward-symbolic",
+        "Seek back 10s",
+        "media-btn-seek",
+    );
     let play_pause = media_play_btn("media-playback-start-symbolic");
-    let seek_fwd = media_ctrl_btn("media-seek-forward-symbolic", "Seek forward 10s", "media-btn-seek");
+    let seek_fwd = media_ctrl_btn(
+        "media-seek-forward-symbolic",
+        "Seek forward 10s",
+        "media-btn-seek",
+    );
     let next = media_ctrl_btn("media-skip-forward-symbolic", "Next", "media-btn-skip");
 
     // Wire MPRIS controls (direct D-Bus, no playerctl).
@@ -1432,7 +1449,11 @@ fn media_ctrl_btn(icon_name: &str, tooltip: &str, css_class: &str) -> Button {
     let btn = Button::from_icon_name(icon_name);
     btn.add_css_class(css_class);
     btn.set_tooltip_text(Some(tooltip));
-    let size = if css_class == "media-btn-seek" { 36 } else { 32 };
+    let size = if css_class == "media-btn-seek" {
+        36
+    } else {
+        32
+    };
     btn.set_size_request(size, size);
     btn.set_halign(gtk::Align::Center);
     btn.set_valign(gtk::Align::Center);
@@ -1534,7 +1555,8 @@ pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
         // Title (bold) · artist · "album · player" — matches the mockup.
         view.title
             .set_text(snapshot.title.as_deref().unwrap_or("Unknown track"));
-        view.player.set_text(snapshot.artist.as_deref().unwrap_or(""));
+        view.player
+            .set_text(snapshot.artist.as_deref().unwrap_or(""));
 
         let player = snapshot.player.as_deref().unwrap_or("");
         let meta = match snapshot.album.as_deref() {
@@ -1566,10 +1588,12 @@ pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
         view.scrubber.set_sensitive(snapshot.length_secs.is_some());
     } else {
         view.title.set_text("No active player");
-        view.player.set_text("Start a media player to see MPRIS status");
+        view.player
+            .set_text("Start a media player to see MPRIS status");
         view.status.set_text("");
         update_media_art(view, None);
-        view.play_pause.set_icon_name("media-playback-start-symbolic");
+        view.play_pause
+            .set_icon_name("media-playback-start-symbolic");
         view.scrubber.set_sensitive(false);
         view.time_pos.set_text("0:00");
         view.time_total.set_text("0:00");
@@ -1641,7 +1665,11 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         text.append(&subtitle);
         layout.append(&text);
 
-        let btn = Button::with_label(if network.active { "Disconnect" } else { "Connect" });
+        let btn = Button::with_label(if network.active {
+            "Disconnect"
+        } else {
+            "Connect"
+        });
         btn.add_css_class(if network.active {
             "network-disconnect-btn"
         } else {
@@ -1844,7 +1872,10 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
         glib::markup_escape_text(&ws_short)
     ));
     view.workspace.set_visible(true);
-    let uptime_val = snapshot.uptime_seconds.map(format_duration).unwrap_or_else(|| "—".to_string());
+    let uptime_val = snapshot
+        .uptime_seconds
+        .map(format_duration)
+        .unwrap_or_else(|| "—".to_string());
     view.uptime.set_markup(&format!(
         "<span alpha='40%'>Uptime</span>  {}",
         glib::markup_escape_text(&uptime_val)
@@ -1865,7 +1896,8 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
         .memory_used_percent()
         .map(|p| (p / 100.0).clamp(0.0, 1.0) as f64)
         .unwrap_or_default();
-    let mem_gb = snapshot.memory_used_kib()
+    let mem_gb = snapshot
+        .memory_used_kib()
         .map(|k| format!("{:.1}", k as f64 / 1024.0 / 1024.0))
         .unwrap_or_else(|| "—".to_string());
     view.memory.set_text(&mem_gb);
@@ -1878,7 +1910,8 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
         .disk_used_percent()
         .map(|p| (p / 100.0).clamp(0.0, 1.0) as f64)
         .unwrap_or_default();
-    let disk_pct = snapshot.disk_used_percent()
+    let disk_pct = snapshot
+        .disk_used_percent()
         .map(|p| format!("{p:.0}"))
         .unwrap_or_else(|| "—".to_string());
     view.disk.set_text(&disk_pct);
@@ -1886,7 +1919,10 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     view.disk_bar.set_fraction(disk_fraction);
     push_metric_graph(&view.disk_graph, disk_fraction);
 
-    let proc_val = snapshot.process_count.map(|n| n.to_string()).unwrap_or_else(|| "—".to_string());
+    let proc_val = snapshot
+        .process_count
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "—".to_string());
     view.processes.set_markup(&format!(
         "<span alpha='40%'>Procs</span>  {}",
         glib::markup_escape_text(&proc_val)
@@ -1897,7 +1933,8 @@ pub fn set_dashboard_thermal(view: &DashboardView, celsius: Option<f32>) {
     if let Some(t) = celsius {
         view.thermal.set_text(&format!("{t:.0}"));
         // Map 0–100 °C onto the bar; most CPUs idle 30–60, throttle ~90.
-        view.thermal_bar.set_fraction((t as f64 / 100.0).clamp(0.0, 1.0));
+        view.thermal_bar
+            .set_fraction((t as f64 / 100.0).clamp(0.0, 1.0));
     } else {
         view.thermal.set_text("—");
         view.thermal_bar.set_fraction(0.0);
@@ -1922,7 +1959,11 @@ pub fn set_dashboard_network_snapshot(view: &DashboardView, snapshot: &NetworkSn
         return;
     };
 
-    let status = if interface.state == "up" { "Connected" } else { &interface.state };
+    let status = if interface.state == "up" {
+        "Connected"
+    } else {
+        &interface.state
+    };
     view.network.set_text(status);
 
     let address = interface
@@ -1957,7 +1998,11 @@ pub fn set_dashboard_battery_snapshot(view: &DashboardView, snapshot: &BatterySn
 
 pub fn set_dashboard_audio_snapshot(view: &DashboardView, snapshot: &AudioSnapshot) {
     if let Some(output) = &snapshot.output {
-        let status = if output.muted { "Muted".to_string() } else { format!("{}%", output.volume_percent) };
+        let status = if output.muted {
+            "Muted".to_string()
+        } else {
+            format!("{}%", output.volume_percent)
+        };
         view.audio.set_text(&status);
         let name = output.name.as_deref().unwrap_or("Built-in Output");
         // Char-safe truncation (byte slicing panics on multi-byte UTF-8).
@@ -1966,7 +2011,9 @@ pub fn set_dashboard_audio_snapshot(view: &DashboardView, snapshot: &AudioSnapsh
         } else {
             name.to_string()
         };
-        let mic_info = snapshot.input.as_ref()
+        let mic_info = snapshot
+            .input
+            .as_ref()
             .map(|i| format!("  ·  mic {}%", i.volume_percent))
             .unwrap_or_default();
         view.audio_sub.set_text(&format!("{short_name}{mic_info}"));
@@ -2019,7 +2066,11 @@ fn set_default_volume(target: &str, percent: f64) {
 
 /// Fill a device ListBox from real devices; clicking a row sets it as the
 /// system default (`wpctl set-default <id>`) and repopulates in place.
-fn populate_audio_device_list(list: &ListBox, devices: &[AudioDeviceOption], section: &'static str) {
+fn populate_audio_device_list(
+    list: &ListBox,
+    devices: &[AudioDeviceOption],
+    section: &'static str,
+) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
@@ -2140,9 +2191,13 @@ pub fn set_system_monitor_snapshot(
     // NET row speeds
     let (rx_mbps, tx_mbps) = crate::net_speed_mbps(&view.net_iface);
     let fmt_speed = |v: f64| -> String {
-        if v < 0.001 { "0 B/s".to_string() }
-        else if v < 1.0 { format!("{:.0} KB/s", v * 1000.0) }
-        else { format!("{v:.1} MB/s") }
+        if v < 0.001 {
+            "0 B/s".to_string()
+        } else if v < 1.0 {
+            format!("{:.0} KB/s", v * 1000.0)
+        } else {
+            format!("{v:.1} MB/s")
+        }
     };
     view.net_rx.set_text(&fmt_speed(rx_mbps));
     view.net_tx.set_text(&fmt_speed(tx_mbps));
@@ -2225,11 +2280,19 @@ fn audio_device_row(name: &str, active: bool) -> gtk::ListBoxRow {
     dot.set_width_request(7);
     dot.set_height_request(7);
     dot.set_valign(gtk::Align::Center);
-    dot.add_css_class(if active { "radio-dot-active" } else { "radio-dot-inactive" });
+    dot.add_css_class(if active {
+        "radio-dot-active"
+    } else {
+        "radio-dot-inactive"
+    });
     layout.append(&dot);
 
     let label = Label::new(Some(name));
-    label.add_css_class(if active { "result-title" } else { "result-subtitle" });
+    label.add_css_class(if active {
+        "result-title"
+    } else {
+        "result-subtitle"
+    });
     label.set_xalign(0.0);
     label.set_hexpand(true);
     layout.append(&label);
@@ -2250,7 +2313,6 @@ fn dashboard_button(label: &str) -> Button {
     button.add_css_class("widget-btn");
     button
 }
-
 
 fn set_audio_device(
     name: &Label,
@@ -2471,7 +2533,8 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
 
     // Mini memory usage bar (36×3px, width relative to max in process list).
     // Colour follows usage: subtle → purple → amber.
-    let mem_frac = process.memory_kib
+    let mem_frac = process
+        .memory_kib
         .map(|v| v as f64 / max_memory_kib.max(1) as f64)
         .unwrap_or(0.0);
     let mem_bar = ProgressBar::new();
@@ -2489,9 +2552,15 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
     layout.append(&mem_bar);
 
     // MEM
-    let mem_text = process.memory_kib
-        .map(|v| if v >= 1024*1024 { format!("{:.1}G", v as f64 / 1024.0 / 1024.0) }
-                 else { format!("{}M", v / 1024) })
+    let mem_text = process
+        .memory_kib
+        .map(|v| {
+            if v >= 1024 * 1024 {
+                format!("{:.1}G", v as f64 / 1024.0 / 1024.0)
+            } else {
+                format!("{}M", v / 1024)
+            }
+        })
         .unwrap_or_else(|| "—".to_string());
     let mem_lbl = Label::new(Some(&mem_text));
     mem_lbl.add_css_class("clipboard-time");
@@ -2771,7 +2840,8 @@ pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&Clipboard
 
     view.detail_preview.set_visible(true);
     view.detail_image.set_visible(false);
-    view.detail_preview.set_text(&clipboard_detail_text(&item.value));
+    view.detail_preview
+        .set_text(&clipboard_detail_text(&item.value));
     // Character count (matches the mockup's "N ch"), not raw byte size.
     view.detail_size
         .set_text(&format!("{} ch", item.value.chars().count()));
@@ -2828,7 +2898,12 @@ pub fn font_browser_view() -> FontBrowserView {
 
     // Populate initial list
     let fonts = list_system_fonts();
-    populate_font_list(&list, &fonts, "", "The quick brown fox jumps over the lazy dog");
+    populate_font_list(
+        &list,
+        &fonts,
+        "",
+        "The quick brown fox jumps over the lazy dog",
+    );
 
     // Wire up search filter
     {
@@ -2848,11 +2923,18 @@ pub fn font_browser_view() -> FontBrowserView {
         });
     }
 
-    FontBrowserView { root, search, preview_entry, list }
+    FontBrowserView {
+        root,
+        search,
+        preview_entry,
+        list,
+    }
 }
 
 fn list_system_fonts() -> Vec<String> {
-    let out = std::process::Command::new("fc-list").args([":", "family"]).output();
+    let out = std::process::Command::new("fc-list")
+        .args([":", "family"])
+        .output();
     match out {
         Ok(o) => {
             let mut fonts: Vec<String> = String::from_utf8_lossy(&o.stdout)
@@ -2869,7 +2951,9 @@ fn list_system_fonts() -> Vec<String> {
 }
 
 fn populate_font_list(list: &ListBox, fonts: &[String], query: &str, preview: &str) {
-    while let Some(c) = list.first_child() { list.remove(&c); }
+    while let Some(c) = list.first_child() {
+        list.remove(&c);
+    }
     let q = query.trim().to_lowercase();
     let preview_text = if preview.trim().is_empty() {
         "The quick brown fox jumps over the lazy dog"
@@ -2879,8 +2963,12 @@ fn populate_font_list(list: &ListBox, fonts: &[String], query: &str, preview: &s
 
     let mut shown = 0;
     for font in fonts {
-        if !q.is_empty() && !font.to_lowercase().contains(&q) { continue; }
-        if shown >= 120 { break; }
+        if !q.is_empty() && !font.to_lowercase().contains(&q) {
+            continue;
+        }
+        if shown >= 120 {
+            break;
+        }
         list.append(&font_row(font, preview_text));
         shown += 1;
     }
@@ -3004,7 +3092,9 @@ pub fn emoji_picker_view() -> EmojiPickerView {
     for &(cat_id, cat_label) in CATEGORIES {
         let btn = Button::with_label(cat_label);
         btn.add_css_class("ai-model-btn");
-        if cat_id == "all" { btn.add_css_class("active"); }
+        if cat_id == "all" {
+            btn.add_css_class("active");
+        }
         let flow_c = flow.clone();
         let confirm_c = confirm.clone();
         let active_cat_c = Rc::clone(&active_cat);
@@ -3042,7 +3132,12 @@ pub fn emoji_picker_view() -> EmojiPickerView {
         });
     }
 
-    EmojiPickerView { root, search, flow, confirm }
+    EmojiPickerView {
+        root,
+        search,
+        flow,
+        confirm,
+    }
 }
 
 fn populate_emoji_flow(flow: &gtk::FlowBox, category: &str, query: &str, confirm: &Label) {
@@ -3059,7 +3154,9 @@ fn populate_emoji_flow(flow: &gtk::FlowBox, category: &str, query: &str, confirm
             || emoji.contains(&*query_lower)
             || name.contains(&*query_lower)
             || cat.contains(&*query_lower);
-        if !cat_match || !query_match { continue; }
+        if !cat_match || !query_match {
+            continue;
+        }
 
         let btn = Button::with_label(emoji);
         btn.add_css_class("emoji-btn");
@@ -3113,7 +3210,6 @@ fn segmented_choice(options: &[(&str, &str)], current: &str, entry: &Entry) -> G
 }
 
 pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
-
     let outer = super::panel_root(0, 0);
     outer.set_vexpand(true);
     outer.set_hexpand(true);
@@ -3162,7 +3258,8 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                     std::env::var("PRETTY_NAME")
                         .or_else(|_| std::fs::read_to_string("/etc/os-release")
                             .ok()
-                            .and_then(|s| s.lines()
+                            .and_then(|s| s
+                                .lines()
                                 .find(|l| l.starts_with("PRETTY_NAME"))
                                 .and_then(|l| l.split('=').nth(1))
                                 .map(|v| v.trim_matches('"').to_string()))
@@ -3215,8 +3312,14 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
             }
             "Privacy" => {
                 let privacy_rows = [
-                    ("Clipboard history", "Stores last 50 clipboard entries locally"),
-                    ("Usage frequency", "Tracks launch frequency for frecency scoring"),
+                    (
+                        "Clipboard history",
+                        "Stores last 50 clipboard entries locally",
+                    ),
+                    (
+                        "Usage frequency",
+                        "Tracks launch frequency for frecency scoring",
+                    ),
                     ("No telemetry", "Zero data sent to remote servers"),
                     ("Config location", "~/.config/zeshicast/"),
                 ];
@@ -3254,10 +3357,8 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                         .find(|(k, _)| *k == *key)
                         .map(|(_, v)| *v)
                         .unwrap_or("");
-                    let effective_val = current
-                        .get(*key)
-                        .map(String::as_str)
-                        .unwrap_or(default_val);
+                    let effective_val =
+                        current.get(*key).map(String::as_str).unwrap_or(default_val);
 
                     // A preference is boolean when its default is true/false.
                     let is_bool = matches!(default_val, "true" | "false");
@@ -3281,7 +3382,8 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                         });
                         row.append(&sw);
                     } else if *key == "ui_font_size" {
-                        let scale = gtk::Scale::with_range(Orientation::Horizontal, 12.0, 22.0, 1.0);
+                        let scale =
+                            gtk::Scale::with_range(Orientation::Horizontal, 12.0, 22.0, 1.0);
                         scale.set_hexpand(true);
                         scale.set_draw_value(true);
                         scale.set_value_pos(gtk::PositionType::Right);
@@ -3491,11 +3593,21 @@ fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
     title.set_hexpand(true);
 
     let subtitle_text = if !command.description.is_empty() {
-        command.description.as_str()
+        command.description.clone()
     } else {
-        command.keyword.as_deref().unwrap_or_default()
+        command.keyword.clone().unwrap_or_default()
     };
-    let subtitle = Label::new(Some(subtitle_text));
+    let capability_text = if command.capabilities.is_empty() {
+        "capabilities: none".to_string()
+    } else {
+        format!("capabilities: {}", command.capabilities.join(", "))
+    };
+    let subtitle_text = if subtitle_text.is_empty() {
+        capability_text
+    } else {
+        format!("{subtitle_text} - {capability_text}")
+    };
+    let subtitle = Label::new(Some(&subtitle_text));
     subtitle.add_css_class("result-subtitle");
     subtitle.set_xalign(0.0);
     subtitle.set_hexpand(true);
@@ -3534,8 +3646,7 @@ fn ethernet_row(iface: &NetworkInterfaceSnapshot) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.add_css_class("result-row");
 
-    let connected =
-        iface.state.eq_ignore_ascii_case("up") && !iface.ipv4_addresses.is_empty();
+    let connected = iface.state.eq_ignore_ascii_case("up") && !iface.ipv4_addresses.is_empty();
     if connected {
         row.add_css_class("network-active");
     }
@@ -3596,7 +3707,11 @@ fn signal_bars(signal_percent: u32) -> GtkBox {
         bar.set_width_request(3);
         bar.set_height_request(h);
         bar.set_valign(gtk::Align::End);
-        bar.add_css_class(if i < filled { "signal-bar-filled" } else { "signal-bar-empty" });
+        bar.add_css_class(if i < filled {
+            "signal-bar-filled"
+        } else {
+            "signal-bar-empty"
+        });
         container.append(&bar);
     }
     container

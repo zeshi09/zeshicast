@@ -40,15 +40,17 @@ pub fn clipboard_load(config_dir: &Path) -> Vec<(String, i64)> {
     let Ok(conn) = open(config_dir) else {
         return Vec::new();
     };
-    let mut stmt = match conn.prepare(
-        "SELECT text, added_at FROM clipboard ORDER BY added_at DESC LIMIT 100",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT text, added_at FROM clipboard ORDER BY added_at DESC LIMIT 100")
+    {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
-    stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default()
+    stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })
+    .map(|rows| rows.flatten().collect())
+    .unwrap_or_default()
 }
 
 pub fn clipboard_insert(config_dir: &Path, text: &str) -> Result<()> {
@@ -107,9 +109,8 @@ pub fn usage_recent(config_dir: &Path, limit: usize) -> Vec<String> {
     let Ok(conn) = open(config_dir) else {
         return Vec::new();
     };
-    let mut stmt = match conn.prepare(
-        "SELECT identity FROM usage ORDER BY last_used DESC LIMIT ?1",
-    ) {
+    let mut stmt = match conn.prepare("SELECT identity FROM usage ORDER BY last_used DESC LIMIT ?1")
+    {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
@@ -137,11 +138,9 @@ pub fn usage_has_data(config_dir: &Path) -> bool {
     let Ok(conn) = open(config_dir) else {
         return false;
     };
-    conn.query_row("SELECT COUNT(*) FROM usage", [], |row| {
-        row.get::<_, i64>(0)
-    })
-    .map(|n| n > 0)
-    .unwrap_or(false)
+    conn.query_row("SELECT COUNT(*) FROM usage", [], |row| row.get::<_, i64>(0))
+        .map(|n| n > 0)
+        .unwrap_or(false)
 }
 
 // ── One-time migrations from text files ──────────────────────────────────────

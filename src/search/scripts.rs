@@ -80,10 +80,7 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
             }
             break;
         }
-        let comment = line
-            .trim_start_matches('#')
-            .trim_start_matches("//")
-            .trim();
+        let comment = line.trim_start_matches('#').trim_start_matches("//").trim();
 
         if let Some(value) = raycast_meta(comment, "schemaVersion") {
             schema_version = value.parse().ok();
@@ -196,4 +193,3 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
     matches.truncate(20);
     matches
 }
-

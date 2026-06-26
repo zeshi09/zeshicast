@@ -11,8 +11,8 @@ mod services;
 pub mod ui;
 
 pub use action::{
-    Action, ActionForm, ActionFormField, ActionPanelSection, CommandArgumentKind, LauncherCommand,
-    SecondaryAction, SecondaryActionKind,
+    Action, ActionForm, ActionFormField, ActionPanelSection, ActionRisk, Capability,
+    CommandArgumentKind, LauncherCommand, SecondaryAction, SecondaryActionKind,
 };
 pub(crate) use action::{ActionKind, HttpRequest, ShellCommand};
 pub use app::{
@@ -26,9 +26,7 @@ pub(crate) use config::{
 pub use config::{export_config, import_config};
 #[cfg(test)]
 pub(crate) use placeholders::format_local_time;
-pub(crate) use placeholders::{
-    PlaceholderContext, expand_placeholders, expand_placeholders_shell,
-};
+pub(crate) use placeholders::{PlaceholderContext, expand_placeholders, expand_placeholders_shell};
 #[cfg(test)]
 pub(crate) use search::apps::clean_desktop_exec;
 pub(crate) use search::apps::{AppEntry, app_action, load_apps, search_apps};
@@ -74,14 +72,13 @@ pub use services::audio::{
     AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
 };
 pub use services::battery::{BatteryDeviceSnapshot, BatterySnapshot, battery_snapshot};
-pub use services::local_ai::{
-    LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming, list_models,
-};
-pub use services::storage as storage_service;
-pub use services::media::{MediaControl, MediaSnapshot, media_control, media_snapshot};
 pub use services::compositor::{
     WorkspaceSnapshot, keyboard_layout, layout_change_receiver, workspace_snapshot,
 };
+pub use services::local_ai::{
+    LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming, list_models,
+};
+pub use services::media::{MediaControl, MediaSnapshot, media_control, media_snapshot};
 pub use services::network::{
     NetworkInterfaceSnapshot, NetworkSnapshot, VpnConnectionSnapshot, WifiNetworkSnapshot,
     net_speed_mbps, network_snapshot,
@@ -92,8 +89,10 @@ pub use services::notifications::{
 };
 #[cfg(feature = "gui")]
 pub use services::poll_cache::{
-    cached_audio_snapshot, cached_keyboard_layout, cached_network_snapshot, start as start_poll_cache,
+    cached_audio_snapshot, cached_keyboard_layout, cached_network_snapshot,
+    start as start_poll_cache,
 };
+pub use services::storage as storage_service;
 pub use services::system_stats::{
     ProcessSummary, SystemSnapshot, system_snapshot, top_processes_by_memory,
 };
@@ -467,6 +466,7 @@ icon = "folder-symbolic"
 keyword = "notes"
 argument_hint = "<path>"
 tags = ["notes", "work"]
+permissions = ["shell", "filesystem", "open_url", "clipboard_write"]
 arguments = [
   { name = "path", type = "path", required = true }
 ]
@@ -492,6 +492,15 @@ NOTES_ROOT = "{{pref:notes_root}}"
             Some("{{pref:notes_root}}")
         );
         assert_eq!(command.tags, vec!["notes", "work"]);
+        assert_eq!(
+            command.capabilities,
+            vec![
+                Capability::Shell,
+                Capability::Filesystem,
+                Capability::OpenUrl,
+                Capability::ClipboardWrite
+            ]
+        );
     }
 
     #[test]
@@ -505,6 +514,7 @@ description = "Search manual pages"
 keyword = "man"
 argument_hint = "<term>"
 tags = ["docs", "terminal"]
+permissions = ["shell"]
 "#,
             )
             .unwrap(),
@@ -526,6 +536,34 @@ tags = ["docs", "terminal"]
     }
 
     #[test]
+    fn shell_command_without_shell_permission_is_blocked() {
+        let entries = vec![
+            parse_command_entry(
+                r#"
+name = "Unsafe"
+mode = "shell"
+keyword = "unsafe"
+command = "rm -rf /tmp/example"
+"#,
+            )
+            .unwrap(),
+        ];
+        let context = PlaceholderContext {
+            query: "unsafe".to_string(),
+            clipboard: String::new(),
+            args: HashMap::new(),
+            preferences: HashMap::new(),
+            now: UNIX_EPOCH,
+        };
+
+        let results = search_commands(&entries, "unsafe", &context);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].risk, ActionRisk::Normal);
+        assert_eq!(results[0].value(), "Unsafe");
+        assert!(results[0].subtitle.contains("lacks permissions"));
+    }
+
+    #[test]
     fn command_keyword_uses_trailing_query_as_argument() {
         let entries = vec![
             parse_command_entry(
@@ -534,6 +572,7 @@ name = "GitHub Search"
 command = "xdg-open https://github.com/search?q={{query}}"
 keyword = "gh"
 argument_hint = "<query>"
+permissions = ["shell"]
 arguments = [
   { name = "query", type = "text", required = true }
 ]
@@ -567,6 +606,7 @@ name = "Deploy"
 command = "deploy --env {{arg:env}} --service {{arg:service}} --force {{arg:force}}"
 keyword = "deploy"
 argument_hint = "<env> <service>"
+permissions = ["shell"]
 arguments = [
   { name = "env", type = "enum", required = true, options = ["dev", "prod"] },
   { name = "service", type = "text", required = true },
@@ -601,6 +641,7 @@ name = "Echo"
 command = "echo {{query}}"
 keyword = "echo"
 argument_hint = "<text>"
+permissions = ["shell"]
 "#,
             )
             .unwrap(),
@@ -628,6 +669,7 @@ argument_hint = "<text>"
 name = "Deploy"
 command = "deploy --env {{arg:env}}"
 keyword = "deploy"
+permissions = ["shell"]
 arguments = [
   { name = "env", type = "enum", required = true, options = ["dev", "prod"] }
 ]
@@ -657,6 +699,7 @@ arguments = [
 name = "Open Workspace"
 command = "xdg-open {{pref:workspace}}/{{arg:project}}"
 keyword = "ws"
+permissions = ["shell"]
 arguments = [
   { name = "project", type = "text", required = true }
 ]
@@ -740,12 +783,51 @@ DEPLOY_TOKEN = "{{pref:token}}"
 "#,
             "Extension",
             900,
+            &[Capability::Network, Capability::ClipboardWrite],
         );
 
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0].title, "Rust");
         assert_eq!(actions[0].value(), "https://www.rust-lang.org");
+        assert_eq!(actions[0].risk, ActionRisk::Normal);
         assert_eq!(actions[1].value(), "gtk4");
+    }
+
+    #[test]
+    fn json_shell_actions_are_marked_shell_risk() {
+        let actions = parse_json_actions(
+            r#"
+[
+  { "title": "Stop service", "action": { "type": "shell", "value": "systemctl stop demo" } }
+]
+"#,
+            "Extension",
+            900,
+            &[Capability::Shell],
+        );
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].risk, ActionRisk::Shell);
+        assert!(actions[0].risk.requires_confirmation());
+    }
+
+    #[test]
+    fn json_shell_actions_without_shell_permission_are_blocked() {
+        let actions = parse_json_actions(
+            r#"
+[
+  { "title": "Stop service", "action": { "type": "shell", "value": "systemctl stop demo" } }
+]
+"#,
+            "Extension",
+            900,
+            &[],
+        );
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].risk, ActionRisk::Normal);
+        assert_eq!(actions[0].value(), "Stop service");
+        assert!(actions[0].subtitle.contains("requires permissions"));
     }
 
     #[test]
@@ -760,6 +842,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
 "#,
             "Extension",
             900,
+            &[Capability::Filesystem],
         );
 
         assert_eq!(actions.len(), 1);
@@ -773,6 +856,13 @@ DEPLOY_TOKEN = "{{pref:token}}"
 
         let explicit = search_system_actions("system power");
         assert!(explicit.iter().any(|action| action.title == "Power Off"));
+        assert_eq!(
+            explicit
+                .iter()
+                .find(|action| action.title == "Power Off")
+                .map(|action| action.risk),
+            Some(ActionRisk::SystemPower)
+        );
     }
 
     #[test]
@@ -1012,6 +1102,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].category, "Process");
         assert_eq!(actions[0].value(), "kill 4242");
+        assert_eq!(actions[0].risk, ActionRisk::ProcessKill);
         assert!(actions[0].subtitle.contains("target/debug/zeshicast-gtk"));
     }
 

@@ -18,7 +18,9 @@ mod widgets;
 pub use forms::show_form_panel;
 pub use launcher::{GuiState, ensure_ui, present_launcher, present_launcher_view};
 pub use navigation::{LauncherView, NavigationStack};
-pub use panels::{show_alias_panel, show_extension_browser, show_preferences_editor};
+pub use panels::{
+    show_alias_panel, show_confirmation_panel, show_extension_browser, show_preferences_editor,
+};
 pub use status_strip::StatusStrip;
 pub use style::install_css;
 pub use views::{

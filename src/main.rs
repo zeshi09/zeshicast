@@ -238,7 +238,7 @@ Command TOML:
   workspace = \"~/Code\"
   [env]
   DEPLOY_TOKEN = \"{{{{pref:deploy_token}}}}\"
-  permissions = [\"shell\"]   # optional: \"shell\", \"network\", \"filesystem\"
+  permissions = [\"shell\"]   # enforced: \"shell\", \"network\", \"filesystem\", \"clipboard_write\"
 "
     );
 }

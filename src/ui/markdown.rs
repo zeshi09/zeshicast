@@ -144,7 +144,10 @@ mod tests {
 
     #[test]
     fn bold_and_italic() {
-        assert_eq!(to_pango_markup("**hi** and *there*"), "<b>hi</b> and <i>there</i>");
+        assert_eq!(
+            to_pango_markup("**hi** and *there*"),
+            "<b>hi</b> and <i>there</i>"
+        );
     }
 
     #[test]

@@ -10,6 +10,77 @@ use gtk::{
 
 use crate::{Action, Zeshicast};
 
+pub fn show_confirmation_panel<F>(
+    parent: &ApplicationWindow,
+    title: &str,
+    subtitle: &str,
+    confirm_label: &str,
+    on_confirm: F,
+) where
+    F: Fn() + 'static,
+{
+    let Some(panel) = super::action_panel(parent, title, 460, 170) else {
+        return;
+    };
+    let root = super::panel_root(12, 14);
+    let header = super::panel_title(title);
+    root.append(&header);
+
+    let detail = Label::new(Some(subtitle));
+    detail.add_css_class("result-subtitle");
+    detail.set_wrap(true);
+    detail.set_xalign(0.0);
+    detail.set_margin_bottom(8);
+    root.append(&detail);
+
+    let buttons = GtkBox::new(Orientation::Horizontal, 8);
+    buttons.set_halign(gtk::Align::End);
+
+    let cancel = Button::with_label("Cancel");
+    let confirm = Button::with_label(confirm_label);
+    confirm.add_css_class("destructive-action");
+
+    buttons.append(&cancel);
+    buttons.append(&confirm);
+    root.append(&buttons);
+    panel.set_child(Some(&root));
+
+    let on_confirm: Rc<dyn Fn()> = Rc::new(on_confirm);
+    {
+        let panel = panel.clone();
+        cancel.connect_clicked(move |_| panel.close());
+    }
+    {
+        let panel = panel.clone();
+        let on_confirm = Rc::clone(&on_confirm);
+        confirm.connect_clicked(move |_| {
+            on_confirm();
+            panel.close();
+        });
+    }
+    {
+        let panel_keys = panel.clone();
+        let on_confirm = Rc::clone(&on_confirm);
+        let key_controller = EventControllerKey::new();
+        key_controller.connect_key_pressed(move |_, key, _, _| match key {
+            gdk::Key::Escape => {
+                panel_keys.close();
+                glib::Propagation::Stop
+            }
+            gdk::Key::Return | gdk::Key::KP_Enter => {
+                on_confirm();
+                panel_keys.close();
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
+        });
+        panel.add_controller(key_controller);
+    }
+
+    confirm.grab_focus();
+    panel.present();
+}
+
 pub fn show_alias_panel(
     parent: &ApplicationWindow,
     launcher: &Rc<RefCell<Zeshicast>>,

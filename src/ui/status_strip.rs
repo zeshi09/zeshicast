@@ -119,7 +119,11 @@ impl StatusStrip {
             return;
         };
         let connected = iface.state == "up";
-        let label = if iface.is_wireless { "Wi-Fi" } else { "Ethernet" };
+        let label = if iface.is_wireless {
+            "Wi-Fi"
+        } else {
+            "Ethernet"
+        };
         let text = format!("✻  {label}");
         self.network.set_text(&text);
         self.network.set_visible(true);

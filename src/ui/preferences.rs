@@ -4,7 +4,10 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("ui_density", "compact"),
     ("ui_theme", "system"),
     ("show_status_strip", "true"),
-    ("status_items", "clock,date,network,battery,audio,media,layout"),
+    (
+        "status_items",
+        "clock,date,network,battery,audio,media,layout",
+    ),
     ("dashboard_enabled", "true"),
     ("dashboard_poll_interval_ms", "1000"),
     ("network_enabled", "true"),
@@ -26,7 +29,10 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
 pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
     ("ui_font_family", "UI font family (restart required)"),
     ("ui_font_size", "UI base font size 12-22 (restart required)"),
-    ("ui_density", "Row density: comfortable (default) or compact"),
+    (
+        "ui_density",
+        "Row density: comfortable (default) or compact",
+    ),
     ("ui_theme", "Theme: system (default), dark, or light"),
     ("show_status_strip", "Show status strip (true/false)"),
     (
@@ -60,10 +66,7 @@ pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
         "translate_target",
         "Translate target language (e.g. en, ru, de)",
     ),
-    (
-        "script_dirs",
-        "Script directories (comma-separated paths)",
-    ),
+    ("script_dirs", "Script directories (comma-separated paths)"),
 ];
 
 pub(crate) struct PrefSection {

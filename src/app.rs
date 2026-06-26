@@ -9,14 +9,14 @@ use crate::{
     CommandEntry, CommandsProvider, EmojiProvider, FileEntry, FilesProvider, HyprlandProvider,
     LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider, NamedValue,
     NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext,
-    ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SecondaryAction,
-    SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
-    app_action, append_alias, expand_placeholders, expand_placeholders_shell, fuzzy_score,
-    home_dir, load_aliases, load_apps,
-    load_clipboard_history, load_command_entries, load_file_index, load_frequencies, load_lines,
-    load_named_values, load_preferences, load_script_entries, normalize_alias,
-    search_audio_actions, search_media_actions, search_network_actions,
-    search_notification_actions, search_system_actions, spawn_shell, write_lines, write_preferences,
+    ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext, SearchProvider,
+    SecondaryAction, SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider,
+    WindowsProvider, app_action, append_alias, expand_placeholders, expand_placeholders_shell,
+    fuzzy_score, home_dir, load_aliases, load_apps, load_clipboard_history, load_command_entries,
+    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences,
+    load_script_entries, normalize_alias, search_audio_actions, search_media_actions,
+    search_network_actions, search_notification_actions, search_system_actions, spawn_shell,
+    write_lines, write_preferences,
 };
 
 #[derive(Debug, Clone)]
@@ -244,8 +244,7 @@ impl Zeshicast {
 
         let clip_rows = storage::clipboard_load(&config_dir);
         let clipboard_history: Vec<String> = clip_rows.iter().map(|(t, _)| t.clone()).collect();
-        let clipboard_timestamps: HashMap<String, i64> =
-            clip_rows.into_iter().collect();
+        let clipboard_timestamps: HashMap<String, i64> = clip_rows.into_iter().collect();
 
         let recent = storage::usage_recent(&config_dir, 50);
         let frequencies = storage::usage_frequencies(&config_dir);
@@ -377,7 +376,12 @@ impl Zeshicast {
         if self.preference_enabled("ai_enabled", true) {
             actions.extend(WebProvider.search(&search_context));
         }
-        actions.extend(ScriptsProvider { entries: &self.scripts }.search(&search_context));
+        actions.extend(
+            ScriptsProvider {
+                entries: &self.scripts,
+            }
+            .search(&search_context),
+        );
         actions.extend(EmojiProvider.search(&search_context));
         actions.extend(
             ClipboardProvider {
@@ -399,7 +403,8 @@ impl Zeshicast {
                         500,
                     )
                     .with_subtitle("Run with sh -c")
-                    .with_icon("utilities-terminal-symbolic"),
+                    .with_icon("utilities-terminal-symbolic")
+                    .with_risk(crate::ActionRisk::Shell),
                 );
             }
         }
@@ -503,10 +508,13 @@ impl Zeshicast {
 
     pub fn record_calc(&mut self, expr: &str, result: &str) {
         self.calc_history.retain(|e| e.expr != expr);
-        self.calc_history.insert(0, CalcHistoryEntry {
-            expr: expr.to_string(),
-            result: result.to_string(),
-        });
+        self.calc_history.insert(
+            0,
+            CalcHistoryEntry {
+                expr: expr.to_string(),
+                result: result.to_string(),
+            },
+        );
         self.calc_history.truncate(20);
         save_calc_history(
             &self.config_dir.join("calc_history.json"),
@@ -908,6 +916,11 @@ impl Zeshicast {
                 icon_name: e.icon_name.clone(),
                 tags: e.tags.clone(),
                 permissions: e.permissions.clone(),
+                capabilities: e
+                    .capabilities
+                    .iter()
+                    .map(|capability| capability.label().to_string())
+                    .collect(),
                 enabled: true,
             })
             .collect()
@@ -1029,10 +1042,7 @@ fn type_text_via_wtype(text: &str) {
         let text = text.to_string();
         move || {
             std::thread::sleep(std::time::Duration::from_millis(200));
-            std::process::Command::new("wtype")
-                .arg(&text)
-                .spawn()
-                .ok();
+            std::process::Command::new("wtype").arg(&text).spawn().ok();
         }
     });
 }
@@ -1061,5 +1071,6 @@ pub struct CommandSummary {
     pub icon_name: String,
     pub tags: Vec<String>,
     pub permissions: Vec<String>,
+    pub capabilities: Vec<String>,
     pub enabled: bool,
 }

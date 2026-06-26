@@ -60,8 +60,61 @@ pub struct Action {
     pub title: String,
     pub subtitle: String,
     pub icon_name: String,
+    pub risk: ActionRisk,
     pub(crate) kind: ActionKind,
     pub score: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionRisk {
+    Normal,
+    Shell,
+    Destructive,
+    SystemPower,
+    ProcessKill,
+    ClipboardClear,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Capability {
+    Shell,
+    Network,
+    Filesystem,
+    ClipboardRead,
+    ClipboardWrite,
+    OpenUrl,
+    OpenPath,
+}
+
+impl Capability {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Shell => "shell",
+            Self::Network => "network",
+            Self::Filesystem => "filesystem",
+            Self::ClipboardRead => "clipboard_read",
+            Self::ClipboardWrite => "clipboard_write",
+            Self::OpenUrl => "open_url",
+            Self::OpenPath => "open_path",
+        }
+    }
+}
+
+impl ActionRisk {
+    pub fn requires_confirmation(self) -> bool {
+        !matches!(self, Self::Normal)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "Run Action",
+            Self::Shell => "Run Shell Command",
+            Self::Destructive => "Confirm Destructive Action",
+            Self::SystemPower => "Confirm System Power Action",
+            Self::ProcessKill => "Confirm Process Kill",
+            Self::ClipboardClear => "Clear Clipboard History",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +201,7 @@ impl Action {
             title: title.into(),
             subtitle: String::new(),
             icon_name: "system-run-symbolic".to_string(),
+            risk: ActionRisk::Normal,
             kind,
             score,
         }
@@ -160,6 +214,11 @@ impl Action {
 
     pub(crate) fn with_icon(mut self, icon_name: impl Into<String>) -> Self {
         self.icon_name = icon_name.into();
+        self
+    }
+
+    pub(crate) fn with_risk(mut self, risk: ActionRisk) -> Self {
+        self.risk = risk;
         self
     }
 

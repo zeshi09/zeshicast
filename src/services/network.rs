@@ -52,9 +52,13 @@ static NET_SPEED_STATE: Mutex<Option<(HashMap<String, (u64, u64)>, Instant)>> = 
 /// Returns (rx_mbps, tx_mbps) for the given interface, using a static to track deltas.
 pub fn net_speed_mbps(iface: &str) -> (f64, f64) {
     let rx = fs::read_to_string(format!("/sys/class/net/{iface}/statistics/rx_bytes"))
-        .ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0);
     let tx = fs::read_to_string(format!("/sys/class/net/{iface}/statistics/tx_bytes"))
-        .ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0);
     let now = Instant::now();
 
     let mut state = NET_SPEED_STATE.lock().unwrap();
@@ -65,9 +69,15 @@ pub fn net_speed_mbps(iface: &str) -> (f64, f64) {
                 let rx_s = rx.saturating_sub(prev_rx) as f64 / dt / 1_000_000.0;
                 let tx_s = tx.saturating_sub(prev_tx) as f64 / dt / 1_000_000.0;
                 (rx_s, tx_s)
-            } else { (0.0, 0.0) }
-        } else { (0.0, 0.0) }
-    } else { (0.0, 0.0) };
+            } else {
+                (0.0, 0.0)
+            }
+        } else {
+            (0.0, 0.0)
+        }
+    } else {
+        (0.0, 0.0)
+    };
 
     let mut map = state.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
     map.insert(iface.to_string(), (rx, tx));
@@ -87,8 +97,7 @@ fn read_interfaces() -> io::Result<Vec<NetworkInterfaceSnapshot>> {
         .collect::<Vec<_>>();
     interfaces.retain(|iface| {
         let n = iface.name.as_str();
-        (n.starts_with("en") || n.starts_with("eth") || n.starts_with("wl"))
-            && !n.starts_with("wg") // WireGuard is VPN, handled separately
+        (n.starts_with("en") || n.starts_with("eth") || n.starts_with("wl")) && !n.starts_with("wg") // WireGuard is VPN, handled separately
     });
     interfaces.sort_by(|left, right| {
         left.name
@@ -182,7 +191,14 @@ fn parse_ip_addr_line(line: &str) -> Option<(String, String)> {
 fn read_wifi_networks() -> io::Result<Vec<WifiNetworkSnapshot>> {
     let output = command_stdout(
         "nmcli",
-        &["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
+        &[
+            "-t",
+            "-f",
+            "IN-USE,SSID,SIGNAL,SECURITY",
+            "dev",
+            "wifi",
+            "list",
+        ],
     )?;
     Ok(parse_nmcli_wifi_list(&output))
 }
@@ -247,9 +263,11 @@ fn parse_nmcli_wifi_list(output: &str) -> Vec<WifiNetworkSnapshot> {
 
     // Active first, then by descending signal strength.
     networks.sort_by(|a, b| {
-        b.active
-            .cmp(&a.active)
-            .then(b.signal_percent.unwrap_or(0).cmp(&a.signal_percent.unwrap_or(0)))
+        b.active.cmp(&a.active).then(
+            b.signal_percent
+                .unwrap_or(0)
+                .cmp(&a.signal_percent.unwrap_or(0)),
+        )
     });
     networks
 }
