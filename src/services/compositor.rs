@@ -226,10 +226,8 @@ fn emit_layout_change(
     // Don't fire on the initial state, only on an actual change.
     let changed = last_idx.is_some_and(|prev| prev != idx);
     *last_idx = Some(idx);
-    if changed {
-        if let Some(name) = names.get(idx) {
-            let _ = tx.send(layout_short_code(name));
-        }
+    if changed && let Some(name) = names.get(idx) {
+        let _ = tx.send(layout_short_code(name));
     }
 }
 

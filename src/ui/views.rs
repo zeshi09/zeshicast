@@ -1817,14 +1817,14 @@ fn notification_history_row(
     text.append(&title);
 
     // Body
-    if let Some(body) = &entry.body {
-        if !body.is_empty() {
-            let body_lbl = Label::new(Some(body));
-            body_lbl.add_css_class("result-subtitle");
-            body_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            body_lbl.set_xalign(0.0);
-            text.append(&body_lbl);
-        }
+    if let Some(body) = &entry.body
+        && !body.is_empty()
+    {
+        let body_lbl = Label::new(Some(body));
+        body_lbl.add_css_class("result-subtitle");
+        body_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        body_lbl.set_xalign(0.0);
+        text.append(&body_lbl);
     }
 
     layout.append(&text);

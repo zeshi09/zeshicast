@@ -36,7 +36,7 @@ pub fn start() {
             // so refresh it less often to save power.
             let audio = audio_snapshot();
             let layout = keyboard_layout();
-            let network = (tick % 3 == 0).then(network_snapshot);
+            let network = tick.is_multiple_of(3).then(network_snapshot);
             if let Ok(mut cache) = cache.lock() {
                 cache.audio = audio;
                 cache.keyboard_layout = layout;

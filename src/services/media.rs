@@ -194,16 +194,14 @@ mod mpris {
                 "xesam:title" => snapshot.title = value.str().map(str::to_string),
                 "xesam:album" => snapshot.album = value.str().map(str::to_string),
                 "mpris:artUrl" => snapshot.art_url = value.str().map(str::to_string),
-                "xesam:artist" | "xesam:albumArtist" => {
+                "xesam:artist" | "xesam:albumArtist" if snapshot.artist.is_none() => {
                     // Array of strings — take the first non-empty.
-                    if snapshot.artist.is_none() {
-                        for j in 0..value.n_children() {
-                            if let Some(artist) = value.child_value(j).str() {
-                                if !artist.is_empty() {
-                                    snapshot.artist = Some(artist.to_string());
-                                    break;
-                                }
-                            }
+                    for j in 0..value.n_children() {
+                        if let Some(artist) = value.child_value(j).str()
+                            && !artist.is_empty()
+                        {
+                            snapshot.artist = Some(artist.to_string());
+                            break;
                         }
                     }
                 }

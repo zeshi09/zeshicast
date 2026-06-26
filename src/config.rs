@@ -16,7 +16,7 @@ pub fn export_config(config_dir: &Path, dest: &Path) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::new(io::ErrorKind::Other, "tar export failed"))
+        Err(io::Error::other("tar export failed"))
     }
 }
 

@@ -346,49 +346,38 @@ pub(crate) fn search_windows(query: &str) -> Vec<Action> {
         return Vec::new();
     };
 
-    if let Ok(output) = Command::new("niri").args(["msg", "windows"]).output() {
-        if output.status.success() {
-            if let Ok(text) = std::str::from_utf8(&output.stdout) {
-                if let Ok(windows) = serde_json::from_str::<serde_json::Value>(text) {
-                    if let Some(arr) = windows.as_array() {
-                        if !arr.is_empty() {
-                            return niri_window_actions(arr, &needle);
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(windows) = command_json_value("niri", &["msg", "windows"])
+        && let Some(arr) = windows.as_array()
+        && !arr.is_empty()
+    {
+        return niri_window_actions(arr, &needle);
     }
 
-    if let Ok(output) = Command::new("hyprctl").args(["clients", "-j"]).output() {
-        if output.status.success() {
-            if let Ok(text) = std::str::from_utf8(&output.stdout) {
-                if let Ok(windows) = serde_json::from_str::<serde_json::Value>(text) {
-                    if let Some(arr) = windows.as_array() {
-                        if !arr.is_empty() {
-                            return hyprland_window_actions(arr, &needle);
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(windows) = command_json_value("hyprctl", &["clients", "-j"])
+        && let Some(arr) = windows.as_array()
+        && !arr.is_empty()
+    {
+        return hyprland_window_actions(arr, &needle);
     }
 
-    if let Ok(output) = Command::new("swaymsg").args(["-t", "get_tree"]).output() {
-        if output.status.success() {
-            if let Ok(text) = std::str::from_utf8(&output.stdout) {
-                if let Ok(tree) = serde_json::from_str::<serde_json::Value>(text) {
-                    let mut nodes = Vec::new();
-                    collect_sway_windows(&tree, &mut nodes);
-                    if !nodes.is_empty() {
-                        return sway_window_actions(&nodes, &needle);
-                    }
-                }
-            }
+    if let Some(tree) = command_json_value("swaymsg", &["-t", "get_tree"]) {
+        let mut nodes = Vec::new();
+        collect_sway_windows(&tree, &mut nodes);
+        if !nodes.is_empty() {
+            return sway_window_actions(&nodes, &needle);
         }
     }
 
     Vec::new()
+}
+
+fn command_json_value(program: &str, args: &[&str]) -> Option<serde_json::Value> {
+    let output = Command::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = std::str::from_utf8(&output.stdout).ok()?;
+    serde_json::from_str(text).ok()
 }
 
 fn niri_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Action> {
@@ -450,14 +439,13 @@ fn hyprland_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<A
 }
 
 fn collect_sway_windows<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json::Value>) {
-    if node.get("type").and_then(|t| t.as_str()) == Some("con") {
-        if node
+    if node.get("type").and_then(|t| t.as_str()) == Some("con")
+        && node
             .get("name")
             .and_then(|n| n.as_str())
             .is_some_and(|n| !n.is_empty())
-        {
-            out.push(node);
-        }
+    {
+        out.push(node);
     }
     if let Some(nodes) = node.get("nodes").and_then(|n| n.as_array()) {
         for child in nodes {

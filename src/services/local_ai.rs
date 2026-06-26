@@ -109,10 +109,10 @@ pub fn ask_local_ai_streaming(
             let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
                 continue;
             };
-            if let Some(token) = value.get("response").and_then(|v| v.as_str()) {
-                if !token.is_empty() {
-                    sender.send(StreamChunk::Token(token.to_string())).ok();
-                }
+            if let Some(token) = value.get("response").and_then(|v| v.as_str())
+                && !token.is_empty()
+            {
+                sender.send(StreamChunk::Token(token.to_string())).ok();
             }
             if value.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
                 break;

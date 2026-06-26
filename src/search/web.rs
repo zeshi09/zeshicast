@@ -172,7 +172,7 @@ pub(crate) fn search_translate(query: &str, preferences: &HashMap<String, String
     let (text, target) = if let Some(pos) = text_part.rfind(" in ") {
         let suffix = &text_part[pos + 4..];
         let lang_len = suffix.chars().count();
-        if lang_len >= 2 && lang_len <= 3 && suffix.chars().all(|c| c.is_ascii_alphabetic()) {
+        if (2..=3).contains(&lang_len) && suffix.chars().all(|c| c.is_ascii_alphabetic()) {
             (&text_part[..pos], suffix.to_string())
         } else {
             (text_part, default_target)

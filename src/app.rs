@@ -425,10 +425,10 @@ impl Zeshicast {
 
     pub fn run_action(&mut self, action: &Action) {
         action.run();
-        if action.category == "Calculator" {
-            if let Some((expr, result)) = action.title.split_once(" = ") {
-                self.record_calc(expr.trim(), result.trim());
-            }
+        if action.category == "Calculator"
+            && let Some((expr, result)) = action.title.split_once(" = ")
+        {
+            self.record_calc(expr.trim(), result.trim());
         }
         if let Err(error) = self.record_recent(action) {
             eprintln!("failed to record recent action: {error}");
@@ -560,7 +560,7 @@ impl Zeshicast {
             return Ok(false);
         }
         storage::clipboard_insert(&self.config_dir, &text)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
         self.clipboard_timestamps
             .entry(text.clone())
             .or_insert_with(crate::unix_now);
@@ -576,15 +576,14 @@ impl Zeshicast {
 
     pub fn delete_clipboard_value(&mut self, value: &str) -> io::Result<()> {
         storage::clipboard_delete(&self.config_dir, value)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
         self.clipboard_history.retain(|e| e != value);
         self.clipboard_timestamps.remove(value);
         Ok(())
     }
 
     pub fn clear_clipboard_history(&mut self) -> io::Result<()> {
-        storage::clipboard_clear(&self.config_dir)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        storage::clipboard_clear(&self.config_dir).map_err(|e| io::Error::other(e.to_string()))?;
         self.clipboard_history.clear();
         self.clipboard_timestamps.clear();
         Ok(())
@@ -929,7 +928,7 @@ impl Zeshicast {
     fn record_recent(&mut self, action: &Action) -> io::Result<()> {
         let identity = action.identity().to_lowercase();
         storage::usage_record(&self.config_dir, &identity)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
         self.recent.retain(|e| e != &identity);
         self.recent.insert(0, identity.clone());
         self.recent.truncate(50);

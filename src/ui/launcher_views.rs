@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Entry, ListBox};
 

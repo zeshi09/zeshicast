@@ -80,10 +80,8 @@ fn main() -> glib::ExitCode {
             let view = parse_view(&args);
             zeshicast::ui::ensure_ui(app, &state, &hold, daemon, configure_layer_shell);
 
-            if !daemon {
-                if let Some(state) = state.borrow().as_ref() {
-                    zeshicast::ui::present_launcher_view(state, view.as_deref());
-                }
+            if !daemon && let Some(state) = state.borrow().as_ref() {
+                zeshicast::ui::present_launcher_view(state, view.as_deref());
             }
 
             glib::ExitCode::SUCCESS
@@ -122,15 +120,15 @@ fn parse_view(args: &[String]) -> Option<String> {
                 return Some(view.to_string());
             }
         } else if arg == "--view" {
-            if let Some(value) = iter.next() {
-                if let Some(view) = canonical(value) {
-                    return Some(view.to_string());
-                }
-            }
-        } else if let Some(flag) = arg.strip_prefix("--") {
-            if let Some(view) = canonical(flag) {
+            if let Some(value) = iter.next()
+                && let Some(view) = canonical(value)
+            {
                 return Some(view.to_string());
             }
+        } else if let Some(flag) = arg.strip_prefix("--")
+            && let Some(view) = canonical(flag)
+        {
+            return Some(view.to_string());
         }
     }
     None

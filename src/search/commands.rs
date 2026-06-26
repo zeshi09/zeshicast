@@ -695,9 +695,9 @@ fn bind_command_arguments(arguments: &[CommandArgument], input: &str) -> Argumen
             argument.default.clone()
         };
 
-        if argument.required && value.trim().is_empty() {
-            missing.push(argument.name.clone());
-        } else if !value.trim().is_empty() && !argument_accepts_value(argument, &value) {
+        let value_is_invalid = (argument.required && value.trim().is_empty())
+            || (!value.trim().is_empty() && !argument_accepts_value(argument, &value));
+        if value_is_invalid {
             missing.push(argument.name.clone());
         }
 

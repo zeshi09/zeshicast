@@ -144,3 +144,9 @@ impl NavigationStack {
         }
     }
 }
+
+impl Default for NavigationStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}

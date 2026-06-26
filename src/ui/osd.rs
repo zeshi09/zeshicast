@@ -49,11 +49,11 @@ pub fn show_layout_osd(app: &Application, code: &str) {
     // but only if no newer show has happened in the meantime.
     glib::timeout_add_local_once(Duration::from_millis(VISIBLE_MS), move || {
         let still_current = LAYOUT_OSD.with(|cell| {
-            if let Some(osd) = cell.borrow().as_ref() {
-                if osd.generation == generation {
-                    osd.revealer.set_reveal_child(false);
-                    return true;
-                }
+            if let Some(osd) = cell.borrow().as_ref()
+                && osd.generation == generation
+            {
+                osd.revealer.set_reveal_child(false);
+                return true;
             }
             false
         });
@@ -62,10 +62,10 @@ pub fn show_layout_osd(app: &Application, code: &str) {
         }
         glib::timeout_add_local_once(Duration::from_millis(FADE_MS as u64 + 40), move || {
             LAYOUT_OSD.with(|cell| {
-                if let Some(osd) = cell.borrow().as_ref() {
-                    if osd.generation == generation {
-                        osd.window.set_visible(false);
-                    }
+                if let Some(osd) = cell.borrow().as_ref()
+                    && osd.generation == generation
+                {
+                    osd.window.set_visible(false);
                 }
             });
         });

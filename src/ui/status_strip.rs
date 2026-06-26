@@ -213,6 +213,12 @@ impl StatusStrip {
     }
 }
 
+impl Default for StatusStrip {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn status_chip() -> Label {
     let label = Label::new(None);
     label.add_css_class("status-chip");

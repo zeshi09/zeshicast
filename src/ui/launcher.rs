@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -337,11 +339,11 @@ fn build_ui(
         list.connect_row_selected(move |_, row| {
             let total = results.borrow().len();
             const OVERFLOW_THRESHOLD: usize = 6;
-            if total > OVERFLOW_THRESHOLD {
-                if let Some(row) = row {
-                    result_counter.set_text(&format!("{} of {}", row.index() + 1, total));
-                    result_counter.set_visible(true);
-                }
+            if total > OVERFLOW_THRESHOLD
+                && let Some(row) = row
+            {
+                result_counter.set_text(&format!("{} of {}", row.index() + 1, total));
+                result_counter.set_visible(true);
             }
         });
     }
@@ -1171,7 +1173,7 @@ fn fill_ai_model_bar(
     };
     // Fall back to the first model if the configured one isn't installed, and
     // persist it so the next query uses something real.
-    let active = if models.iter().any(|m| *m == current) {
+    let active = if models.contains(&current) {
         current
     } else {
         let first = models[0].clone();
@@ -1263,10 +1265,10 @@ fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
                     if buf.last() == Some(&0) {
                         buf.pop();
                     }
-                    if let Some(text) = decode_clipboard_text(&buf) {
-                        if tx.send(text).is_err() {
-                            return; // receiver gone, stop the thread
-                        }
+                    if let Some(text) = decode_clipboard_text(&buf)
+                        && tx.send(text).is_err()
+                    {
+                        return; // receiver gone, stop the thread
                     }
                 }
                 Err(_) => break,
@@ -1975,12 +1977,11 @@ fn handle_view_key(
                 clear_clipboard_history_or_confirm(window, launcher, move || {
                     refresh_clipboard_view(&launcher_for_done, &clipboard_view, &clipboard_items);
                 });
-            } else if let Some(row) = clipboard_view.list.selected_row() {
-                if let Some(item) = clipboard_items.borrow().get(row.index() as usize) {
-                    if let Err(error) = launcher.borrow_mut().delete_clipboard_value(&item.value) {
-                        eprintln!("failed to delete clipboard item: {error}");
-                    }
-                }
+            } else if let Some(row) = clipboard_view.list.selected_row()
+                && let Some(item) = clipboard_items.borrow().get(row.index() as usize)
+                && let Err(error) = launcher.borrow_mut().delete_clipboard_value(&item.value)
+            {
+                eprintln!("failed to delete clipboard item: {error}");
             }
             if !state.contains(gdk::ModifierType::CONTROL_MASK) {
                 refresh_clipboard_view(launcher, clipboard_view, clipboard_items);
@@ -1988,15 +1989,13 @@ fn handle_view_key(
             glib::Propagation::Stop
         }
         gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::Snippets => {
-            if let Some(row) = snippet_list.selected_row() {
-                if let Some(item) = snippet_items.borrow().get(row.index() as usize) {
-                    if let Err(error) = launcher
-                        .borrow_mut()
-                        .delete_snippet(&item.name, &item.value)
-                    {
-                        eprintln!("failed to delete snippet: {error}");
-                    }
-                }
+            if let Some(row) = snippet_list.selected_row()
+                && let Some(item) = snippet_items.borrow().get(row.index() as usize)
+                && let Err(error) = launcher
+                    .borrow_mut()
+                    .delete_snippet(&item.name, &item.value)
+            {
+                eprintln!("failed to delete snippet: {error}");
             }
             refresh_snippet_view(launcher, snippet_list, snippet_items);
             glib::Propagation::Stop

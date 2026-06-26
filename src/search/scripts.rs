@@ -145,7 +145,11 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
     let lower = query.trim().to_lowercase();
     let explicit = lower.starts_with("script ") || lower.starts_with("scripts ");
     let search_query = if explicit {
-        query.splitn(2, ' ').nth(1).unwrap_or("").trim()
+        query
+            .split_once(' ')
+            .map(|(_, rest)| rest)
+            .unwrap_or("")
+            .trim()
     } else {
         query.trim()
     };
@@ -163,11 +167,7 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
             } else {
                 fuzzy_score(&text, search_query)?
             };
-            let category = if entry.package.is_empty() {
-                "Script"
-            } else {
-                "Script"
-            };
+            let category = "Script";
             let subtitle = if !entry.description.is_empty() {
                 entry.description.clone()
             } else if !entry.package.is_empty() {

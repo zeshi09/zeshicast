@@ -118,7 +118,11 @@ pub(crate) fn search_emoji(query: &str) -> Vec<Action> {
     let bare_colon = lower.starts_with(':') && !lower.starts_with(": ");
 
     let search_term = if explicit {
-        query.splitn(2, ' ').nth(1).unwrap_or("").trim()
+        query
+            .split_once(' ')
+            .map(|(_, rest)| rest)
+            .unwrap_or("")
+            .trim()
     } else if bare_colon {
         lower[1..].trim()
     } else {
@@ -142,7 +146,7 @@ pub(crate) fn search_emoji(query: &str) -> Vec<Action> {
         })
         .collect();
 
-    matches.sort_by(|a, b| b.0.cmp(&a.0));
+    matches.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
     matches.truncate(30);
     matches.into_iter().map(|(_, a)| a).collect()
 }

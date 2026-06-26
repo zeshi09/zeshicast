@@ -138,7 +138,7 @@ fn read_process_count() -> io::Result<usize> {
 fn read_root_disk_usage() -> io::Result<(u64, u64)> {
     let output = Command::new("df").args(["-kP", "/"]).output()?;
     if !output.status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "df failed"));
+        return Err(io::Error::other("df failed"));
     }
     parse_df_root_usage(&String::from_utf8_lossy(&output.stdout))
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid df output"))

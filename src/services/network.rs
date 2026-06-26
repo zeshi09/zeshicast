@@ -47,7 +47,10 @@ pub fn network_snapshot() -> NetworkSnapshot {
     }
 }
 
-static NET_SPEED_STATE: Mutex<Option<(HashMap<String, (u64, u64)>, Instant)>> = Mutex::new(None);
+type NetByteCounters = HashMap<String, (u64, u64)>;
+type NetSpeedState = Option<(NetByteCounters, Instant)>;
+
+static NET_SPEED_STATE: Mutex<NetSpeedState> = Mutex::new(None);
 
 /// Returns (rx_mbps, tx_mbps) for the given interface, using a static to track deltas.
 pub fn net_speed_mbps(iface: &str) -> (f64, f64) {
@@ -152,7 +155,7 @@ fn read_interface_addresses() -> io::Result<HashMap<String, InterfaceAddresses>>
 fn command_stdout(program: &str, args: &[&str]) -> io::Result<String> {
     let output = Command::new(program).args(args).output()?;
     if !output.status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "command failed"));
+        return Err(io::Error::other("command failed"));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
