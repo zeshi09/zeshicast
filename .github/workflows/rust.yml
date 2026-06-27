@@ -11,7 +11,7 @@ env:
 
 jobs:
   build:
-
+    name: Rust
     runs-on: ubuntu-latest
 
     steps:
@@ -20,3 +20,23 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  nix:
+    name: Nix
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Nix
+      uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - name: Cache Nix store
+      uses: DeterminateSystems/magic-nix-cache-action@v14
+    - name: Check flake outputs
+      run: nix flake check
+    - name: Build Nix package
+      run: nix build
+    - name: Check GUI with layer-shell
+      run: nix develop --command cargo check --features gui,layer-shell
