@@ -270,6 +270,30 @@ come from the user's graphical session or system packages; missing tools usually
 make the related action fail or disappear rather than preventing the launcher
 from starting.
 
+With the NixOS or Home Manager module, declare optional runtime tools explicitly:
+
+```nix
+{
+  services.zeshicast = {
+    enable = true;
+    extraRuntimePackages = with pkgs; [
+      wireplumber     # wpctl audio controls
+      networkmanager  # nmcli network controls
+      iproute2        # ip address snapshots
+      brightnessctl
+      bluez           # bluetoothctl
+      wtype
+      grim
+      slurp
+      xclip
+    ];
+  };
+}
+```
+
+Compositor tools (`niri`, `hyprctl`, `swaymsg`) should normally come from the
+running compositor package or session configuration.
+
 ## Wayland hotkey
 
 Bind this command in your compositor:

@@ -18,5 +18,13 @@ pkgs.mkShell {
     wayland-protocols
     wl-clipboard
     xclip
+    wireplumber
+    networkmanager
+    iproute2
+    brightnessctl
+    bluez
+    wtype
+    grim
+    slurp
   ];
 }

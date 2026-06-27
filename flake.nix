@@ -8,6 +8,19 @@
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsFor = system: import nixpkgs { inherit system; };
+      commonRuntimePackages = pkgs:
+        with pkgs; [
+          wl-clipboard
+          xclip
+          wireplumber
+          networkmanager
+          iproute2
+          brightnessctl
+          bluez
+          wtype
+          grim
+          slurp
+        ];
 
       zeshicastFor = pkgs:
         pkgs.rustPlatform.buildRustPackage {
@@ -49,6 +62,29 @@
           defaultText = lib.literalExpression "zeshicast.packages.\${system}.default";
           description = "The zeshicast package to use.";
         };
+        extraRuntimePackages = lib.mkOption {
+          type = lib.types.listOf lib.types.package;
+          default = [ ];
+          example = lib.literalExpression ''
+            with pkgs; [
+              wireplumber
+              networkmanager
+              iproute2
+              brightnessctl
+              bluez
+              wtype
+              grim
+              slurp
+              xclip
+            ]
+          '';
+          description = ''
+            Extra command-line tools made available to zeshicast runtime
+            integrations. The package wrapper already includes wl-clipboard;
+            add tools here for audio, networking, brightness, Bluetooth,
+            screenshot, typing, and fallback clipboard actions.
+          '';
+        };
       };
     in
     {
@@ -71,9 +107,7 @@
               cairo
               wayland
               wayland-protocols
-              wl-clipboard
-              xclip
-            ];
+            ] ++ commonRuntimePackages pkgs;
           };
         });
 
@@ -101,7 +135,7 @@
           options.services.zeshicast = zeshicastModuleOptions { inherit lib pkgs; };
 
           config = lib.mkIf cfg.enable {
-            environment.systemPackages = [ cfg.package ];
+            environment.systemPackages = [ cfg.package ] ++ cfg.extraRuntimePackages;
 
             systemd.user.services.zeshicast = {
               description = "zeshicast launcher daemon + notification server";
@@ -109,6 +143,7 @@
               partOf = [ "graphical-session.target" ];
               after = [ "graphical-session.target" ];
               wantedBy = [ "graphical-session.target" ];
+              path = cfg.extraRuntimePackages;
               serviceConfig = {
                 ExecStart = "${lib.getExe cfg.package} --daemon";
                 ExecStop = "${lib.getExe cfg.package} --quit";
@@ -127,7 +162,7 @@
           options.services.zeshicast = zeshicastModuleOptions { inherit lib pkgs; };
 
           config = lib.mkIf cfg.enable {
-            home.packages = [ cfg.package ];
+            home.packages = [ cfg.package ] ++ cfg.extraRuntimePackages;
 
             systemd.user.services.zeshicast = {
               Unit = {
