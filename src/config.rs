@@ -252,11 +252,16 @@ pub(crate) fn load_aliases(path: &Path) -> HashMap<String, String> {
 pub(crate) fn append_alias(config_dir: &Path, alias: &str, target: &str) -> io::Result<()> {
     fs::create_dir_all(config_dir)?;
     let path = config_dir.join("aliases.txt");
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{alias} = {target}")
+    let mut content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(&format!("{alias} = {target}\n"));
+    write_file_atomic(&path, content.as_bytes(), 0o600)
 }
 
 pub(crate) fn normalize_alias(alias: &str) -> String {
@@ -283,10 +288,7 @@ pub(crate) fn write_preferences(
         let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
         content.push_str(&format!("{key} = \"{escaped}\"\n"));
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, content)
+    write_file_atomic(path, content.as_bytes(), 0o600)
 }
 
 pub(crate) fn load_preferences(path: &Path) -> HashMap<String, String> {
@@ -339,14 +341,66 @@ pub(crate) fn load_lines(path: &Path) -> Vec<String> {
 }
 
 pub(crate) fn write_lines(path: &Path, lines: &[String]) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut file = fs::File::create(path)?;
+    let mut content = Vec::new();
     for line in lines {
-        writeln!(file, "{line}")?;
+        writeln!(&mut content, "{line}")?;
     }
+    write_file_atomic(path, &content, 0o600)
+}
+
+pub(crate) fn write_file_atomic(path: &Path, content: &[u8], mode: u32) -> io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("path has no file name"))?
+        .to_string_lossy();
+    let temp_path = parent.join(format!(
+        ".{file_name}.tmp-{}-{}",
+        std::process::id(),
+        unix_now_nanos()
+    ));
+
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
+        set_file_mode(&file, mode)?;
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp_path, path)?;
+        sync_parent_dir(parent)?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
+}
+
+#[cfg(unix)]
+fn set_file_mode(file: &fs::File, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    file.set_permissions(fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn set_file_mode(_file: &fs::File, _mode: u32) -> io::Result<()> {
     Ok(())
+}
+
+fn sync_parent_dir(parent: &Path) -> io::Result<()> {
+    fs::File::open(parent)?.sync_all()
+}
+
+fn unix_now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 pub(crate) fn unix_now() -> i64 {
@@ -379,7 +433,7 @@ mod tests {
         std::env::temp_dir().join(format!(
             "zeshicast-{name}-{}-{}",
             std::process::id(),
-            unix_now()
+            unix_now_nanos()
         ))
     }
 
@@ -411,6 +465,60 @@ mod tests {
         assert!(!preferences.contains_key("custom_token"));
         assert!(!preferences.contains_key("db_password"));
         assert!(!preferences.contains_key("export_include_secrets"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_preferences_creates_0600_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = test_dir("preferences-mode");
+        let path = dir.join("preferences.toml");
+        write_preferences(
+            &path,
+            &HashMap::from([("ai_api_key".to_string(), "secret".to_string())]),
+        )
+        .unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn write_lines_atomic_replaces_existing_content() {
+        let dir = test_dir("atomic-lines");
+        let path = dir.join("pins.txt");
+        write_lines(&path, &["old".to_string()]).unwrap();
+        write_lines(&path, &["new".to_string(), "other".to_string()]).unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new\nother\n");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_does_not_follow_symlink_target() {
+        use std::os::unix::fs::symlink;
+
+        let dir = test_dir("atomic-symlink");
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target.txt");
+        let link = dir.join("preferences.toml");
+        fs::write(&target, b"old-secret").unwrap();
+        symlink(&target, &link).unwrap();
+
+        write_file_atomic(&link, b"new-value", 0o600).unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"old-secret");
+        assert_eq!(fs::read(&link).unwrap(), b"new-value");
+        assert!(
+            !fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -6,11 +6,22 @@ use rusqlite::{Connection, Result, params};
 
 fn open(config_dir: &Path) -> Result<Connection> {
     std::fs::create_dir_all(config_dir).ok();
-    let conn = Connection::open(config_dir.join("zeshicast.db"))?;
+    let db_path = config_dir.join("zeshicast.db");
+    let conn = Connection::open(&db_path)?;
+    secure_database_permissions(&db_path);
     conn.execute_batch("PRAGMA journal_mode = WAL;")?;
     init(&conn)?;
     Ok(conn)
 }
+
+#[cfg(unix)]
+fn secure_database_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn secure_database_permissions(_path: &Path) {}
 
 fn init(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -193,4 +204,34 @@ pub fn migrate_usage(
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("zeshicast-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_database_file_is_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = test_dir("sqlite-mode");
+        clipboard_insert(&dir, "secret").unwrap();
+
+        let mode = std::fs::metadata(dir.join("zeshicast.db"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

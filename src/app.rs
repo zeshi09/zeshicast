@@ -1144,11 +1144,8 @@ fn save_calc_history(path: &std::path::Path, history: &[CalcHistoryEntry]) {
         .iter()
         .map(|e| serde_json::json!({"e": e.expr, "r": e.result}))
         .collect();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
     if let Ok(json) = serde_json::to_string(&array) {
-        std::fs::write(path, json).ok();
+        crate::write_file_atomic(path, json.as_bytes(), 0o600).ok();
     }
 }
 

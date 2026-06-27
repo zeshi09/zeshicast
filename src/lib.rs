@@ -21,7 +21,8 @@ pub use app::{
 };
 pub(crate) use config::{
     append_alias, home_dir, load_aliases, load_frequencies, load_lines, load_preferences,
-    normalize_alias, toml_value_string, unix_now, write_lines, write_preferences,
+    normalize_alias, toml_value_string, unix_now, write_file_atomic, write_lines,
+    write_preferences,
 };
 pub use config::{export_config, export_config_with_options, import_config};
 #[cfg(test)]
