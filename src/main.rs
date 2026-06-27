@@ -211,10 +211,10 @@ Config:
   ~/.config/zeshicast/snippets.txt     lines: Name | tag1,tag2 = text to copy
   ~/.config/zeshicast/commands/*.toml  custom shell commands
   ~/.config/zeshicast/preferences.toml global extension preferences
-  ~/.config/zeshicast/clipboard.txt    updated automatically by GTK daemon
+  ~/.config/zeshicast/zeshicast.db     SQLite clipboard and usage history
+  ~/.cache/zeshicast/clipboard/        cached clipboard image PNGs
   ~/.config/zeshicast/aliases.txt      lines: ff = Firefox
   ~/.config/zeshicast/pins.txt         lines: App:Firefox or Firefox
-  ~/.config/zeshicast/recent.txt       updated automatically
 
 AI / Translate preferences (in preferences.toml):
   ai_endpoint    = \"http://localhost:11434/v1\"

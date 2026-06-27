@@ -8,7 +8,8 @@ history. The headless `zeshicast` CLI works without any GUI dependency; the
 GTK4 launcher and daemon are behind the `gui` feature.
 
 See [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the
-roadmap.
+roadmap. For threat model and local data handling, read
+[docs/security.md](docs/security.md) and [docs/privacy.md](docs/privacy.md).
 
 ## Screenshots
 
@@ -173,7 +174,7 @@ Enter        Run selected result (opens form panel for commands with missing arg
 Ctrl+Enter   Copy selected value
 Ctrl+K       Action panel — pin, unpin, set alias, secondary actions
 Ctrl+B       Extension browser — list all custom commands
-Ctrl+,       Preferences editor — AI endpoint, model, translate settings
+Ctrl+,       Preferences editor — UI, privacy, AI, translate, integration settings
 Ctrl+D       Dashboard — clock, system, network, audio, media, notifications
 Ctrl+T       System Monitor — load, memory, disk, temperatures, top processes
 Ctrl+N       Network view — Ethernet + Wi-Fi, connect/disconnect
@@ -222,7 +223,10 @@ zeshicast-gtk --quit      # stop the daemon
 
 Clipboard/notification capture happens while the daemon holds the session; the
 launcher is a single GApplication instance, so re-invoking `zeshicast-gtk` just
-shows the existing daemon's window.
+shows the existing daemon's window. The notification server can record history
+only if it owns `org.freedesktop.Notifications`; if another daemon already owns
+that D-Bus name, zeshicast logs the conflict and notification history/DND actions
+will not reflect that external daemon.
 
 ## Non-Nix install
 
@@ -240,6 +244,31 @@ systemctl --user restart zeshicast-gtk.service
 systemctl --user enable zeshicast-gtk.service
 systemctl --user disable zeshicast-gtk.service
 ```
+
+## Runtime Dependencies
+
+The GTK launcher is a Wayland/GTK4 application. Build-time dependencies are
+provided by the Nix flake; non-Nix installs need GTK4, GLib, gdk-pixbuf, Pango,
+Cairo, Wayland, and optionally `gtk4-layer-shell` when building
+`--features gui,layer-shell`.
+
+Runtime integrations use session tools when present:
+
+- `wl-copy`/`wl-paste` for Wayland clipboard capture and copy-back;
+- `xclip` as a clipboard fallback on X11-style sessions;
+- compositor tools for compositor-specific actions and window switching:
+  `niri`, `hyprctl`, or `swaymsg`;
+- `wpctl` for PipeWire/WirePlumber audio controls;
+- `nmcli` and `ip` for NetworkManager/network views;
+- `brightnessctl` for brightness actions;
+- `grim`/`slurp` for screenshot actions in some compositor command sets;
+- `wtype` for the optional "type text" secondary action;
+- `tar` for import/export.
+
+The Nix package wraps `wl-clipboard` into PATH. The other tools are expected to
+come from the user's graphical session or system packages; missing tools usually
+make the related action fail or disappear rather than preventing the launcher
+from starting.
 
 ## Wayland hotkey
 
@@ -271,14 +300,16 @@ settings.
 ~/.config/zeshicast/snippets.txt     lines: Name | tag1,tag2 = text to copy
 ~/.config/zeshicast/commands/*.toml  custom shell commands
 ~/.config/zeshicast/preferences.toml global extension preferences
-~/.config/zeshicast/*.sqlite         clipboard/usage/app-index cache (auto)
-~/.cache/zeshicast/clipboard/        cached clipboard images (auto)
+~/.config/zeshicast/zeshicast.db     SQLite clipboard and usage history
+~/.cache/zeshicast/clipboard/        cached clipboard image PNGs
 ~/.config/zeshicast/aliases.txt      lines: ff = Firefox
 ~/.config/zeshicast/pins.txt         lines: App:Firefox or Firefox
-~/.config/zeshicast/recent.txt       updated automatically
 ```
 
 Pins and aliases can be set from the CLI action menu or the GTK action panel.
+Clipboard rows are retained according to `clipboard_retention` and cached image
+PNGs are pruned when history is pruned, individual image entries are deleted, or
+clipboard history is cleared.
 
 ### Placeholders
 
@@ -310,6 +341,25 @@ VAT       | finance   = Total: {{calc:100 * 1.2}}
 ```
 
 Tags are optional. Search matches both names and tags.
+
+## Security And Privacy Notes
+
+Custom commands are local extensions and can execute shell commands if they
+declare the `shell` capability. Treat command TOML files like scripts: install
+only commands you trust, review placeholders, and prefer the narrowest
+permissions needed. Zeshicast shell-quotes placeholder values before `sh -c`,
+but the command template itself is still executable code.
+
+Clipboard history, notification history, recent usage, aliases, pins, and
+preferences are local state. Clipboard/usage history lives in
+`~/.config/zeshicast/zeshicast.db`; image clipboard entries additionally write
+PNG files under `~/.cache/zeshicast/clipboard/`. Use Preferences > Privacy to
+pause/disable clipboard capture, disable image capture, or adjust retention.
+`zeshicast --export` excludes API keys and secret-like preference keys by
+default; pass `--include-secrets` only for trusted backups.
+
+See [docs/security.md](docs/security.md) and [docs/privacy.md](docs/privacy.md)
+for the full threat model and storage policy.
 
 ### Custom commands (shell mode)
 
@@ -486,7 +536,7 @@ Translation        LibreTranslate with language suffix (trans hello in ru)
 GTK4 launcher      Layer-shell overlay (Wayland), daemon mode, clipboard monitor
 Command forms      GTK form panel for commands with missing required arguments
 Extension browser  Ctrl+B — list and inspect all custom commands
-Preferences editor Ctrl+, — edit AI/translate settings without touching files
+Preferences editor Ctrl+, — edit UI/privacy/AI/integration settings without touching files
 Permission field   enforced capabilities: shell, network/open_url, filesystem/open_path, clipboard_write
 Import/export      zeshicast --export / --import; export excludes API keys unless explicitly enabled
 Example extensions packaging/examples/commands/ — github, weather, dict, docker, git

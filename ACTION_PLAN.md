@@ -1,5 +1,15 @@
 # Action Plan — Security, Performance & Robustness
 
+> **Superseded:** this 2026-06-18 review plan is retained for history. The
+> active execution plan is `ACTION_PLAN_FULL_REVIEW.md` (2026-06-27). Major
+> items from this file have since been closed in code: import hardening
+> (`src/config.rs`), shell placeholder quoting and command capability
+> enforcement (`src/search/commands.rs`, `src/placeholders.rs`), async/deferred
+> JSON command execution (`src/search/commands.rs`, `src/ui/launcher.rs`),
+> clipboard/usage SQLite pruning and migrations (`src/services/storage.rs`),
+> clipboard image cache pruning (`src/app.rs`, `src/ui/launcher.rs`), privacy
+> controls (`src/ui/preferences.rs`, `src/app.rs`), and warning/clippy cleanup.
+
 > **Status (2026-06-18):** #2, #6, #7, #8, #9, #10, #11, #12 — done. #3 — done
 > (network/audio moved off main thread). #4 — left view-gated by design (see note).
 > #5 — bounded with a 1s timeout; full async-on-keystroke deferred. #1 — false
