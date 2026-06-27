@@ -10,20 +10,42 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Rust
+  rust:
+    name: Rust / ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: fmt
+          command: cargo fmt --check
+        - name: check
+          command: cargo check
+        - name: test
+          command: cargo test
 
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+    - name: Run ${{ matrix.name }}
+      run: ${{ matrix.command }}
 
   nix:
-    name: Nix
+    name: Nix / ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: flake-check
+          command: nix flake check
+        - name: package-build
+          command: nix build
+        - name: gui-check
+          command: nix develop --command cargo check --features gui
+        - name: gui-clippy
+          command: nix develop --command cargo clippy --all-targets --features gui -- -D warnings
+        - name: layer-shell-check
+          command: nix develop --command cargo check --features gui,layer-shell
 
     steps:
     - uses: actions/checkout@v4
@@ -34,9 +56,5 @@ jobs:
           experimental-features = nix-command flakes
     - name: Cache Nix store
       uses: DeterminateSystems/magic-nix-cache-action@v14
-    - name: Check flake outputs
-      run: nix flake check
-    - name: Build Nix package
-      run: nix build
-    - name: Check GUI with layer-shell
-      run: nix develop --command cargo check --features gui,layer-shell
+    - name: Run ${{ matrix.name }}
+      run: ${{ matrix.command }}
