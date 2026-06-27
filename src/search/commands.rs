@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 use std::fs;
+#[cfg(feature = "gui")]
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(feature = "gui", test))]
+use std::path::PathBuf;
+#[cfg(feature = "gui")]
 use std::process::Command;
 
 use crate::{
     Action, ActionForm, ActionFormField, ActionKind, ActionRisk, Capability, CommandArgumentKind,
-    MAX_RESULTS, PlaceholderContext, ShellCommand, expand_placeholders, expand_placeholders_shell,
-    fuzzy_score, normalize_alias, tagged_subtitle, toml_value_string,
+    JsonCommandAction, PlaceholderContext, ShellCommand, expand_placeholders,
+    expand_placeholders_shell, fuzzy_score, normalize_alias, tagged_subtitle, toml_value_string,
 };
 
 #[derive(Debug, Clone)]
@@ -301,11 +305,11 @@ pub(crate) fn search_commands(
                 && command_match.direct
                 && command_match.missing.is_empty()
             {
-                return Some(search_json_command(
+                return Some(vec![json_command_action(
                     entry,
                     shell_command,
                     command_match.score,
-                ));
+                )]);
             }
 
             let command = shell_command.command.clone();
@@ -364,33 +368,61 @@ pub(crate) fn search_commands(
         .collect()
 }
 
-fn search_json_command(entry: &CommandEntry, command: ShellCommand, score: i32) -> Vec<Action> {
+fn json_command_action(entry: &CommandEntry, command: ShellCommand, score: i32) -> Action {
     if !has_capability(&entry.capabilities, Capability::Shell) {
-        return vec![
-            Action::new(&entry.category, &entry.name, ActionKind::None, score + 1)
-                .with_subtitle("Blocked: command manifest lacks permissions = [\"shell\"]")
-                .with_icon("dialog-warning-symbolic"),
-        ];
+        return Action::new(&entry.category, &entry.name, ActionKind::None, score + 1)
+            .with_subtitle("Blocked: command manifest lacks permissions = [\"shell\"]")
+            .with_icon("dialog-warning-symbolic");
     }
 
-    match run_json_command(&command) {
-        Ok(stdout) => {
-            parse_json_actions(&stdout, &entry.category, score + 100, &entry.capabilities)
-        }
+    let command_value = command.command.clone();
+    Action::new(
+        &entry.category,
+        &entry.name,
+        ActionKind::JsonCommand(JsonCommandAction {
+            category: entry.category.clone(),
+            command,
+            capabilities: entry.capabilities.clone(),
+            score: score + 100,
+        }),
+        score + 85,
+    )
+    .with_subtitle(format!("Run JSON command - {command_value}"))
+    .with_icon(&entry.icon_name)
+    .with_risk(ActionRisk::Shell)
+}
+
+#[cfg(feature = "gui")]
+pub(crate) fn run_json_command_actions(action: &JsonCommandAction) -> Vec<Action> {
+    match run_json_command(&action.command) {
+        Ok(stdout) => parse_json_actions(
+            &stdout,
+            &action.category,
+            action.score,
+            &action.capabilities,
+        ),
         Err(error) => vec![
-            Action::new(&entry.category, &entry.name, ActionKind::None, score + 1)
-                .with_subtitle(format!("JSON command failed: {error}"))
-                .with_icon("dialog-warning-symbolic"),
+            Action::new(
+                &action.category,
+                "JSON command failed",
+                ActionKind::None,
+                action.score,
+            )
+            .with_subtitle(format!("JSON command failed: {error}"))
+            .with_icon("dialog-warning-symbolic"),
         ],
     }
 }
 
-/// JSON-mode commands run synchronously during search (search-as-you-type), so
-/// a slow or hung script would freeze the GTK main loop. Bound that with a hard
-/// timeout: if the script overruns we kill it and report a timeout instead of
-/// blocking the UI indefinitely.
+/// Bound JSON commands so slow scripts do not occupy the worker indefinitely.
+#[cfg(feature = "gui")]
 const JSON_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+#[cfg(feature = "gui")]
+const JSON_STDOUT_LIMIT_BYTES: u64 = 512 * 1024;
+#[cfg(feature = "gui")]
+const JSON_STDERR_LIMIT_BYTES: u64 = 8 * 1024;
 
+#[cfg(feature = "gui")]
 fn run_json_command(command: &ShellCommand) -> io::Result<String> {
     use std::io::Read;
     use std::process::Stdio;
@@ -419,13 +451,22 @@ fn run_json_command(command: &ShellCommand) -> io::Result<String> {
 
     let mut stdout = String::new();
     if let Some(mut out) = child.stdout.take() {
-        out.read_to_string(&mut stdout).ok();
+        out.by_ref()
+            .take(JSON_STDOUT_LIMIT_BYTES + 1)
+            .read_to_string(&mut stdout)
+            .ok();
+    }
+    if stdout.len() as u64 > JSON_STDOUT_LIMIT_BYTES {
+        return Err(io::Error::other("json command stdout exceeded 512 KiB"));
     }
 
     if !status.success() {
         let mut stderr = String::new();
         if let Some(mut err) = child.stderr.take() {
-            err.read_to_string(&mut stderr).ok();
+            err.by_ref()
+                .take(JSON_STDERR_LIMIT_BYTES)
+                .read_to_string(&mut stderr)
+                .ok();
         }
         return Err(io::Error::other(
             stderr.trim().chars().take(160).collect::<String>(),
@@ -435,6 +476,7 @@ fn run_json_command(command: &ShellCommand) -> io::Result<String> {
     Ok(stdout)
 }
 
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn parse_json_actions(
     input: &str,
     category: &str,
@@ -464,7 +506,7 @@ pub(crate) fn parse_json_actions(
 
     values
         .iter()
-        .take(MAX_RESULTS)
+        .take(crate::MAX_RESULTS)
         .enumerate()
         .filter_map(|(index, value)| {
             parse_json_action(value, category, base_score - index as i32, capabilities)
@@ -472,6 +514,7 @@ pub(crate) fn parse_json_actions(
         .collect()
 }
 
+#[cfg(any(feature = "gui", test))]
 fn parse_json_action(
     value: &serde_json::Value,
     category: &str,
@@ -508,11 +551,13 @@ fn parse_json_action(
     )
 }
 
+#[cfg(any(feature = "gui", test))]
 struct ParsedJsonActionKind {
     kind: ActionKind,
     denial: Option<String>,
 }
 
+#[cfg(any(feature = "gui", test))]
 impl ParsedJsonActionKind {
     fn allowed(kind: ActionKind) -> Self {
         Self { kind, denial: None }
@@ -526,6 +571,7 @@ impl ParsedJsonActionKind {
     }
 }
 
+#[cfg(any(feature = "gui", test))]
 fn parse_json_action_kind(
     value: &serde_json::Value,
     capabilities: &[Capability],
@@ -582,10 +628,12 @@ fn parse_json_action_kind(
     }
 }
 
+#[cfg(any(feature = "gui", test))]
 fn json_url_requires_capability(value: &str) -> bool {
     !value.trim().to_lowercase().starts_with("file://")
 }
 
+#[cfg(any(feature = "gui", test))]
 fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
     value
         .get(key)?

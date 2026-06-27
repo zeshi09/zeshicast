@@ -34,6 +34,15 @@ pub struct ActionForm {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct JsonCommandAction {
+    pub(crate) category: String,
+    pub(crate) command: ShellCommand,
+    pub(crate) capabilities: Vec<Capability>,
+    pub(crate) score: i32,
+}
+
+#[derive(Debug, Clone)]
 pub enum HttpRequest {
     Translate {
         endpoint: String,
@@ -247,6 +256,7 @@ impl Action {
             }
             ActionKind::Launcher(_) => {}
             ActionKind::Form(_) => {}
+            ActionKind::JsonCommand(_) => {}
             ActionKind::Media(control) => crate::media_control(*control),
             ActionKind::Notification(action) => match action {
                 crate::NotificationAction::ToggleDnd => {
@@ -272,6 +282,14 @@ impl Action {
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn json_command_data(&self) -> Option<&JsonCommandAction> {
+        match &self.kind {
+            ActionKind::JsonCommand(command) => Some(command),
+            _ => None,
+        }
+    }
+
     pub fn copy_value(&self) {
         copy_to_clipboard(&self.value());
     }
@@ -289,6 +307,7 @@ impl Action {
             },
             ActionKind::Launcher(_) => self.title.clone(),
             ActionKind::Form(form) => form.command.clone(),
+            ActionKind::JsonCommand(command) => command.command.command.clone(),
             ActionKind::Media(_) => self.title.clone(),
             ActionKind::Notification(_) => self.title.clone(),
             ActionKind::None => self.title.clone(),
@@ -323,6 +342,7 @@ pub(crate) enum ActionKind {
     HttpCopy(HttpRequest),
     Launcher(LauncherCommand),
     Form(ActionForm),
+    JsonCommand(JsonCommandAction),
     /// Playback control routed to the active MPRIS player over D-Bus.
     Media(crate::MediaControl),
     /// Notification action routed to our own notification store.

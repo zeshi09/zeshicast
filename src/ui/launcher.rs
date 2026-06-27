@@ -387,6 +387,10 @@ fn build_ui(
                     show_form_for_action(
                         &window, &launcher, &hold, &entry, &list_ref, &results, action,
                     );
+                } else if action.json_command_data().is_some() {
+                    run_json_command_action_or_confirm(
+                        &window, &entry, &list_ref, &results, action,
+                    );
                 } else if action.category == "Script" {
                     if let Some(stdout) = run_script_capture(&action) {
                         show_script_output_view(
@@ -1441,6 +1445,38 @@ fn update_results(
             ctr.set_visible(false);
         }
     }
+}
+
+fn set_raw_result_actions(
+    results: &Rc<RefCell<Vec<Action>>>,
+    list: &ListBox,
+    actions: Vec<Action>,
+    empty_message: &str,
+) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+
+    for action in &actions {
+        list.append(&crate::ui::result_row(action));
+    }
+
+    if actions.is_empty() {
+        let row = gtk::ListBoxRow::new();
+        row.set_selectable(false);
+        row.set_activatable(false);
+        let lbl = Label::new(Some(empty_message));
+        lbl.add_css_class("no-results-label");
+        lbl.set_halign(gtk::Align::Center);
+        lbl.set_hexpand(true);
+        lbl.set_margin_top(30);
+        lbl.set_margin_bottom(30);
+        row.set_child(Some(&lbl));
+        list.append(&row);
+    }
+
+    *results.borrow_mut() = actions;
+    select_first_action_row(list);
 }
 
 fn calc_result_row(expr: &str) -> gtk::ListBoxRow {
@@ -2680,10 +2716,83 @@ fn run_selected_with_views(
             );
         } else if action.form_data().is_some() {
             show_form_for_action(window, launcher, hold, entry, list, results, action);
+        } else if action.json_command_data().is_some() {
+            run_json_command_action_or_confirm(window, entry, list, results, action);
         } else {
             run_action_or_confirm(window, launcher, hold, action);
         }
     }
+}
+
+fn run_json_command_action_or_confirm(
+    window: &ApplicationWindow,
+    entry: &Entry,
+    list: &ListBox,
+    results: &Rc<RefCell<Vec<Action>>>,
+    action: Action,
+) {
+    if !action.risk.requires_confirmation() {
+        run_json_command_action_async(entry, list, results, action);
+        return;
+    }
+
+    let title = action.risk.label().to_string();
+    let detail = action_confirmation_detail(&action);
+    let entry = entry.clone();
+    let list = list.clone();
+    let results = Rc::clone(results);
+    crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
+        run_json_command_action_async(&entry, &list, &results, action.clone());
+    });
+}
+
+fn run_json_command_action_async(
+    entry: &Entry,
+    list: &ListBox,
+    results: &Rc<RefCell<Vec<Action>>>,
+    action: Action,
+) {
+    let Some(command) = action.json_command_data().cloned() else {
+        return;
+    };
+    let query = entry.text().to_string();
+    set_raw_result_actions(
+        results,
+        list,
+        vec![
+            Action::new(
+                &action.category,
+                format!("Running {}", action.title),
+                ActionKind::None,
+                action.score,
+            )
+            .with_subtitle("Running JSON command…")
+            .with_icon("view-refresh-symbolic"),
+        ],
+        "No JSON results",
+    );
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(crate::run_json_command_actions(&command));
+    });
+
+    let entry = entry.clone();
+    let list = list.clone();
+    let results = Rc::clone(results);
+    glib::timeout_add_local(
+        std::time::Duration::from_millis(30),
+        move || match receiver.try_recv() {
+            Ok(actions) => {
+                if entry.text().as_str() == query {
+                    set_raw_result_actions(&results, &list, actions, "No JSON results");
+                }
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        },
+    );
 }
 
 fn run_action_or_confirm(

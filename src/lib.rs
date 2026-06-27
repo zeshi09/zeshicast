@@ -14,7 +14,7 @@ pub use action::{
     Action, ActionForm, ActionFormField, ActionPanelSection, ActionRisk, Capability,
     CommandArgumentKind, LauncherCommand, SecondaryAction, SecondaryActionKind,
 };
-pub(crate) use action::{ActionKind, HttpRequest, ShellCommand};
+pub(crate) use action::{ActionKind, HttpRequest, JsonCommandAction, ShellCommand};
 pub use app::{
     CLIPBOARD_IMAGE_PREFIX, CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary,
     SnippetSummary, Zeshicast, clipboard_image_path,
@@ -37,6 +37,8 @@ pub(crate) use search::clipboard::{
 };
 #[cfg(test)]
 pub(crate) use search::clipboard::{decode_clipboard_line, encode_clipboard_line};
+#[cfg(feature = "gui")]
+pub(crate) use search::commands::run_json_command_actions;
 pub(crate) use search::commands::{CommandEntry, load_command_entries, search_commands};
 #[cfg(test)]
 pub(crate) use search::commands::{
@@ -561,6 +563,36 @@ command = "rm -rf /tmp/example"
         assert_eq!(results[0].risk, ActionRisk::Normal);
         assert_eq!(results[0].value(), "Unsafe");
         assert!(results[0].subtitle.contains("lacks permissions"));
+    }
+
+    #[test]
+    fn json_command_search_returns_deferred_action() {
+        let entries = vec![
+            parse_command_entry(
+                r#"
+name = "Docs"
+mode = "json"
+keyword = "docs"
+command = "printf invalid-json"
+permissions = ["shell", "network"]
+"#,
+            )
+            .unwrap(),
+        ];
+        let context = PlaceholderContext {
+            query: "docs gtk".to_string(),
+            clipboard: String::new(),
+            args: HashMap::new(),
+            preferences: HashMap::new(),
+            now: UNIX_EPOCH,
+        };
+
+        let results = search_commands(&entries, "docs gtk", &context);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Docs");
+        assert!(results[0].json_command_data().is_some());
+        assert_eq!(results[0].risk, ActionRisk::Shell);
+        assert!(!results[0].title.contains("Invalid JSON"));
     }
 
     #[test]
