@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::services::storage;
@@ -52,6 +53,65 @@ pub const CLIPBOARD_IMAGE_PREFIX: &str = "\u{1}zeshicast-image:";
 /// If `value` is an image entry, return the cached PNG path.
 pub fn clipboard_image_path(value: &str) -> Option<&str> {
     value.strip_prefix(CLIPBOARD_IMAGE_PREFIX)
+}
+
+pub fn clipboard_cache_dir() -> PathBuf {
+    home_dir().join(".cache/zeshicast/clipboard")
+}
+
+fn referenced_clipboard_image_paths(entries: &[String]) -> HashSet<PathBuf> {
+    entries
+        .iter()
+        .filter_map(|entry| clipboard_image_path(entry).map(PathBuf::from))
+        .collect()
+}
+
+fn is_png_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+}
+
+pub(crate) fn prune_clipboard_image_cache_dir(
+    cache_dir: &Path,
+    entries: &[String],
+) -> io::Result<()> {
+    if !cache_dir.exists() {
+        return Ok(());
+    }
+
+    let referenced = referenced_clipboard_image_paths(entries);
+    for entry in fs::read_dir(cache_dir)? {
+        let path = entry?.path();
+        if is_png_file(&path) && !referenced.contains(&path) {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+fn prune_clipboard_image_cache(entries: &[String]) -> io::Result<()> {
+    prune_clipboard_image_cache_dir(&clipboard_cache_dir(), entries)
+}
+
+pub(crate) fn clear_clipboard_image_cache_dir(cache_dir: &Path) -> io::Result<()> {
+    if !cache_dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(cache_dir)? {
+        let path = entry?.path();
+        if is_png_file(&path) {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+fn clear_clipboard_image_cache() -> io::Result<()> {
+    clear_clipboard_image_cache_dir(&clipboard_cache_dir())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,6 +305,7 @@ impl Zeshicast {
         let clip_rows = storage::clipboard_load(&config_dir);
         let clipboard_history: Vec<String> = clip_rows.iter().map(|(t, _)| t.clone()).collect();
         let clipboard_timestamps: HashMap<String, i64> = clip_rows.into_iter().collect();
+        let _ = prune_clipboard_image_cache(&clipboard_history);
 
         let recent = storage::usage_recent(&config_dir, 50);
         let frequencies = storage::usage_frequencies(&config_dir);
@@ -567,6 +628,7 @@ impl Zeshicast {
         self.clipboard_history.retain(|e| e != &text);
         self.clipboard_history.insert(0, text);
         self.clipboard_history.truncate(MAX_CLIPBOARD_ENTRIES);
+        prune_clipboard_image_cache(&self.clipboard_history)?;
         Ok(true)
     }
 
@@ -579,6 +641,7 @@ impl Zeshicast {
             .map_err(|e| io::Error::other(e.to_string()))?;
         self.clipboard_history.retain(|e| e != value);
         self.clipboard_timestamps.remove(value);
+        prune_clipboard_image_cache(&self.clipboard_history)?;
         Ok(())
     }
 
@@ -586,6 +649,7 @@ impl Zeshicast {
         storage::clipboard_clear(&self.config_dir).map_err(|e| io::Error::other(e.to_string()))?;
         self.clipboard_history.clear();
         self.clipboard_timestamps.clear();
+        clear_clipboard_image_cache()?;
         Ok(())
     }
 
@@ -1072,4 +1136,69 @@ pub struct CommandSummary {
     pub permissions: Vec<String>,
     pub capabilities: Vec<String>,
     pub enabled: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_cache_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("zeshicast-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    fn image_entry(path: &Path) -> String {
+        format!("{CLIPBOARD_IMAGE_PREFIX}{}", path.display())
+    }
+
+    #[test]
+    fn clipboard_clear_removes_image_cache_files() {
+        let dir = test_cache_dir("clipboard-clear");
+        fs::create_dir_all(&dir).unwrap();
+        let image = dir.join("image.png");
+        let metadata = dir.join("metadata.txt");
+        fs::write(&image, b"png").unwrap();
+        fs::write(&metadata, b"keep").unwrap();
+
+        clear_clipboard_image_cache_dir(&dir).unwrap();
+
+        assert!(!image.exists());
+        assert!(metadata.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clipboard_prune_removes_orphan_images() {
+        let dir = test_cache_dir("clipboard-prune");
+        fs::create_dir_all(&dir).unwrap();
+        let kept = dir.join("kept.png");
+        let orphan = dir.join("orphan.png");
+        fs::write(&kept, b"png").unwrap();
+        fs::write(&orphan, b"png").unwrap();
+        let entries = vec![image_entry(&kept)];
+
+        prune_clipboard_image_cache_dir(&dir, &entries).unwrap();
+
+        assert!(kept.exists());
+        assert!(!orphan.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clipboard_delete_keeps_still_referenced_image() {
+        let dir = test_cache_dir("clipboard-delete");
+        fs::create_dir_all(&dir).unwrap();
+        let image = dir.join("shared.png");
+        fs::write(&image, b"png").unwrap();
+        let entries = vec![image_entry(&image), "plain text".to_string()];
+
+        prune_clipboard_image_cache_dir(&dir, &entries).unwrap();
+
+        assert!(image.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
 }

@@ -17,7 +17,7 @@ pub use action::{
 pub(crate) use action::{ActionKind, HttpRequest, JsonCommandAction, ShellCommand};
 pub use app::{
     CLIPBOARD_IMAGE_PREFIX, CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary,
-    SnippetSummary, Zeshicast, clipboard_image_path,
+    SnippetSummary, Zeshicast, clipboard_cache_dir, clipboard_image_path,
 };
 pub(crate) use config::{
     append_alias, home_dir, load_aliases, load_frequencies, load_lines, load_preferences,

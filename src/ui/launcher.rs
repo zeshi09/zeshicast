@@ -1338,7 +1338,7 @@ fn capture_clipboard_image(
         // Content-addressed cache file so identical images dedupe naturally.
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         bytes.hash(&mut hasher);
-        let dir = crate::home_dir().join(".cache/zeshicast/clipboard");
+        let dir = crate::clipboard_cache_dir();
         let path = dir.join(format!("{:016x}.png", hasher.finish()));
         if !path.exists()
             && (std::fs::create_dir_all(&dir).is_err() || std::fs::write(&path, bytes).is_err())
