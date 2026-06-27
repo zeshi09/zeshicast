@@ -1,6 +1,31 @@
-use std::process::Command;
+use std::collections::HashMap;
+use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::{Action, ActionKind, ShellCommand, SystemActionEntry, fuzzy_score};
+
+const WINDOW_QUERY_TIMEOUT: Duration = Duration::from_millis(200);
+const WINDOW_CACHE_TTL: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowBackend {
+    Niri,
+    Hyprland,
+    Sway,
+}
+
+#[derive(Debug, Clone)]
+struct WindowSnapshot {
+    backend: WindowBackend,
+    windows: Vec<serde_json::Value>,
+    captured_at: Instant,
+}
+
+fn window_snapshot_cache() -> &'static Mutex<Option<WindowSnapshot>> {
+    static CACHE: OnceLock<Mutex<Option<WindowSnapshot>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
 
 pub(crate) fn search_niri_actions(query: &str) -> Vec<Action> {
     let lower = query.trim().to_lowercase();
@@ -333,51 +358,164 @@ fn sway_action_entries() -> Vec<SystemActionEntry> {
 }
 
 pub(crate) fn search_windows(query: &str) -> Vec<Action> {
+    let Some(needle) = window_query_needle(query) else {
+        return Vec::new();
+    };
+
+    if let Some(snapshot) = fresh_window_snapshot() {
+        return window_snapshot_actions(&snapshot, &needle);
+    }
+
+    let Some(snapshot) = load_window_snapshot() else {
+        return stale_window_snapshot()
+            .map(|snapshot| window_snapshot_actions(&snapshot, &needle))
+            .unwrap_or_default();
+    };
+
+    if let Ok(mut cached) = window_snapshot_cache().lock() {
+        *cached = Some(snapshot.clone());
+    }
+    window_snapshot_actions(&snapshot, &needle)
+}
+
+fn window_query_needle(query: &str) -> Option<String> {
     let lower = query.trim().to_lowercase();
-    let (_has_prefix, needle) = if let Some(rest) = lower
+    if let Some(rest) = lower
         .strip_prefix("windows ")
         .or_else(|| lower.strip_prefix("window "))
         .or_else(|| lower.strip_prefix("win "))
     {
-        (true, rest.trim().to_string())
+        Some(rest.trim().to_string())
     } else if lower == "win" || lower == "window" || lower == "windows" {
-        (true, String::new())
+        Some(String::new())
     } else {
-        return Vec::new();
-    };
-
-    if let Some(windows) = command_json_value("niri", &["msg", "windows"])
-        && let Some(arr) = windows.as_array()
-        && !arr.is_empty()
-    {
-        return niri_window_actions(arr, &needle);
+        None
     }
+}
 
-    if let Some(windows) = command_json_value("hyprctl", &["clients", "-j"])
-        && let Some(arr) = windows.as_array()
-        && !arr.is_empty()
-    {
-        return hyprland_window_actions(arr, &needle);
-    }
+fn fresh_window_snapshot() -> Option<WindowSnapshot> {
+    let cached = window_snapshot_cache().lock().ok()?.clone()?;
+    (cached.captured_at.elapsed() <= WINDOW_CACHE_TTL).then_some(cached)
+}
 
-    if let Some(tree) = command_json_value("swaymsg", &["-t", "get_tree"]) {
-        let mut nodes = Vec::new();
-        collect_sway_windows(&tree, &mut nodes);
-        if !nodes.is_empty() {
-            return sway_window_actions(&nodes, &needle);
+fn stale_window_snapshot() -> Option<WindowSnapshot> {
+    window_snapshot_cache().lock().ok()?.clone()
+}
+
+fn load_window_snapshot() -> Option<WindowSnapshot> {
+    for backend in window_backend_candidates() {
+        if let Some(snapshot) = load_backend_snapshot(backend) {
+            return Some(snapshot);
         }
     }
+    None
+}
 
-    Vec::new()
+fn window_backend_candidates() -> Vec<WindowBackend> {
+    let env = std::env::vars().collect::<HashMap<_, _>>();
+    window_backend_candidates_from_env(&env)
+}
+
+fn window_backend_candidates_from_env(env: &HashMap<String, String>) -> Vec<WindowBackend> {
+    if env
+        .get("NIRI_SOCKET")
+        .is_some_and(|value| !value.is_empty())
+        || env
+            .get("XDG_CURRENT_DESKTOP")
+            .is_some_and(|value| value.to_lowercase().contains("niri"))
+    {
+        return vec![WindowBackend::Niri];
+    }
+    if env
+        .get("HYPRLAND_INSTANCE_SIGNATURE")
+        .is_some_and(|value| !value.is_empty())
+        || env
+            .get("XDG_CURRENT_DESKTOP")
+            .is_some_and(|value| value.to_lowercase().contains("hyprland"))
+    {
+        return vec![WindowBackend::Hyprland];
+    }
+    if env.get("SWAYSOCK").is_some_and(|value| !value.is_empty())
+        || env
+            .get("XDG_CURRENT_DESKTOP")
+            .is_some_and(|value| value.to_lowercase().contains("sway"))
+    {
+        return vec![WindowBackend::Sway];
+    }
+
+    vec![
+        WindowBackend::Niri,
+        WindowBackend::Hyprland,
+        WindowBackend::Sway,
+    ]
+}
+
+fn load_backend_snapshot(backend: WindowBackend) -> Option<WindowSnapshot> {
+    let windows = match backend {
+        WindowBackend::Niri => command_json_value("niri", &["msg", "windows"])
+            .and_then(|value| value.as_array().cloned())?,
+        WindowBackend::Hyprland => command_json_value("hyprctl", &["clients", "-j"])
+            .and_then(|value| value.as_array().cloned())?,
+        WindowBackend::Sway => {
+            let tree = command_json_value("swaymsg", &["-t", "get_tree"])?;
+            let mut nodes = Vec::new();
+            collect_sway_windows(&tree, &mut nodes);
+            nodes.into_iter().cloned().collect()
+        }
+    };
+
+    (!windows.is_empty()).then_some(WindowSnapshot {
+        backend,
+        windows,
+        captured_at: Instant::now(),
+    })
 }
 
 fn command_json_value(program: &str, args: &[&str]) -> Option<serde_json::Value> {
-    let output = Command::new(program).args(args).output().ok()?;
+    let output = command_output_with_timeout(program, args, WINDOW_QUERY_TIMEOUT)?;
     if !output.status.success() {
         return None;
     }
     let text = std::str::from_utf8(&output.stdout).ok()?;
     serde_json::from_str(text).ok()
+}
+
+fn command_output_with_timeout(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Option<std::process::Output> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started_at = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) if started_at.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(_) => return None,
+        }
+    }
+}
+
+fn window_snapshot_actions(snapshot: &WindowSnapshot, needle: &str) -> Vec<Action> {
+    match snapshot.backend {
+        WindowBackend::Niri => niri_window_actions(&snapshot.windows, needle),
+        WindowBackend::Hyprland => hyprland_window_actions(&snapshot.windows, needle),
+        WindowBackend::Sway => {
+            let windows = snapshot.windows.iter().collect::<Vec<_>>();
+            sway_window_actions(&windows, needle)
+        }
+    }
 }
 
 fn niri_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Action> {
@@ -484,4 +622,59 @@ fn sway_window_actions(windows: &[&serde_json::Value], needle: &str) -> Vec<Acti
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_query_needle_accepts_window_prefixes() {
+        assert_eq!(
+            window_query_needle("win firefox").as_deref(),
+            Some("firefox")
+        );
+        assert_eq!(window_query_needle("window Code").as_deref(), Some("code"));
+        assert_eq!(window_query_needle("windows").as_deref(), Some(""));
+        assert_eq!(window_query_needle("firefox"), None);
+    }
+
+    #[test]
+    fn backend_candidates_prefer_detected_compositor() {
+        let mut env = HashMap::new();
+        env.insert("HYPRLAND_INSTANCE_SIGNATURE".to_string(), "abc".to_string());
+        assert_eq!(
+            window_backend_candidates_from_env(&env),
+            vec![WindowBackend::Hyprland]
+        );
+
+        env.clear();
+        env.insert("XDG_CURRENT_DESKTOP".to_string(), "sway".to_string());
+        assert_eq!(
+            window_backend_candidates_from_env(&env),
+            vec![WindowBackend::Sway]
+        );
+    }
+
+    #[test]
+    fn backend_candidates_probe_all_without_compositor_env() {
+        let env = HashMap::new();
+        assert_eq!(
+            window_backend_candidates_from_env(&env),
+            vec![
+                WindowBackend::Niri,
+                WindowBackend::Hyprland,
+                WindowBackend::Sway,
+            ]
+        );
+    }
+
+    #[test]
+    fn command_output_with_timeout_stops_slow_process() {
+        let started_at = Instant::now();
+        let output = command_output_with_timeout("sleep", &["1"], Duration::from_millis(50));
+
+        assert!(output.is_none());
+        assert!(started_at.elapsed() < Duration::from_millis(500));
+    }
 }
