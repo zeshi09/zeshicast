@@ -12,9 +12,12 @@ pub mod ui;
 
 pub use action::{
     Action, ActionForm, ActionFormField, ActionPanelSection, ActionRisk, Capability,
-    CommandArgumentKind, LauncherCommand, SecondaryAction, SecondaryActionKind,
+    CommandArgumentKind, ExecutionDecision, ExecutionPolicy, LauncherCommand, SecondaryAction,
+    SecondaryActionKind,
 };
 pub(crate) use action::{ActionKind, HttpRequest, JsonCommandAction, ShellCommand};
+#[cfg(feature = "gui")]
+pub(crate) use action::{ExecutionRequest, run_execution_request};
 pub use app::{
     CLIPBOARD_IMAGE_PREFIX, CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary,
     SnippetSummary, Zeshicast, clipboard_cache_dir, clipboard_image_path,
@@ -1137,6 +1140,48 @@ DEPLOY_TOKEN = "{{pref:token}}"
         assert_eq!(actions[0].value(), "kill 4242");
         assert_eq!(actions[0].risk, ActionRisk::ProcessKill);
         assert!(actions[0].subtitle.contains("target/debug/zeshicast-gtk"));
+    }
+
+    #[test]
+    fn executor_requests_confirmation_for_power_action() {
+        let action = Action::new(
+            "System",
+            "Power Off",
+            ActionKind::Shell(ShellCommand::new("systemctl poweroff")),
+            0,
+        )
+        .with_risk(ActionRisk::SystemPower);
+
+        assert_eq!(
+            action.execution_decision(),
+            ExecutionDecision::NeedsConfirmation(ActionRisk::SystemPower)
+        );
+        assert_eq!(
+            ExecutionPolicy::confirmed().decide(&action),
+            ExecutionDecision::RunNow
+        );
+    }
+
+    #[test]
+    fn executor_allows_copy_without_confirmation() {
+        let action = Action::new(
+            "Clipboard",
+            "Copy",
+            ActionKind::Copy("value".to_string()),
+            0,
+        );
+
+        assert_eq!(action.execution_decision(), ExecutionDecision::RunNow);
+    }
+
+    #[test]
+    fn executor_denies_non_executable_action() {
+        let action = Action::new("Command", "Deferred", ActionKind::None, 0);
+
+        assert!(matches!(
+            action.execution_decision(),
+            ExecutionDecision::Denied(_)
+        ));
     }
 
     #[test]

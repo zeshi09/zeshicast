@@ -7,17 +7,18 @@ use std::time::SystemTime;
 use crate::services::storage;
 use crate::{
     Action, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider, ClipboardProvider,
-    CommandEntry, CommandsProvider, EmojiProvider, FileEntry, FilesProvider, HyprlandProvider,
-    LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider, NamedValue,
-    NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext,
-    ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext, SearchProvider,
-    SecondaryAction, SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider,
-    WindowsProvider, app_action, append_alias, expand_placeholders, expand_placeholders_shell,
-    fuzzy_score, home_dir, load_aliases, load_apps, load_clipboard_history, load_command_entries,
-    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences,
-    load_script_entries, normalize_alias, search_audio_actions, search_media_actions,
-    search_network_actions, search_notification_actions, search_system_actions, spawn_shell,
-    write_lines, write_preferences,
+    CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision, ExecutionPolicy, FileEntry,
+    FilesProvider, HyprlandProvider, LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS,
+    MediaProvider, NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider,
+    NotificationsProvider, PlaceholderContext, ProcessesProvider, ScriptEntry, ScriptsProvider,
+    SearchContext, SearchProvider, SecondaryAction, SecondaryActionKind, ShellCommand,
+    SwayProvider, SystemProvider, WebProvider, WindowsProvider, app_action, append_alias,
+    expand_placeholders, expand_placeholders_shell, fuzzy_score, home_dir, load_aliases, load_apps,
+    load_clipboard_history, load_command_entries, load_file_index, load_frequencies, load_lines,
+    load_named_values, load_preferences, load_script_entries, normalize_alias,
+    search_audio_actions, search_media_actions, search_network_actions,
+    search_notification_actions, search_system_actions, spawn_shell, write_lines,
+    write_preferences,
 };
 
 #[derive(Debug, Clone)]
@@ -504,8 +505,23 @@ impl Zeshicast {
         actions
     }
 
-    pub fn run_action(&mut self, action: &Action) {
-        action.run();
+    pub fn run_action(&mut self, action: &Action) -> ExecutionDecision {
+        self.run_action_with_policy(action, ExecutionPolicy::interactive())
+    }
+
+    pub fn run_action_confirmed(&mut self, action: &Action) -> ExecutionDecision {
+        self.run_action_with_policy(action, ExecutionPolicy::confirmed())
+    }
+
+    fn run_action_with_policy(
+        &mut self,
+        action: &Action,
+        policy: ExecutionPolicy,
+    ) -> ExecutionDecision {
+        let decision = action.run_with_policy(policy);
+        if !matches!(decision, ExecutionDecision::RunNow) {
+            return decision;
+        }
         if action.category == "Calculator"
             && let Some((expr, result)) = action.title.split_once(" = ")
         {
@@ -514,6 +530,7 @@ impl Zeshicast {
         if let Err(error) = self.record_recent(action) {
             eprintln!("failed to record recent action: {error}");
         }
+        decision
     }
 
     pub fn available_secondary_actions(&self, action: &Action) -> Vec<SecondaryAction> {
@@ -623,7 +640,9 @@ impl Zeshicast {
         secondary: SecondaryActionKind,
     ) -> io::Result<()> {
         match secondary {
-            SecondaryActionKind::Run => self.run_action(action),
+            SecondaryActionKind::Run => {
+                self.run_action(action);
+            }
             SecondaryActionKind::CopyValue => action.copy_value(),
             SecondaryActionKind::TypeText => type_text_via_wtype(&action.value()),
             SecondaryActionKind::OpenParent => action.open_parent_dir(),

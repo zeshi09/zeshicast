@@ -64,6 +64,51 @@ pub enum HttpRequest {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) enum ExecutionRequest {
+    Shell { command: ShellCommand },
+    Command { program: String, args: Vec<String> },
+    OpenPath(PathBuf),
+    OpenUrl(String),
+    Copy(String),
+    Http(HttpRequest),
+    Media(crate::MediaControl),
+    Notification(crate::NotificationAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutionDecision {
+    RunNow,
+    NeedsConfirmation(ActionRisk),
+    Denied(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionPolicy {
+    confirmed: bool,
+}
+
+impl ExecutionPolicy {
+    pub fn interactive() -> Self {
+        Self { confirmed: false }
+    }
+
+    pub fn confirmed() -> Self {
+        Self { confirmed: true }
+    }
+
+    pub fn decide(self, action: &Action) -> ExecutionDecision {
+        if action.execution_request().is_none() {
+            return ExecutionDecision::Denied("action has no executable request".to_string());
+        }
+        if action.risk.requires_confirmation() && !self.confirmed {
+            ExecutionDecision::NeedsConfirmation(action.risk)
+        } else {
+            ExecutionDecision::RunNow
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Action {
     pub category: String,
     pub title: String,
@@ -232,40 +277,42 @@ impl Action {
     }
 
     pub fn run(&self) {
+        let _ = self.run_with_policy(ExecutionPolicy::interactive());
+    }
+
+    pub fn execution_decision(&self) -> ExecutionDecision {
+        ExecutionPolicy::interactive().decide(self)
+    }
+
+    pub(crate) fn execution_request(&self) -> Option<ExecutionRequest> {
         match &self.kind {
-            ActionKind::Launch(command) => spawn_shell(&ShellCommand::new(command)),
-            ActionKind::OpenPath(path) => {
-                spawn_command("xdg-open", &[path.to_string_lossy().as_ref()])
-            }
-            ActionKind::OpenUrl(url) => spawn_command("xdg-open", &[url]),
-            ActionKind::Copy(text) => copy_to_clipboard(text),
-            ActionKind::Shell(command) => spawn_shell(command),
-            ActionKind::HttpCopy(req) => {
-                // Network round-trips (translate / OpenAI / Ollama) can take
-                // seconds. Run them off the caller's thread so the GUI never
-                // freezes; `copy_to_clipboard` shells out to wl-copy/xclip and is
-                // safe to call from a worker thread.
-                let req = req.clone();
-                std::thread::spawn(move || {
-                    if let Some(result) = execute_http_request(&req) {
-                        copy_to_clipboard(&result);
-                    } else {
-                        eprintln!("http request failed");
-                    }
-                });
-            }
-            ActionKind::Launcher(_) => {}
-            ActionKind::Form(_) => {}
-            ActionKind::JsonCommand(_) => {}
-            ActionKind::Media(control) => crate::media_control(*control),
-            ActionKind::Notification(action) => match action {
-                crate::NotificationAction::ToggleDnd => {
-                    crate::toggle_dnd();
-                }
-                crate::NotificationAction::ClearAll => crate::clear_notifications(),
-            },
-            ActionKind::None => {}
+            ActionKind::Launch(command) => Some(ExecutionRequest::Shell {
+                command: ShellCommand::new(command),
+            }),
+            ActionKind::OpenPath(path) => Some(ExecutionRequest::OpenPath(path.clone())),
+            ActionKind::OpenUrl(url) => Some(ExecutionRequest::OpenUrl(url.clone())),
+            ActionKind::Copy(text) => Some(ExecutionRequest::Copy(text.clone())),
+            ActionKind::Shell(command) => Some(ExecutionRequest::Shell {
+                command: command.clone(),
+            }),
+            ActionKind::HttpCopy(req) => Some(ExecutionRequest::Http(req.clone())),
+            ActionKind::Media(control) => Some(ExecutionRequest::Media(*control)),
+            ActionKind::Notification(action) => Some(ExecutionRequest::Notification(*action)),
+            ActionKind::Launcher(_)
+            | ActionKind::Form(_)
+            | ActionKind::JsonCommand(_)
+            | ActionKind::None => None,
         }
+    }
+
+    pub(crate) fn run_with_policy(&self, policy: ExecutionPolicy) -> ExecutionDecision {
+        let decision = policy.decide(self);
+        if matches!(decision, ExecutionDecision::RunNow)
+            && let Some(request) = self.execution_request()
+        {
+            run_execution_request(request);
+        }
+        decision
     }
 
     pub fn launcher_command(&self) -> Option<LauncherCommand> {
@@ -291,7 +338,7 @@ impl Action {
     }
 
     pub fn copy_value(&self) {
-        copy_to_clipboard(&self.value());
+        run_execution_request(ExecutionRequest::Copy(self.value()));
     }
 
     pub fn value(&self) -> String {
@@ -323,12 +370,50 @@ impl Action {
 
     pub fn open_parent_dir(&self) {
         if let Some(parent) = self.parent_dir() {
-            spawn_command("xdg-open", &[parent.to_string_lossy().as_ref()]);
+            run_execution_request(ExecutionRequest::Command {
+                program: "xdg-open".to_string(),
+                args: vec![parent.display().to_string()],
+            });
         }
     }
 
     pub fn identity(&self) -> String {
         format!("{}:{}", self.category, self.title)
+    }
+}
+
+pub(crate) fn run_execution_request(request: ExecutionRequest) {
+    match request {
+        ExecutionRequest::Shell { command } => spawn_shell(&command),
+        ExecutionRequest::Command { program, args } => {
+            let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+            spawn_command(&program, &refs);
+        }
+        ExecutionRequest::OpenPath(path) => {
+            spawn_command("xdg-open", &[path.to_string_lossy().as_ref()]);
+        }
+        ExecutionRequest::OpenUrl(url) => spawn_command("xdg-open", &[&url]),
+        ExecutionRequest::Copy(text) => copy_to_clipboard(&text),
+        ExecutionRequest::Http(req) => {
+            // Network round-trips (translate / OpenAI / Ollama) can take
+            // seconds. Run them off the caller's thread so the GUI never
+            // freezes; `copy_to_clipboard` shells out to wl-copy/xclip and is
+            // safe to call from a worker thread.
+            std::thread::spawn(move || {
+                if let Some(result) = execute_http_request(&req) {
+                    copy_to_clipboard(&result);
+                } else {
+                    eprintln!("http request failed");
+                }
+            });
+        }
+        ExecutionRequest::Media(control) => crate::media_control(control),
+        ExecutionRequest::Notification(action) => match action {
+            crate::NotificationAction::ToggleDnd => {
+                crate::toggle_dnd();
+            }
+            crate::NotificationAction::ClearAll => crate::clear_notifications(),
+        },
     }
 }
 

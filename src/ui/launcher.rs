@@ -740,7 +740,7 @@ fn build_ui(
             .toggle_wifi
             .clone()
             .connect_clicked(move |_| {
-                crate::spawn_command("nmcli", &["radio", "wifi", "toggle"]);
+                run_command_request("nmcli", ["radio", "wifi", "toggle"]);
             });
     }
 
@@ -749,9 +749,9 @@ fn build_ui(
             .toggle_bluetooth
             .clone()
             .connect_clicked(move |_| {
-                crate::spawn_shell(&crate::ShellCommand::new(
+                run_shell_request(
                     "if bluetoothctl show | grep -q 'Powered: yes'; then bluetoothctl power off; else bluetoothctl power on; fi",
-                ));
+                );
             });
     }
 
@@ -766,19 +766,27 @@ fn build_ui(
             .toggle_mute
             .clone()
             .connect_clicked(move |_| {
-                crate::spawn_command("wpctl", &["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
+                run_command_request("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
             });
     }
 
     {
         dashboard_view.lock.clone().connect_clicked(move |_| {
-            crate::spawn_command("loginctl", &["lock-session"]);
+            run_command_request("loginctl", ["lock-session"]);
         });
     }
 
     {
+        let window = window.clone();
         dashboard_view.suspend.clone().connect_clicked(move |_| {
-            crate::spawn_command("systemctl", &["suspend"]);
+            let window = window.clone();
+            crate::ui::show_confirmation_panel(
+                &window,
+                ActionRisk::SystemPower.label(),
+                "Suspend this system.",
+                "Confirm",
+                move || run_command_request("systemctl", ["suspend"]),
+            );
         });
     }
 
@@ -795,7 +803,7 @@ fn build_ui(
     {
         let audio_view = audio_view.clone();
         audio_view.mute_output.clone().connect_clicked(move |_| {
-            crate::spawn_command("wpctl", &["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
+            run_command_request("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
             crate::ui::set_audio_snapshot(&audio_view, &crate::audio_snapshot());
         });
     }
@@ -803,7 +811,7 @@ fn build_ui(
     {
         let audio_view = audio_view.clone();
         audio_view.mute_input.clone().connect_clicked(move |_| {
-            crate::spawn_command("wpctl", &["set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"]);
+            run_command_request("wpctl", ["set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"]);
             crate::ui::set_audio_snapshot(&audio_view, &crate::audio_snapshot());
         });
     }
@@ -2317,7 +2325,7 @@ fn terminate_selected_system_process_or_confirm<F>(
         &detail,
         "Confirm",
         move || {
-            crate::spawn_command("kill", &[&process.pid.to_string()]);
+            run_command_request("kill", [process.pid.to_string()]);
             on_done();
         },
     );
@@ -2361,7 +2369,7 @@ fn run_selected_network_command(list: &ListBox, value: NetworkCommandValue) {
             let Some(interface) = snapshot.interfaces.get(index) else {
                 return;
             };
-            crate::spawn_command("nmcli", &["device", "disconnect", interface.name.as_str()]);
+            run_command_request("nmcli", ["device", "disconnect", interface.name.as_str()]);
         }
         NetworkCommandValue::ConnectWifi => {
             let wifi_offset = snapshot.interfaces.len()
@@ -2373,7 +2381,7 @@ fn run_selected_network_command(list: &ListBox, value: NetworkCommandValue) {
             else {
                 return;
             };
-            crate::spawn_command("nmcli", &["dev", "wifi", "connect", network.ssid.as_str()]);
+            run_command_request("nmcli", ["dev", "wifi", "connect", network.ssid.as_str()]);
         }
     }
 }
@@ -2832,7 +2840,7 @@ fn run_action_or_confirm(
     let hold = Rc::clone(hold);
     let finish_window = window.clone();
     crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
-        launcher.borrow_mut().run_action(&action);
+        launcher.borrow_mut().run_action_confirmed(&action);
         finish_interaction(&finish_window, &hold);
     });
 }
@@ -2846,6 +2854,26 @@ fn action_confirmation_detail(action: &Action) -> String {
     }
 }
 
+fn run_command_request<I, S>(program: &str, args: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    crate::run_execution_request(crate::ExecutionRequest::Command {
+        program: program.to_string(),
+        args: args
+            .into_iter()
+            .map(|arg| arg.as_ref().to_string())
+            .collect(),
+    });
+}
+
+fn run_shell_request(command: &str) {
+    crate::run_execution_request(crate::ExecutionRequest::Shell {
+        command: crate::ShellCommand::new(command),
+    });
+}
+
 fn run_secondary_action_or_confirm<F>(
     window: &ApplicationWindow,
     launcher: &Rc<RefCell<Zeshicast>>,
@@ -2855,7 +2883,7 @@ fn run_secondary_action_or_confirm<F>(
 ) where
     F: Fn() + 'static,
 {
-    let risk = secondary_action_risk(kind);
+    let risk = secondary_action_risk(&action, kind);
     if !risk.requires_confirmation() {
         run_secondary_action(launcher, &action, kind);
         on_done();
@@ -2866,7 +2894,11 @@ fn run_secondary_action_or_confirm<F>(
     let detail = secondary_action_confirmation_detail(&action, kind);
     let launcher = Rc::clone(launcher);
     crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
-        run_secondary_action(&launcher, &action, kind);
+        if kind == SecondaryActionKind::Run {
+            launcher.borrow_mut().run_action_confirmed(&action);
+        } else {
+            run_secondary_action(&launcher, &action, kind);
+        }
         on_done();
     });
 }
@@ -2881,8 +2913,9 @@ fn run_secondary_action(
     }
 }
 
-fn secondary_action_risk(kind: SecondaryActionKind) -> ActionRisk {
+fn secondary_action_risk(action: &Action, kind: SecondaryActionKind) -> ActionRisk {
     match kind {
+        SecondaryActionKind::Run => action.risk,
         SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
         SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
         _ => ActionRisk::Normal,
@@ -3032,7 +3065,10 @@ mod tests {
         ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, action_panel_display_items,
         action_panel_display_rows, decode_clipboard_text, secondary_action_risk,
     };
-    use crate::{ActionPanelSection, ActionRisk, SecondaryActionKind, ui::ActionPanelDisplayItem};
+    use crate::{
+        Action, ActionKind, ActionPanelSection, ActionRisk, SecondaryActionKind,
+        ui::ActionPanelDisplayItem,
+    };
 
     #[test]
     fn clipboard_text_accepts_plain_and_multiline() {
@@ -3130,13 +3166,30 @@ mod tests {
 
     #[test]
     fn clipboard_clear_secondary_action_is_marked_clipboard_clear() {
+        let action = Action::new(
+            "Clipboard",
+            "Item",
+            ActionKind::Copy("value".to_string()),
+            0,
+        );
         assert_eq!(
-            secondary_action_risk(SecondaryActionKind::ClearClipboardHistory),
+            secondary_action_risk(&action, SecondaryActionKind::ClearClipboardHistory),
             ActionRisk::ClipboardClear
         );
         assert!(
-            secondary_action_risk(SecondaryActionKind::ClearClipboardHistory)
+            secondary_action_risk(&action, SecondaryActionKind::ClearClipboardHistory)
                 .requires_confirmation()
+        );
+    }
+
+    #[test]
+    fn secondary_run_inherits_action_risk() {
+        let action =
+            Action::new("Shell", "Power", ActionKind::None, 0).with_risk(ActionRisk::SystemPower);
+
+        assert_eq!(
+            secondary_action_risk(&action, SecondaryActionKind::Run),
+            ActionRisk::SystemPower
         );
     }
 
