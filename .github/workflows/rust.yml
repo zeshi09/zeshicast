@@ -58,3 +58,15 @@ jobs:
       uses: DeterminateSystems/magic-nix-cache-action@v14
     - name: Run ${{ matrix.name }}
       run: ${{ matrix.command }}
+
+  supply-chain:
+    name: Supply Chain
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: cargo-deny
+      uses: EmbarkStudios/cargo-deny-action@v2
+      with:
+        command: check
+        arguments: --all-features
