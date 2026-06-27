@@ -133,7 +133,9 @@ fn build_ui(
     let snippet_items = Rc::new(RefCell::new(Vec::<SnippetSummary>::new()));
     install_clipboard_monitor(&launcher);
     install_clipboard_background_watcher(&launcher);
-    super::notify_server::install_notification_server();
+    if launcher.borrow().notifications_history_enabled() {
+        super::notify_server::install_notification_server();
+    }
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -1097,6 +1099,10 @@ pub fn present_launcher_view(state: &GuiState, view: Option<&str>) {
 }
 
 fn install_clipboard_monitor(launcher: &Rc<RefCell<Zeshicast>>) {
+    if !launcher.borrow().clipboard_history_enabled() {
+        return;
+    }
+
     let Some(display) = gdk::Display::default() else {
         return;
     };
@@ -1223,6 +1229,10 @@ fn fill_ai_model_bar(
 /// content). `wl-paste --watch` fires for *every* change in the background.
 /// Text only; image copies stay on the gdk path.
 fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshicast>>) {
+    if !launcher.borrow().clipboard_history_enabled() {
+        return;
+    }
+
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     std::thread::spawn(move || watch_clipboard_text(tx));
 
@@ -1311,6 +1321,11 @@ fn capture_clipboard(
     launcher: &Rc<RefCell<Zeshicast>>,
     last: &Rc<RefCell<Option<String>>>,
 ) {
+    if !launcher.borrow().clipboard_history_enabled() || launcher.borrow().clipboard_private_mode()
+    {
+        return;
+    }
+
     let formats = clipboard.formats();
     if formats.contain_mime_type("image/png") || formats.contains_type(gdk::Texture::static_type())
     {
@@ -1326,6 +1341,10 @@ fn capture_clipboard_image(
     last: &Rc<RefCell<Option<String>>>,
 ) {
     use std::hash::{Hash, Hasher};
+    if !launcher.borrow().clipboard_capture_images() {
+        return;
+    }
+
     let launcher = Rc::clone(launcher);
     let last = Rc::clone(last);
     clipboard.read_texture_async(gio::Cancellable::NONE, move |result| {

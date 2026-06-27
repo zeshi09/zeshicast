@@ -6,6 +6,41 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn export_config(config_dir: &Path, dest: &Path) -> io::Result<()> {
+    let preferences = load_preferences(&config_dir.join("preferences.toml"));
+    let include_secrets = preference_bool(&preferences, "export_include_secrets", false);
+    export_config_with_options(config_dir, dest, include_secrets)
+}
+
+pub fn export_config_with_options(
+    config_dir: &Path,
+    dest: &Path,
+    include_secrets: bool,
+) -> io::Result<()> {
+    if include_secrets {
+        return export_config_dir(config_dir, dest);
+    }
+
+    let parent = config_dir.parent().unwrap_or(config_dir);
+    let staging = parent.join(format!(
+        ".zeshicast-export-{}-{}",
+        std::process::id(),
+        unix_now()
+    ));
+    let staged_config = staging.join(config_dir.file_name().unwrap_or_default());
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staged_config)?;
+
+    let result = (|| {
+        copy_config_sanitized(config_dir, &staged_config)?;
+        sanitize_export_preferences(&staged_config.join("preferences.toml"))?;
+        export_config_dir(&staged_config, dest)
+    })();
+
+    let _ = fs::remove_dir_all(&staging);
+    result
+}
+
+fn export_config_dir(config_dir: &Path, dest: &Path) -> io::Result<()> {
     let status = Command::new("tar")
         .args(["-czf"])
         .arg(dest)
@@ -18,6 +53,56 @@ pub fn export_config(config_dir: &Path, dest: &Path) -> io::Result<()> {
     } else {
         Err(io::Error::other("tar export failed"))
     }
+}
+
+fn copy_config_sanitized(src: &Path, dest: &Path) -> io::Result<()> {
+    if !src.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        let path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if file_type.is_dir() {
+            fs::create_dir_all(&dest_path)?;
+            copy_config_sanitized(&path, &dest_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn sanitize_export_preferences(path: &Path) -> io::Result<()> {
+    let mut preferences = load_preferences(path);
+    preferences.retain(|key, _| !is_secret_preference_key(key));
+    preferences.remove("export_include_secrets");
+    write_preferences(path, &preferences)
+}
+
+fn is_secret_preference_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.ends_with("_api_key")
+        || key.contains("secret")
+        || key.contains("token")
+        || key.contains("password")
+}
+
+fn preference_bool(preferences: &HashMap<String, String>, key: &str, default_value: bool) -> bool {
+    preferences
+        .get(key)
+        .and_then(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "true" | "yes" | "on" | "1" => Some(true),
+            "false" | "no" | "off" | "0" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(default_value)
 }
 
 pub fn import_config(src: &Path, config_dir: &Path) -> io::Result<()> {
@@ -283,5 +368,49 @@ pub(crate) fn format_time_ago(ts: i64) -> String {
         format!("{} h ago", delta / 3600)
     } else {
         format!("{} d ago", delta / 86400)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "zeshicast-{name}-{}-{}",
+            std::process::id(),
+            unix_now()
+        ))
+    }
+
+    #[test]
+    fn export_preferences_sanitizer_removes_secret_keys() {
+        let dir = test_dir("export-sanitize");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("preferences.toml");
+        write_preferences(
+            &path,
+            &HashMap::from([
+                ("ai_api_key".to_string(), "sk-secret".to_string()),
+                ("custom_token".to_string(), "token".to_string()),
+                ("db_password".to_string(), "password".to_string()),
+                ("ai_model".to_string(), "llama".to_string()),
+                ("export_include_secrets".to_string(), "true".to_string()),
+            ]),
+        )
+        .unwrap();
+
+        sanitize_export_preferences(&path).unwrap();
+        let preferences = load_preferences(&path);
+
+        assert_eq!(
+            preferences.get("ai_model").map(String::as_str),
+            Some("llama")
+        );
+        assert!(!preferences.contains_key("ai_api_key"));
+        assert!(!preferences.contains_key("custom_token"));
+        assert!(!preferences.contains_key("db_password"));
+        assert!(!preferences.contains_key("export_include_secrets"));
+        let _ = fs::remove_dir_all(dir);
     }
 }

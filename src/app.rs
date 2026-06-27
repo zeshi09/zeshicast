@@ -59,6 +59,25 @@ pub fn clipboard_cache_dir() -> PathBuf {
     home_dir().join(".cache/zeshicast/clipboard")
 }
 
+fn preference_enabled_value(
+    preferences: &HashMap<String, String>,
+    key: &str,
+    default_value: bool,
+) -> bool {
+    preferences
+        .get(key)
+        .and_then(|value| parse_bool_preference(value))
+        .unwrap_or(default_value)
+}
+
+fn clipboard_retention_value(preferences: &HashMap<String, String>) -> usize {
+    preferences
+        .get("clipboard_retention")
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(MAX_CLIPBOARD_ENTRIES)
+        .clamp(1, 1000)
+}
+
 fn referenced_clipboard_image_paths(entries: &[String]) -> HashSet<PathBuf> {
     entries
         .iter()
@@ -302,7 +321,8 @@ impl Zeshicast {
             }
         }
 
-        let clip_rows = storage::clipboard_load(&config_dir);
+        let clipboard_retention = clipboard_retention_value(&preferences);
+        let clip_rows = storage::clipboard_load_with_limit(&config_dir, clipboard_retention);
         let clipboard_history: Vec<String> = clip_rows.iter().map(|(t, _)| t.clone()).collect();
         let clipboard_timestamps: HashMap<String, i64> = clip_rows.into_iter().collect();
         let _ = prune_clipboard_image_cache(&clipboard_history);
@@ -427,7 +447,7 @@ impl Zeshicast {
         if self.preference_enabled("media_enabled", true) {
             actions.extend(MediaProvider.search(&search_context));
         }
-        if self.preference_enabled("notifications_enabled", true) {
+        if self.notifications_history_enabled() {
             actions.extend(NotificationsProvider.search(&search_context));
         }
         actions.extend(NiriProvider.search(&search_context));
@@ -616,18 +636,22 @@ impl Zeshicast {
     }
 
     pub fn add_clipboard_text(&mut self, text: &str) -> io::Result<bool> {
+        if !self.clipboard_history_enabled() || self.clipboard_private_mode() {
+            return Ok(false);
+        }
         let text = crate::normalize_clipboard_text(text);
         if text.is_empty() {
             return Ok(false);
         }
-        storage::clipboard_insert(&self.config_dir, &text)
+        let retention = self.clipboard_retention();
+        storage::clipboard_insert_with_limit(&self.config_dir, &text, retention)
             .map_err(|e| io::Error::other(e.to_string()))?;
         self.clipboard_timestamps
             .entry(text.clone())
             .or_insert_with(crate::unix_now);
         self.clipboard_history.retain(|e| e != &text);
         self.clipboard_history.insert(0, text);
-        self.clipboard_history.truncate(MAX_CLIPBOARD_ENTRIES);
+        self.clipboard_history.truncate(retention);
         prune_clipboard_image_cache(&self.clipboard_history)?;
         Ok(true)
     }
@@ -676,6 +700,9 @@ impl Zeshicast {
 
     /// Record a captured image (already cached as a PNG at `path`).
     pub fn add_clipboard_image(&mut self, path: &str) -> io::Result<bool> {
+        if !self.clipboard_capture_images() {
+            return Ok(false);
+        }
         self.add_clipboard_text(&format!("{CLIPBOARD_IMAGE_PREFIX}{path}"))
     }
 
@@ -785,7 +812,7 @@ impl Zeshicast {
         if self.preference_enabled("media_enabled", true) {
             actions.extend(search_media_actions("media"));
         }
-        if self.preference_enabled("notifications_enabled", true) {
+        if self.notifications_history_enabled() {
             actions.extend(search_notification_actions("notify"));
         }
         actions.extend(
@@ -924,10 +951,38 @@ impl Zeshicast {
     }
 
     fn preference_enabled(&self, key: &str, default_value: bool) -> bool {
-        self.preferences
-            .get(key)
-            .and_then(|value| parse_bool_preference(value))
-            .unwrap_or(default_value)
+        preference_enabled_value(&self.preferences, key, default_value)
+    }
+
+    pub fn clipboard_history_enabled(&self) -> bool {
+        self.preference_enabled("clipboard_history_enabled", true)
+    }
+
+    pub fn clipboard_private_mode(&self) -> bool {
+        self.preference_enabled("clipboard_private_mode", false)
+    }
+
+    pub fn clipboard_capture_images(&self) -> bool {
+        self.preference_enabled("clipboard_capture_images", true)
+            && self.clipboard_history_enabled()
+            && !self.clipboard_private_mode()
+    }
+
+    pub fn notifications_history_enabled(&self) -> bool {
+        self.preference_enabled("notifications_enabled", true)
+            && self.preference_enabled("notifications_history_enabled", true)
+    }
+
+    fn clipboard_retention(&self) -> usize {
+        clipboard_retention_value(&self.preferences)
+    }
+
+    fn enforce_clipboard_retention(&mut self) -> io::Result<()> {
+        let retention = self.clipboard_retention();
+        storage::clipboard_prune(&self.config_dir, retention)
+            .map_err(|e| io::Error::other(e.to_string()))?;
+        self.clipboard_history.truncate(retention);
+        prune_clipboard_image_cache(&self.clipboard_history)
     }
 
     pub fn run_form_action(&mut self, action: &Action, values: HashMap<String, String>) {
@@ -960,12 +1015,17 @@ impl Zeshicast {
     }
 
     pub fn set_preference(&mut self, key: String, value: String) -> io::Result<()> {
+        let should_prune_clipboard = key == "clipboard_retention";
         if value.is_empty() {
             self.preferences.remove(&key);
         } else {
             self.preferences.insert(key, value);
         }
-        write_preferences(&self.config_dir.join("preferences.toml"), &self.preferences)
+        write_preferences(&self.config_dir.join("preferences.toml"), &self.preferences)?;
+        if should_prune_clipboard {
+            self.enforce_clipboard_retention()?;
+        }
+        Ok(())
     }
 
     pub fn list_commands(&self) -> Vec<CommandSummary> {
@@ -1155,6 +1215,26 @@ mod tests {
         format!("{CLIPBOARD_IMAGE_PREFIX}{}", path.display())
     }
 
+    fn test_app(config_dir: PathBuf, preferences: HashMap<String, String>) -> Zeshicast {
+        Zeshicast {
+            apps: Vec::new(),
+            quicklinks: Vec::new(),
+            snippets: Vec::new(),
+            commands: Vec::new(),
+            scripts: Vec::new(),
+            clipboard_history: Vec::new(),
+            clipboard_timestamps: HashMap::new(),
+            calc_history: Vec::new(),
+            preferences,
+            aliases: HashMap::new(),
+            pins: HashSet::new(),
+            recent: Vec::new(),
+            frequencies: HashMap::new(),
+            files: Vec::new(),
+            config_dir,
+        }
+    }
+
     #[test]
     fn clipboard_clear_removes_image_cache_files() {
         let dir = test_cache_dir("clipboard-clear");
@@ -1200,5 +1280,31 @@ mod tests {
 
         assert!(image.exists());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clipboard_disabled_does_not_record_text() {
+        let config_dir = test_cache_dir("clipboard-disabled-config");
+        let mut app = test_app(
+            config_dir.clone(),
+            HashMap::from([("clipboard_history_enabled".to_string(), "false".to_string())]),
+        );
+
+        assert!(!app.add_clipboard_text("secret").unwrap());
+        assert!(app.clipboard_history.is_empty());
+        assert!(!config_dir.join("zeshicast.db").exists());
+    }
+
+    #[test]
+    fn private_mode_does_not_record_clipboard() {
+        let config_dir = test_cache_dir("clipboard-private-config");
+        let mut app = test_app(
+            config_dir.clone(),
+            HashMap::from([("clipboard_private_mode".to_string(), "true".to_string())]),
+        );
+
+        assert!(!app.add_clipboard_text("secret").unwrap());
+        assert!(app.clipboard_history.is_empty());
+        assert!(!config_dir.join("zeshicast.db").exists());
     }
 }

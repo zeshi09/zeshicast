@@ -20,7 +20,8 @@ fn main() {
             .unwrap_or_else(|| PathBuf::from("zeshicast-config.tar.gz"));
         let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
         let config_dir = home.join(".config/zeshicast");
-        match zeshicast::export_config(&config_dir, &dest) {
+        let include_secrets = args.iter().any(|arg| arg == "--include-secrets");
+        match zeshicast::export_config_with_options(&config_dir, &dest, include_secrets) {
             Ok(()) => println!("exported to {}", dest.display()),
             Err(err) => eprintln!("export failed: {err}"),
         }
@@ -180,7 +181,9 @@ fn print_help() {
 Usage:
   zeshicast                 Start interactive command palette
   zeshicast <query>         Print matching actions
-  zeshicast --export [file] Export config to tar.gz (default: zeshicast-config.tar.gz)
+  zeshicast --export [file] Export config to tar.gz without API keys by default
+  zeshicast --export [file] --include-secrets
+                            Export config including API keys and secret-like preferences
   zeshicast --import <file> Import config from tar.gz
 
 Queries:

@@ -201,7 +201,9 @@ zeshicast-gtk --view media          # --ai, --system, --notifications, --emoji, 
 ```bash
 zeshicast                       Start interactive REPL
 zeshicast firefox               Print matching actions and exit
-zeshicast --export [file]       Export config to tar.gz (default: zeshicast-config.tar.gz)
+zeshicast --export [file]       Export config to tar.gz, excluding API keys by default
+zeshicast --export [file] --include-secrets
+                                Export config including API keys and secret-like preferences
 zeshicast --import file.tar.gz  Import config from tar.gz
 ```
 
@@ -437,6 +439,12 @@ dashboard_enabled  = "true"
 network_enabled    = "true"
 media_enabled      = "true"
 notifications_enabled = "true"
+notifications_history_enabled = "true"
+clipboard_history_enabled = "true"
+clipboard_private_mode = "false"
+clipboard_retention = "100"
+clipboard_capture_images = "true"
+export_include_secrets = "false"
 ai_enabled         = "true"
 dashboard_poll_interval_ms = "1000"
 ollama_endpoint    = "http://localhost:11434"
@@ -480,7 +488,7 @@ Command forms      GTK form panel for commands with missing required arguments
 Extension browser  Ctrl+B — list and inspect all custom commands
 Preferences editor Ctrl+, — edit AI/translate settings without touching files
 Permission field   enforced capabilities: shell, network/open_url, filesystem/open_path, clipboard_write
-Import/export      zeshicast --export / --import for config backup and migration
+Import/export      zeshicast --export / --import; export excludes API keys unless explicitly enabled
 Example extensions packaging/examples/commands/ — github, weather, dict, docker, git
 Nix flake          packages, apps (nix run), NixOS module (systemd user service)
 ```

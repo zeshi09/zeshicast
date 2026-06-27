@@ -37,16 +37,20 @@ fn now() -> i64 {
 // ── Clipboard ────────────────────────────────────────────────────────────────
 
 pub fn clipboard_load(config_dir: &Path) -> Vec<(String, i64)> {
+    clipboard_load_with_limit(config_dir, 100)
+}
+
+pub fn clipboard_load_with_limit(config_dir: &Path, limit: usize) -> Vec<(String, i64)> {
     let Ok(conn) = open(config_dir) else {
         return Vec::new();
     };
     let mut stmt = match conn
-        .prepare("SELECT text, added_at FROM clipboard ORDER BY added_at DESC LIMIT 100")
+        .prepare("SELECT text, added_at FROM clipboard ORDER BY added_at DESC LIMIT ?1")
     {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
-    stmt.query_map([], |row| {
+    stmt.query_map(params![limit as i64], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
     })
     .map(|rows| rows.flatten().collect())
@@ -54,6 +58,10 @@ pub fn clipboard_load(config_dir: &Path) -> Vec<(String, i64)> {
 }
 
 pub fn clipboard_insert(config_dir: &Path, text: &str) -> Result<()> {
+    clipboard_insert_with_limit(config_dir, text, 100)
+}
+
+pub fn clipboard_insert_with_limit(config_dir: &Path, text: &str, limit: usize) -> Result<()> {
     let conn = open(config_dir)?;
     conn.execute(
         "INSERT OR REPLACE INTO clipboard (text, added_at) VALUES (?1, ?2)",
@@ -63,9 +71,20 @@ pub fn clipboard_insert(config_dir: &Path, text: &str) -> Result<()> {
     // 100), so prune the rest to stop the db from growing without bound.
     conn.execute(
         "DELETE FROM clipboard WHERE id NOT IN (
-            SELECT id FROM clipboard ORDER BY added_at DESC LIMIT 100
+            SELECT id FROM clipboard ORDER BY added_at DESC LIMIT ?1
         )",
-        [],
+        params![limit as i64],
+    )?;
+    Ok(())
+}
+
+pub fn clipboard_prune(config_dir: &Path, limit: usize) -> Result<()> {
+    let conn = open(config_dir)?;
+    conn.execute(
+        "DELETE FROM clipboard WHERE id NOT IN (
+            SELECT id FROM clipboard ORDER BY added_at DESC LIMIT ?1
+        )",
+        params![limit as i64],
     )?;
     Ok(())
 }

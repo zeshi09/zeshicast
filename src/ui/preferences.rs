@@ -13,6 +13,12 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("network_enabled", "true"),
     ("media_enabled", "true"),
     ("notifications_enabled", "true"),
+    ("notifications_history_enabled", "true"),
+    ("clipboard_history_enabled", "true"),
+    ("clipboard_private_mode", "false"),
+    ("clipboard_retention", "100"),
+    ("clipboard_capture_images", "true"),
+    ("export_include_secrets", "false"),
     ("ai_enabled", "true"),
     ("ai_provider", "ollama"),
     ("ollama_endpoint", "http://localhost:11434"),
@@ -45,6 +51,30 @@ pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
     (
         "notifications_enabled",
         "Notification features enabled (true/false)",
+    ),
+    (
+        "notifications_history_enabled",
+        "Notification history enabled (true/false)",
+    ),
+    (
+        "clipboard_history_enabled",
+        "Clipboard history enabled (true/false)",
+    ),
+    (
+        "clipboard_private_mode",
+        "Pause clipboard capture without clearing existing history (true/false)",
+    ),
+    (
+        "clipboard_retention",
+        "Clipboard history retention count (1-1000)",
+    ),
+    (
+        "clipboard_capture_images",
+        "Capture clipboard images into local cache (true/false)",
+    ),
+    (
+        "export_include_secrets",
+        "Include API keys and secrets in config export (true/false)",
     ),
     ("ai_enabled", "AI features enabled (true/false)"),
     (
@@ -118,7 +148,14 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
     },
     PrefSection {
         name: "Privacy",
-        keys: &[],
+        keys: &[
+            ("clipboard_history_enabled", "Clipboard history"),
+            ("clipboard_private_mode", "Pause clipboard capture"),
+            ("clipboard_retention", "Clipboard retention"),
+            ("clipboard_capture_images", "Clipboard images"),
+            ("notifications_history_enabled", "Notification history"),
+            ("export_include_secrets", "Export secrets"),
+        ],
     },
     PrefSection {
         name: "About",
