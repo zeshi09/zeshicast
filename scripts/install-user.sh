@@ -92,8 +92,11 @@ Run launcher:
 Start daemon now:
   systemctl --user restart zeshicast-gtk.service
 
-Enable daemon at login:
+Enable daemon for the graphical session:
   systemctl --user enable zeshicast-gtk.service
+
+Fallback if your desktop does not start graphical-session.target:
+  systemctl --user add-wants default.target zeshicast-gtk.service
 
 Suggested Wayland hotkey command:
   $BIN_DIR/zeshicast-gtk

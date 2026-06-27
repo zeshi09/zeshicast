@@ -245,6 +245,15 @@ systemctl --user enable zeshicast-gtk.service
 systemctl --user disable zeshicast-gtk.service
 ```
 
+The non-Nix unit is installed under `graphical-session.target` so the daemon
+starts with the desktop session and stops with it. If your distro or compositor
+does not start that target, keep the same unit and attach it to
+`default.target` instead:
+
+```bash
+systemctl --user add-wants default.target zeshicast-gtk.service
+```
+
 ## Runtime Dependencies
 
 The GTK launcher is a Wayland/GTK4 application. Build-time dependencies are
