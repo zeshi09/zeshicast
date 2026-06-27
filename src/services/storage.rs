@@ -4,13 +4,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, Result, params};
 
+const CURRENT_SCHEMA_VERSION: i64 = 1;
+
 fn open(config_dir: &Path) -> Result<Connection> {
     std::fs::create_dir_all(config_dir).ok();
     let db_path = config_dir.join("zeshicast.db");
-    let conn = Connection::open(&db_path)?;
+    let mut conn = Connection::open(&db_path)?;
     secure_database_permissions(&db_path);
     conn.execute_batch("PRAGMA journal_mode = WAL;")?;
-    init(&conn)?;
+    init(&mut conn)?;
     Ok(conn)
 }
 
@@ -23,7 +25,45 @@ fn secure_database_permissions(path: &Path) {
 #[cfg(not(unix))]
 fn secure_database_permissions(_path: &Path) {}
 
-fn init(conn: &Connection) -> Result<()> {
+fn init(conn: &mut Connection) -> Result<()> {
+    migrate(conn)
+}
+
+fn migrate(conn: &mut Connection) -> Result<()> {
+    let version = schema_version(conn)?;
+    if version > CURRENT_SCHEMA_VERSION {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "database schema version {version} is newer than supported {CURRENT_SCHEMA_VERSION}"
+        )));
+    }
+    if version == CURRENT_SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    let transaction = conn.transaction()?;
+    let mut version = version;
+    while version < CURRENT_SCHEMA_VERSION {
+        match version {
+            0 => {
+                migrate_0_to_1(&transaction)?;
+                version = 1;
+            }
+            _ => {
+                return Err(rusqlite::Error::InvalidParameterName(format!(
+                    "no migration path from schema version {version}"
+                )));
+            }
+        }
+    }
+    transaction.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
+    transaction.commit()
+}
+
+fn schema_version(conn: &Connection) -> Result<i64> {
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+}
+
+fn migrate_0_to_1(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS clipboard (
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +74,9 @@ fn init(conn: &Connection) -> Result<()> {
             identity  TEXT    NOT NULL PRIMARY KEY,
             last_used INTEGER NOT NULL,
             count     INTEGER NOT NULL DEFAULT 1
-        );",
+        );
+        CREATE INDEX IF NOT EXISTS idx_clipboard_added_at ON clipboard(added_at);
+        CREATE INDEX IF NOT EXISTS idx_usage_last_used ON usage(last_used);",
     )
 }
 
@@ -233,5 +275,71 @@ mod tests {
             & 0o777;
         assert_eq!(mode, 0o600);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fresh_db_has_current_schema_version() {
+        let dir = test_dir("fresh-schema");
+        let conn = open(&dir).unwrap();
+
+        assert_eq!(schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        assert!(index_exists(&conn, "idx_clipboard_added_at"));
+        assert!(index_exists(&conn, "idx_usage_last_used"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn old_db_migrates_to_current_schema() {
+        let dir = test_dir("old-schema");
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let conn = Connection::open(dir.join("zeshicast.db")).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE clipboard (
+                    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text     TEXT    NOT NULL UNIQUE,
+                    added_at INTEGER NOT NULL
+                );
+                CREATE TABLE usage (
+                    identity  TEXT    NOT NULL PRIMARY KEY,
+                    last_used INTEGER NOT NULL,
+                    count     INTEGER NOT NULL DEFAULT 1
+                );
+                INSERT INTO clipboard (text, added_at) VALUES ('old', 1);
+                INSERT INTO usage (identity, last_used, count) VALUES ('app:old', 1, 2);",
+            )
+            .unwrap();
+            assert_eq!(schema_version(&conn).unwrap(), 0);
+        }
+
+        let conn = open(&dir).unwrap();
+
+        assert_eq!(schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        assert!(index_exists(&conn, "idx_clipboard_added_at"));
+        let migrated_text = conn
+            .query_row("SELECT text FROM clipboard", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap();
+        assert_eq!(migrated_text, "old");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clipboard_added_at_index_exists() {
+        let dir = test_dir("clipboard-index");
+        let conn = open(&dir).unwrap();
+
+        assert!(index_exists(&conn, "idx_clipboard_added_at"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn index_exists(conn: &Connection, name: &str) -> bool {
+        conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            params![name],
+            |_| Ok(()),
+        )
+        .is_ok()
     }
 }
