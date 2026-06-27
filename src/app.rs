@@ -14,8 +14,9 @@ use crate::{
     SearchContext, SearchProvider, SecondaryAction, SecondaryActionKind, ShellCommand,
     SwayProvider, SystemProvider, WebProvider, WindowsProvider, app_action, append_alias,
     expand_placeholders, expand_placeholders_shell, fuzzy_score, home_dir, load_aliases, load_apps,
-    load_clipboard_history, load_command_entries, load_file_index, load_frequencies, load_lines,
-    load_named_values, load_preferences, load_script_entries, normalize_alias,
+    load_clipboard_history, load_command_entries, load_extension_command_entries,
+    load_extension_manifests, load_extension_script_entries, load_file_index, load_frequencies,
+    load_lines, load_named_values, load_preferences, load_script_entries, normalize_alias,
     search_audio_actions, search_media_actions, search_network_actions,
     search_notification_actions, search_system_actions, spawn_shell, write_lines,
     write_preferences,
@@ -301,6 +302,7 @@ impl Zeshicast {
         let config_dir = home.join(".config/zeshicast");
         let preferences = load_preferences(&config_dir.join("preferences.toml"));
         let script_dirs = preference_script_dirs(&preferences, &config_dir);
+        let extensions = load_extension_manifests(&config_dir);
 
         // Migrate text-file clipboard to SQLite on first run
         if !storage::clipboard_has_data(&config_dir) {
@@ -332,12 +334,17 @@ impl Zeshicast {
         let frequencies = storage::usage_frequencies(&config_dir);
 
         let calc_history = load_calc_history(&config_dir.join("calc_history.json"));
+        let mut commands = load_command_entries(&config_dir.join("commands"));
+        commands.extend(load_extension_command_entries(&extensions));
+        let mut scripts = load_script_entries(&script_dirs);
+        scripts.extend(load_extension_script_entries(&extensions));
+
         Self {
             apps: load_apps(&home),
             quicklinks: load_named_values(&config_dir.join("quicklinks.txt")),
             snippets: load_named_values(&config_dir.join("snippets.txt")),
-            commands: load_command_entries(&config_dir.join("commands")),
-            scripts: load_script_entries(&script_dirs),
+            commands,
+            scripts,
             clipboard_history,
             clipboard_timestamps,
             calc_history,
@@ -1048,9 +1055,11 @@ impl Zeshicast {
     }
 
     pub fn list_commands(&self) -> Vec<CommandSummary> {
-        self.commands
+        let mut summaries = self
+            .commands
             .iter()
             .map(|e| CommandSummary {
+                kind: "Command".to_string(),
                 name: e.name.clone(),
                 category: e.category.clone(),
                 description: e.description.clone(),
@@ -1063,9 +1072,42 @@ impl Zeshicast {
                     .iter()
                     .map(|capability| capability.label().to_string())
                     .collect(),
+                extension: e.origin.as_ref().map(ExtensionSummary::from_origin),
                 enabled: true,
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        summaries.extend(self.scripts.iter().map(|script| {
+            CommandSummary {
+                kind: "Script".to_string(),
+                name: script.title.clone(),
+                category: "Script".to_string(),
+                description: script.description.clone(),
+                keyword: None,
+                icon_name: script.icon.clone(),
+                tags: Vec::new(),
+                permissions: script
+                    .origin
+                    .as_ref()
+                    .map(|origin| origin.capabilities.clone())
+                    .unwrap_or_default(),
+                capabilities: script
+                    .origin
+                    .as_ref()
+                    .map(|origin| origin.capabilities.clone())
+                    .unwrap_or_default(),
+                extension: script.origin.as_ref().map(ExtensionSummary::from_origin),
+                enabled: true,
+            }
+        }));
+
+        summaries.sort_by(|a, b| {
+            a.extension_group()
+                .cmp(&b.extension_group())
+                .then(a.kind.cmp(&b.kind))
+                .then(a.name.cmp(&b.name))
+        });
+        summaries
     }
 
     fn record_recent(&mut self, action: &Action) -> io::Result<()> {
@@ -1203,6 +1245,7 @@ fn preference_script_dirs(
 
 #[derive(Debug, Clone)]
 pub struct CommandSummary {
+    pub kind: String,
     pub name: String,
     pub category: String,
     pub description: String,
@@ -1211,7 +1254,43 @@ pub struct CommandSummary {
     pub tags: Vec<String>,
     pub permissions: Vec<String>,
     pub capabilities: Vec<String>,
+    pub extension: Option<ExtensionSummary>,
     pub enabled: bool,
+}
+
+impl CommandSummary {
+    pub fn extension_group(&self) -> String {
+        self.extension
+            .as_ref()
+            .map(|extension| extension.name.clone())
+            .unwrap_or_else(|| "Built-in".to_string())
+    }
+
+    pub fn extension_detail(&self) -> String {
+        self.extension
+            .as_ref()
+            .map(|extension| format!("{}@{}", extension.id, extension.version))
+            .unwrap_or_else(|| "legacy command directories".to_string())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtensionSummary {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub capabilities: Vec<String>,
+}
+
+impl ExtensionSummary {
+    pub(crate) fn from_origin(origin: &crate::ExtensionOrigin) -> Self {
+        Self {
+            id: origin.id.clone(),
+            name: origin.name.clone(),
+            version: origin.version.clone(),
+            capabilities: origin.capabilities.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

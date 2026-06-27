@@ -17,7 +17,8 @@ Zeshicast handles local user data:
 ## Trust Boundaries
 
 Zeshicast is a local-first app. It does not sandbox custom commands. Anything in
-`~/.config/zeshicast/commands/*.toml` is user-trusted extension code.
+`~/.config/zeshicast/commands/*.toml` or
+`~/.config/zeshicast/extensions/*/` is user-trusted extension code.
 
 Important boundaries:
 

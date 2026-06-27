@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{Action, ActionKind, ShellCommand, fuzzy_score};
+use crate::{Action, ActionKind, ExtensionManifest, ExtensionOrigin, ShellCommand, fuzzy_score};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ScriptEntry {
@@ -10,6 +10,7 @@ pub(crate) struct ScriptEntry {
     pub(crate) package: String,
     pub(crate) icon: String,
     pub(crate) path: PathBuf,
+    pub(crate) origin: Option<ExtensionOrigin>,
 }
 
 #[allow(dead_code)]
@@ -38,6 +39,23 @@ pub(crate) fn load_script_entries(script_dirs: &[PathBuf]) -> Vec<ScriptEntry> {
                 continue;
             }
             if let Some(script) = parse_script_entry(&path) {
+                entries.push(script);
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.title.cmp(&b.title));
+    entries
+}
+
+pub(crate) fn load_extension_script_entries(manifests: &[ExtensionManifest]) -> Vec<ScriptEntry> {
+    let mut entries = Vec::new();
+    for manifest in manifests {
+        for path in &manifest.scripts {
+            if !is_script_file(path) {
+                continue;
+            }
+            if let Some(mut script) = parse_script_entry(path) {
+                script.origin = Some(manifest.origin.clone());
                 entries.push(script);
             }
         }
@@ -111,6 +129,7 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
         package,
         icon,
         path: path.to_path_buf(),
+        origin: None,
     })
 }
 

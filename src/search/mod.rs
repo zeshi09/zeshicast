@@ -227,7 +227,7 @@ impl SearchProvider for ScriptsProvider<'_> {
     }
 }
 
-pub(crate) use scripts::{ScriptEntry, load_script_entries};
+pub(crate) use scripts::{ScriptEntry, load_extension_script_entries, load_script_entries};
 
 pub(crate) struct EmojiProvider;
 

@@ -332,6 +332,7 @@ settings.
 ~/.config/zeshicast/quicklinks.txt   lines: Name | tag1,tag2 = https://example.com?q={{query}}
 ~/.config/zeshicast/snippets.txt     lines: Name | tag1,tag2 = text to copy
 ~/.config/zeshicast/commands/*.toml  custom shell commands
+~/.config/zeshicast/extensions/*/extension.toml  local extension manifests
 ~/.config/zeshicast/preferences.toml global extension preferences
 ~/.config/zeshicast/zeshicast.db     SQLite clipboard and usage history
 ~/.cache/zeshicast/clipboard/        cached clipboard image PNGs
@@ -495,6 +496,34 @@ git-log.toml    git-log <path>   — show recent commits in pref:workspace
 ```
 
 Copy any file to `~/.config/zeshicast/commands/` to enable it.
+
+### Local extension manifests
+
+For multi-command local extensions, create a directory under
+`~/.config/zeshicast/extensions/` with an `extension.toml` manifest:
+
+```text
+~/.config/zeshicast/extensions/git-tools/
+  extension.toml
+  git-log.toml
+  scripts/status.sh
+```
+
+```toml
+# ~/.config/zeshicast/extensions/git-tools/extension.toml
+id = "example.git-tools"
+name = "Git Tools"
+version = "0.1.0"
+capabilities = ["shell", "filesystem"]
+commands = ["git-log.toml"]
+scripts = ["scripts/status.sh"]
+```
+
+`commands` points to normal command TOML files. `scripts` points to
+Raycast/Vicinae-style script commands with metadata comments. Paths are relative
+to the extension directory; absolute paths and `..` entries are ignored.
+Manifest capabilities are inherited by every command/script in that extension,
+and the extension browser groups entries by extension id/name/version.
 
 ### Global preferences
 

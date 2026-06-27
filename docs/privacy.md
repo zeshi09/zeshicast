@@ -12,6 +12,8 @@ Zeshicast stores data under the current user's home directory.
 | `~/.config/zeshicast/zeshicast.db` | SQLite database for clipboard history and action usage history. Uses schema migrations via `PRAGMA user_version`. |
 | `~/.cache/zeshicast/clipboard/` | Cached PNG files for image clipboard entries. |
 | `~/.config/zeshicast/commands/*.toml` | Custom command definitions and per-command defaults. |
+| `~/.config/zeshicast/extensions/*/extension.toml` | Local extension metadata, version, capabilities, and command/script file lists. |
+| `~/.config/zeshicast/extensions/*/` | Local extension command TOMLs and scripts referenced by extension manifests. |
 | `~/.config/zeshicast/quicklinks.txt` | User quicklinks. |
 | `~/.config/zeshicast/snippets.txt` | User snippets. |
 | `~/.config/zeshicast/aliases.txt` | User aliases. |

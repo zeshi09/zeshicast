@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 mod action;
 mod app;
 mod config;
+mod extensions;
 mod placeholders;
 mod search;
 mod services;
@@ -28,6 +29,7 @@ pub(crate) use config::{
     write_preferences,
 };
 pub use config::{export_config, export_config_with_options, import_config};
+pub(crate) use extensions::{ExtensionManifest, ExtensionOrigin, load_extension_manifests};
 #[cfg(test)]
 pub(crate) use placeholders::format_local_time;
 pub(crate) use placeholders::{PlaceholderContext, expand_placeholders, expand_placeholders_shell};
@@ -43,7 +45,9 @@ pub(crate) use search::clipboard::{
 pub(crate) use search::clipboard::{decode_clipboard_line, encode_clipboard_line};
 #[cfg(feature = "gui")]
 pub(crate) use search::commands::run_json_command_actions;
-pub(crate) use search::commands::{CommandEntry, load_command_entries, search_commands};
+pub(crate) use search::commands::{
+    CommandEntry, load_command_entries, load_extension_command_entries, search_commands,
+};
 #[cfg(test)]
 pub(crate) use search::commands::{
     CommandMode, command_env, command_preferences, match_command_entry, parse_command_entry,
@@ -72,7 +76,7 @@ pub(crate) use search::{
     HyprlandProvider, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
     NotificationsProvider, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
     SearchProvider, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
-    load_script_entries,
+    load_extension_script_entries, load_script_entries,
 };
 pub use services::audio::{
     AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
@@ -507,6 +511,31 @@ NOTES_ROOT = "{{pref:notes_root}}"
                 Capability::ClipboardWrite
             ]
         );
+    }
+
+    #[test]
+    fn extension_origin_adds_manifest_capabilities_to_command() {
+        let origin = ExtensionOrigin {
+            id: "example.git-tools".to_string(),
+            name: "Git Tools".to_string(),
+            version: "0.1.0".to_string(),
+            capabilities: vec!["shell".to_string(), "filesystem".to_string()],
+        };
+        let command = parse_command_entry(
+            r#"
+name = "Git Log"
+command = "git log --oneline"
+"#,
+        )
+        .unwrap()
+        .with_extension_origin(origin.clone());
+
+        assert_eq!(command.origin.as_ref(), Some(&origin));
+        assert_eq!(
+            command.capabilities,
+            vec![Capability::Shell, Capability::Filesystem]
+        );
+        assert_eq!(command.permissions, vec!["shell", "filesystem"]);
     }
 
     #[test]

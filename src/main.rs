@@ -210,6 +210,7 @@ Config:
   ~/.config/zeshicast/quicklinks.txt   lines: Name | tag1,tag2 = https://example.com?q={{{{query}}}}
   ~/.config/zeshicast/snippets.txt     lines: Name | tag1,tag2 = text to copy
   ~/.config/zeshicast/commands/*.toml  custom shell commands
+  ~/.config/zeshicast/extensions/*/extension.toml  local extension manifests
   ~/.config/zeshicast/preferences.toml global extension preferences
   ~/.config/zeshicast/zeshicast.db     SQLite clipboard and usage history
   ~/.cache/zeshicast/clipboard/        cached clipboard image PNGs

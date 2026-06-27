@@ -2,16 +2,15 @@ use std::collections::HashMap;
 use std::fs;
 #[cfg(feature = "gui")]
 use std::io;
-use std::path::Path;
-#[cfg(any(feature = "gui", test))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "gui")]
 use std::process::Command;
 
 use crate::{
     Action, ActionForm, ActionFormField, ActionKind, ActionRisk, Capability, CommandArgumentKind,
-    JsonCommandAction, PlaceholderContext, ShellCommand, expand_placeholders,
-    expand_placeholders_shell, fuzzy_score, normalize_alias, tagged_subtitle, toml_value_string,
+    ExtensionManifest, ExtensionOrigin, JsonCommandAction, PlaceholderContext, ShellCommand,
+    expand_placeholders, expand_placeholders_shell, fuzzy_score, normalize_alias, tagged_subtitle,
+    toml_value_string,
 };
 
 #[derive(Debug, Clone)]
@@ -30,6 +29,7 @@ pub(crate) struct CommandEntry {
     pub(crate) description: String,
     pub(crate) permissions: Vec<String>,
     pub(crate) capabilities: Vec<Capability>,
+    pub(crate) origin: Option<ExtensionOrigin>,
 }
 
 impl CommandEntry {
@@ -42,6 +42,13 @@ impl CommandEntry {
             self.tags.join(" "),
             self.keyword.as_deref().unwrap_or_default()
         )
+    }
+
+    pub(crate) fn with_extension_origin(mut self, origin: ExtensionOrigin) -> Self {
+        merge_permissions(&mut self.permissions, &origin.capabilities);
+        self.capabilities = parse_capabilities(&self.permissions);
+        self.origin = Some(origin);
+        self
     }
 }
 
@@ -76,24 +83,49 @@ struct ArgumentBinding {
 }
 
 pub(crate) fn load_command_entries(dir: &Path) -> Vec<CommandEntry> {
+    load_command_entries_from_paths(command_paths_in_dir(dir), None)
+}
+
+pub(crate) fn load_extension_command_entries(manifests: &[ExtensionManifest]) -> Vec<CommandEntry> {
+    manifests
+        .iter()
+        .flat_map(|manifest| {
+            load_command_entries_from_paths(
+                manifest.commands.clone(),
+                Some(manifest.origin.clone()),
+            )
+        })
+        .collect()
+}
+
+fn command_paths_in_dir(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
 
-    let mut commands = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
-            continue;
-        }
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("toml"))
+        .collect()
+}
 
-        let Some(command) = fs::read_to_string(&path)
+fn load_command_entries_from_paths(
+    paths: Vec<PathBuf>,
+    origin: Option<ExtensionOrigin>,
+) -> Vec<CommandEntry> {
+    let mut commands = Vec::new();
+    for path in paths {
+        let Some(mut command) = fs::read_to_string(&path)
             .ok()
             .and_then(|content| parse_command_entry(&content))
         else {
             eprintln!("failed to parse command: {}", path.display());
             continue;
         };
+        if let Some(origin) = &origin {
+            command = command.with_extension_origin(origin.clone());
+        }
         commands.push(command);
     }
 
@@ -141,10 +173,11 @@ pub(crate) fn parse_command_entry(input: &str) -> Option<CommandEntry> {
         description,
         permissions,
         capabilities,
+        origin: None,
     })
 }
 
-fn parse_capabilities(permissions: &[String]) -> Vec<Capability> {
+pub(crate) fn parse_capabilities(permissions: &[String]) -> Vec<Capability> {
     let mut capabilities = Vec::new();
     for permission in permissions {
         let Some(capability) = parse_capability(permission) else {
@@ -155,6 +188,18 @@ fn parse_capabilities(permissions: &[String]) -> Vec<Capability> {
         }
     }
     capabilities
+}
+
+fn merge_permissions(permissions: &mut Vec<String>, inherited: &[String]) {
+    for permission in inherited {
+        if permissions
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(permission))
+        {
+            continue;
+        }
+        permissions.push(permission.clone());
+    }
 }
 
 fn parse_capability(permission: &str) -> Option<Capability> {
