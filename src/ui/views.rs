@@ -916,11 +916,11 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         suspend,
     };
     set_dashboard_snapshot(&view, snapshot);
-    set_dashboard_network_snapshot(&view, &crate::network_snapshot());
+    set_dashboard_network_snapshot(&view, &NetworkSnapshot::default());
     set_dashboard_battery_snapshot(&view, &crate::battery_snapshot());
-    set_dashboard_audio_snapshot(&view, &crate::audio_snapshot());
-    set_dashboard_media_snapshot(&view, &crate::media_snapshot());
-    set_dashboard_notification_snapshot(&view, &crate::notification_snapshot());
+    set_dashboard_audio_snapshot(&view, &AudioSnapshot::default());
+    set_dashboard_media_snapshot(&view, &MediaSnapshot::default());
+    set_dashboard_notification_snapshot(&view, &NotificationSnapshot::default());
     view
 }
 
@@ -1115,16 +1115,8 @@ pub fn system_monitor_view(
     let processes_label = Label::new(None);
     processes_label.set_visible(false);
 
-    // Detect primary non-loopback interface for speed display
-    let net_iface = {
-        let snap = crate::network_snapshot();
-        snap.interfaces
-            .iter()
-            .find(|i| i.name != "lo" && i.state == "up")
-            .or_else(|| snap.interfaces.iter().find(|i| i.name != "lo"))
-            .map(|i| i.name.clone())
-            .unwrap_or_else(|| "eth0".to_string())
-    };
+    // Resolved lazily by refreshes; keep startup free of network subprocesses.
+    let net_iface = "eth0".to_string();
 
     // ── Process table ────────────────────────────────────────────────────────
     // Table header: filter + sort buttons

@@ -5,7 +5,8 @@
 //! ~7 `fork`+`exec`s per second on the UI thread, which blocks rendering and
 //! input (visible micro-stutters) and drains the battery. This worker computes
 //! them on a dedicated thread and publishes the latest result to a cache the
-//! main thread reads cheaply (a mutex clone, no subprocesses).
+//! main thread reads cheaply (a mutex clone, no subprocesses). The cache starts
+//! empty so launcher construction never waits for these tools.
 
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -52,15 +53,7 @@ pub fn start() {
 
 fn cache() -> Arc<Mutex<Cache>> {
     CACHE
-        .get_or_init(|| {
-            // Seed synchronously once so the first frame isn't blank. The
-            // recurring per-second cost is what we move off the main loop.
-            Arc::new(Mutex::new(Cache {
-                network: network_snapshot(),
-                audio: audio_snapshot(),
-                keyboard_layout: keyboard_layout(),
-            }))
-        })
+        .get_or_init(|| Arc::new(Mutex::new(Cache::default())))
         .clone()
 }
 

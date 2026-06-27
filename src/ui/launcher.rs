@@ -182,15 +182,13 @@ fn build_ui(
     let extension_view = crate::ui::extension_browser_view(&launcher.borrow().list_commands());
     let action_panel_view = crate::ui::action_panel_view();
     let ai_chat_view = crate::ui::ai_chat_view();
-    let audio_view = crate::ui::audio_view(&crate::audio_snapshot());
-    let dashboard_view = crate::ui::dashboard_view(&crate::system_snapshot());
-    let system_monitor_view = crate::ui::system_monitor_view(
-        &crate::system_snapshot(),
-        &crate::top_processes_by_memory(8),
-    );
-    let media_view = crate::ui::media_view(&crate::media_snapshot());
-    let network_view = crate::ui::network_view(&crate::network_snapshot());
-    let notifications_view = crate::ui::notifications_view(&crate::notification_snapshot());
+    let audio_view = crate::ui::audio_view(&crate::AudioSnapshot::default());
+    let dashboard_view = crate::ui::dashboard_view(&crate::SystemSnapshot::default());
+    let system_monitor_view =
+        crate::ui::system_monitor_view(&crate::SystemSnapshot::default(), &[]);
+    let media_view = crate::ui::media_view(&crate::MediaSnapshot::default());
+    let network_view = crate::ui::network_view(&crate::NetworkSnapshot::default());
+    let notifications_view = crate::ui::notifications_view(&crate::NotificationSnapshot::default());
     let current_clipboard = launcher.borrow().list_clipboard_history();
     *clipboard_items.borrow_mut() = current_clipboard.clone();
     let clipboard_view = crate::ui::clipboard_history_view(&current_clipboard);
@@ -254,10 +252,10 @@ fn build_ui(
 
     let status_strip = crate::ui::StatusStrip::new();
     apply_status_strip_preferences(&status_strip, &launcher);
-    status_strip.set_network_snapshot(&crate::network_snapshot());
+    status_strip.set_network_snapshot(&crate::NetworkSnapshot::default());
     status_strip.set_battery_snapshot(&crate::battery_snapshot());
-    status_strip.set_audio_snapshot(&crate::audio_snapshot());
-    status_strip.set_media_snapshot(&crate::media_snapshot());
+    status_strip.set_audio_snapshot(&crate::AudioSnapshot::default());
+    status_strip.set_media_snapshot(&crate::MediaSnapshot::default());
 
     let search_shell = GtkBox::new(Orientation::Horizontal, 8);
     search_shell.add_css_class("search-bar");
