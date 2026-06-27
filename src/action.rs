@@ -26,11 +26,28 @@ pub struct ActionFormField {
 pub struct ActionForm {
     pub name: String,
     pub fields: Vec<ActionFormField>,
-    pub(crate) command: String,
+    pub(crate) command: ActionFormCommand,
     pub(crate) env: HashMap<String, String>,
     pub(crate) preferences: HashMap<String, String>,
     pub(crate) current_args: HashMap<String, String>,
     pub(crate) partial_query: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ActionFormCommand {
+    Shell(String),
+    Argv { program: String, args: Vec<String> },
+}
+
+impl ActionFormCommand {
+    pub(crate) fn display(&self) -> String {
+        match self {
+            Self::Shell(command) => command.clone(),
+            Self::Argv { program, args } => {
+                ProcessCommand::new(program.clone(), args.clone()).display()
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -66,7 +83,7 @@ pub enum HttpRequest {
 #[derive(Debug, Clone)]
 pub(crate) enum ExecutionRequest {
     Shell { command: ShellCommand },
-    Command { program: String, args: Vec<String> },
+    Command(ProcessCommand),
     OpenPath(PathBuf),
     OpenUrl(String),
     Copy(String),
@@ -295,6 +312,7 @@ impl Action {
             ActionKind::Shell(command) => Some(ExecutionRequest::Shell {
                 command: command.clone(),
             }),
+            ActionKind::Command(command) => Some(ExecutionRequest::Command(command.clone())),
             ActionKind::HttpCopy(req) => Some(ExecutionRequest::Http(req.clone())),
             ActionKind::Media(control) => Some(ExecutionRequest::Media(*control)),
             ActionKind::Notification(action) => Some(ExecutionRequest::Notification(*action)),
@@ -345,6 +363,7 @@ impl Action {
         match &self.kind {
             ActionKind::Launch(command) | ActionKind::OpenUrl(command) => command.clone(),
             ActionKind::Shell(command) => command.command.clone(),
+            ActionKind::Command(command) => command.display(),
             ActionKind::OpenPath(path) => path.display().to_string(),
             ActionKind::Copy(text) => text.clone(),
             ActionKind::HttpCopy(req) => match req {
@@ -353,7 +372,7 @@ impl Action {
                 HttpRequest::AiChat { query, .. } => query.clone(),
             },
             ActionKind::Launcher(_) => self.title.clone(),
-            ActionKind::Form(form) => form.command.clone(),
+            ActionKind::Form(form) => form.command.display(),
             ActionKind::JsonCommand(command) => command.command.command.clone(),
             ActionKind::Media(_) => self.title.clone(),
             ActionKind::Notification(_) => self.title.clone(),
@@ -370,10 +389,10 @@ impl Action {
 
     pub fn open_parent_dir(&self) {
         if let Some(parent) = self.parent_dir() {
-            run_execution_request(ExecutionRequest::Command {
-                program: "xdg-open".to_string(),
-                args: vec![parent.display().to_string()],
-            });
+            run_execution_request(ExecutionRequest::Command(ProcessCommand::new(
+                "xdg-open",
+                vec![parent.display().to_string()],
+            )));
         }
     }
 
@@ -385,14 +404,16 @@ impl Action {
 pub(crate) fn run_execution_request(request: ExecutionRequest) {
     match request {
         ExecutionRequest::Shell { command } => spawn_shell(&command),
-        ExecutionRequest::Command { program, args } => {
-            let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-            spawn_command(&program, &refs);
-        }
+        ExecutionRequest::Command(command) => spawn_command(&command),
         ExecutionRequest::OpenPath(path) => {
-            spawn_command("xdg-open", &[path.to_string_lossy().as_ref()]);
+            spawn_command(&ProcessCommand::new(
+                "xdg-open",
+                vec![path.to_string_lossy().to_string()],
+            ));
         }
-        ExecutionRequest::OpenUrl(url) => spawn_command("xdg-open", &[&url]),
+        ExecutionRequest::OpenUrl(url) => {
+            spawn_command(&ProcessCommand::new("xdg-open", vec![url]))
+        }
         ExecutionRequest::Copy(text) => copy_to_clipboard(&text),
         ExecutionRequest::Http(req) => {
             // Network round-trips (translate / OpenAI / Ollama) can take
@@ -424,6 +445,7 @@ pub(crate) enum ActionKind {
     OpenUrl(String),
     Copy(String),
     Shell(ShellCommand),
+    Command(ProcessCommand),
     HttpCopy(HttpRequest),
     Launcher(LauncherCommand),
     Form(ActionForm),
@@ -439,6 +461,42 @@ pub(crate) enum ActionKind {
 pub(crate) struct ShellCommand {
     pub(crate) command: String,
     pub(crate) env: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ProcessCommand {
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) env: HashMap<String, String>,
+}
+
+impl ProcessCommand {
+    pub(crate) fn new(program: impl Into<String>, args: Vec<String>) -> Self {
+        Self {
+            program: program.into(),
+            args,
+            env: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn with_env(
+        program: impl Into<String>,
+        args: Vec<String>,
+        env: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            program: program.into(),
+            args,
+            env,
+        }
+    }
+
+    pub(crate) fn display(&self) -> String {
+        std::iter::once(self.program.as_str())
+            .chain(self.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 impl ShellCommand {

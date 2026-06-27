@@ -2859,13 +2859,14 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    crate::run_execution_request(crate::ExecutionRequest::Command {
-        program: program.to_string(),
-        args: args
-            .into_iter()
-            .map(|arg| arg.as_ref().to_string())
-            .collect(),
-    });
+    crate::run_execution_request(crate::ExecutionRequest::Command(
+        crate::ProcessCommand::new(
+            program,
+            args.into_iter()
+                .map(|arg| arg.as_ref().to_string())
+                .collect(),
+        ),
+    ));
 }
 
 fn run_shell_request(command: &str) {

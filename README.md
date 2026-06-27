@@ -331,7 +331,7 @@ settings.
 ```text
 ~/.config/zeshicast/quicklinks.txt   lines: Name | tag1,tag2 = https://example.com?q={{query}}
 ~/.config/zeshicast/snippets.txt     lines: Name | tag1,tag2 = text to copy
-~/.config/zeshicast/commands/*.toml  custom shell commands
+~/.config/zeshicast/commands/*.toml  custom command TOMLs
 ~/.config/zeshicast/extensions/*/extension.toml  local extension manifests
 ~/.config/zeshicast/preferences.toml global extension preferences
 ~/.config/zeshicast/zeshicast.db     SQLite clipboard and usage history
@@ -395,6 +395,30 @@ default; pass `--include-secrets` only for trusted backups.
 See [docs/security.md](docs/security.md) and [docs/privacy.md](docs/privacy.md)
 for the full threat model and storage policy.
 
+### Custom commands (argv mode)
+
+Prefer `argv` mode for commands that do not need shell syntax. Placeholders are
+expanded into individual process arguments, so they do not need shell quoting
+and cannot inject extra shell syntax:
+
+```toml
+# ~/.config/zeshicast/commands/git-log.toml
+name = "Git Log"
+mode = "argv"
+keyword = "git-log"
+argument_hint = "<path>"
+program = "git"
+args = ["log", "--oneline", "-20", "--", "{{arg:path}}"]
+description = "Show recent commits"
+tags = ["git", "repo"]
+arguments = [
+  { name = "path", type = "path", required = true }
+]
+```
+
+Use `shell` mode only when you need pipelines, redirects, command chaining, or
+other shell features.
+
 ### Custom commands (shell mode)
 
 ```toml
@@ -422,15 +446,17 @@ DEPLOY_ENV   = "{{arg:env}}"
 DEPLOY_TOKEN = "{{pref:deploy_token}}"
 ```
 
-Only `name` and `command` are required. Optional fields: `category`, `keyword`,
-`argument_hint`, `arguments`, `preferences`, `env`, `description`, `tags`,
-`icon`, `permissions`.
+For `shell`/`json` modes, `name` and `command` are required. For `argv` mode,
+`name` and `program` are required and `args` is optional. Optional fields:
+`category`, `keyword`, `argument_hint`, `arguments`, `preferences`, `env`,
+`description`, `tags`, `icon`, `permissions`.
 
 A keyword enables direct command mode: `deploy prod api worker` sets `{{query}}`
 to `prod api worker`, `{{arg:env}}` to `prod`, and `{{arg:service}}` to
 `api worker`. Supported argument types: `text`, `number`, `path`, `bool`, `enum`.
 Commands with missing required arguments are shown as disabled warning actions
-until the input is complete. Commands run through `sh -c`.
+until the input is complete. Shell and JSON producer commands run through
+`sh -c`; argv commands run as `program` plus `args` directly.
 
 > **Do not wrap placeholders in your own quotes.** Substituted values
 > (`{{query}}`, `{{clipboard}}`, `{{arg:*}}`, `{{pref:*}}`, …) are automatically
@@ -440,11 +466,13 @@ until the input is complete. Commands run through `sh -c`.
 `[env]` values are expanded with the same placeholders as `command` and injected
 only into that command process.
 
-`permissions` is enforced. Shell-mode commands require `"shell"` or they are
-shown as blocked actions. JSON-mode commands also require `"shell"` to execute
-their producer command, and returned actions require matching capabilities:
-`"shell"`, `"network"`/`"open_url"`, `"filesystem"`/`"open_path"`, and
-`"clipboard_write"`.
+`permissions` is enforced for high-risk actions. Shell-mode commands require
+`"shell"` or they are shown as blocked actions. JSON-mode commands also require
+`"shell"` to execute their producer command, and returned actions require
+matching capabilities: `"shell"`, `"network"`/`"open_url"`,
+`"filesystem"`/`"open_path"`, and `"clipboard_write"`. Argv-mode commands do
+not require `"shell"` because they do not invoke `sh -c`, but they are still
+local executable extension code and should only come from trusted files.
 
 ### Custom commands (JSON mode)
 

@@ -16,8 +16,9 @@ pub use action::{
     CommandArgumentKind, ExecutionDecision, ExecutionPolicy, LauncherCommand, SecondaryAction,
     SecondaryActionKind,
 };
-pub(crate) use action::{ActionKind, HttpRequest, JsonCommandAction, ShellCommand};
-#[cfg(feature = "gui")]
+pub(crate) use action::{
+    ActionFormCommand, ActionKind, HttpRequest, JsonCommandAction, ProcessCommand, ShellCommand,
+};
 pub(crate) use action::{ExecutionRequest, run_execution_request};
 pub use app::{
     CLIPBOARD_IMAGE_PREFIX, CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary,
@@ -163,10 +164,14 @@ fn spawn_shell(command: &ShellCommand) {
     }
 }
 
-fn spawn_command(program: &str, args: &[&str]) {
-    match Command::new(program).args(args).spawn() {
-        Ok(_) => println!("started: {program} {}", args.join(" ")),
-        Err(error) => eprintln!("failed to start {program}: {error}"),
+fn spawn_command(command: &ProcessCommand) {
+    match Command::new(&command.program)
+        .args(&command.args)
+        .envs(&command.env)
+        .spawn()
+    {
+        Ok(_) => println!("started: {}", command.display()),
+        Err(error) => eprintln!("failed to start {}: {error}", command.program),
     }
 }
 
@@ -536,6 +541,79 @@ command = "git log --oneline"
             vec![Capability::Shell, Capability::Filesystem]
         );
         assert_eq!(command.permissions, vec!["shell", "filesystem"]);
+    }
+
+    #[test]
+    fn argv_command_entries_parse_without_shell_command() {
+        let command = parse_command_entry(
+            r#"
+name = "Git Log"
+mode = "argv"
+program = "git"
+args = ["log", "--oneline", "-20", "{{arg:path}}"]
+keyword = "git-log"
+arguments = [
+  { name = "path", type = "path", required = true }
+]
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(command.mode, CommandMode::Argv);
+        assert_eq!(command.command, "");
+        assert_eq!(command.program.as_deref(), Some("git"));
+        assert_eq!(
+            command.args,
+            vec!["log", "--oneline", "-20", "{{arg:path}}"]
+        );
+    }
+
+    #[test]
+    fn argv_placeholders_expand_without_shell_quoting() {
+        let entries = vec![
+            parse_command_entry(
+                r#"
+name = "Safe Echo"
+mode = "argv"
+program = "printf"
+args = ["--query", "{{query}}", "--clip", "{{clipboard}}", "--path", "{{arg:path}}", "--workspace", "{{pref:workspace}}"]
+keyword = "safe"
+arguments = [
+  { name = "path", type = "text", required = true }
+]
+"#,
+            )
+            .unwrap(),
+        ];
+        let context = PlaceholderContext {
+            query: String::new(),
+            clipboard: "$(wl-paste); reboot".to_string(),
+            args: HashMap::new(),
+            preferences: HashMap::from([("workspace".to_string(), "$(echo owned)".to_string())]),
+            now: UNIX_EPOCH,
+        };
+
+        let payload = "$(rm -rf ~); reboot";
+        let results = search_commands(&entries, &format!("safe {payload}"), &context);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].risk, ActionRisk::Normal);
+        let ActionKind::Command(command) = &results[0].kind else {
+            panic!("expected argv command");
+        };
+        assert_eq!(command.program, "printf");
+        assert_eq!(
+            command.args,
+            vec![
+                "--query",
+                payload,
+                "--clip",
+                "$(wl-paste); reboot",
+                "--path",
+                payload,
+                "--workspace",
+                "$(echo owned)"
+            ]
+        );
     }
 
     #[test]

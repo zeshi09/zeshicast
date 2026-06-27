@@ -7,16 +7,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{
-    Action, ActionForm, ActionFormField, ActionKind, ActionRisk, Capability, CommandArgumentKind,
-    ExtensionManifest, ExtensionOrigin, JsonCommandAction, PlaceholderContext, ShellCommand,
-    expand_placeholders, expand_placeholders_shell, fuzzy_score, normalize_alias, tagged_subtitle,
-    toml_value_string,
+    Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
+    CommandArgumentKind, ExtensionManifest, ExtensionOrigin, JsonCommandAction, PlaceholderContext,
+    ProcessCommand, ShellCommand, expand_placeholders, expand_placeholders_shell, fuzzy_score,
+    normalize_alias, tagged_subtitle, toml_value_string,
 };
 
 #[derive(Debug, Clone)]
 pub(crate) struct CommandEntry {
     pub(crate) name: String,
     pub(crate) command: String,
+    pub(crate) program: Option<String>,
+    pub(crate) args: Vec<String>,
     pub(crate) env: HashMap<String, String>,
     pub(crate) mode: CommandMode,
     pub(crate) category: String,
@@ -55,6 +57,7 @@ impl CommandEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommandMode {
     Shell,
+    Argv,
     Json,
 }
 
@@ -135,12 +138,19 @@ fn load_command_entries_from_paths(
 pub(crate) fn parse_command_entry(input: &str) -> Option<CommandEntry> {
     let table = input.parse::<toml::Table>().ok()?;
     let name = toml_required_string(&table, "name")?;
-    let command = toml_required_string(&table, "command")?;
     let env = parse_env_table(table.get("env"));
     let mode = toml_optional_string(&table, "mode")
         .as_deref()
         .and_then(parse_command_mode)
         .unwrap_or(CommandMode::Shell);
+    let command = toml_optional_string(&table, "command").unwrap_or_default();
+    let program = toml_optional_string(&table, "program");
+    let args = toml_string_array(&table, "args");
+    match mode {
+        CommandMode::Shell | CommandMode::Json if command.is_empty() => return None,
+        CommandMode::Argv if program.as_deref().unwrap_or_default().is_empty() => return None,
+        _ => {}
+    }
     let category = toml_optional_string(&table, "category")
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "Command".to_string());
@@ -161,6 +171,8 @@ pub(crate) fn parse_command_entry(input: &str) -> Option<CommandEntry> {
     Some(CommandEntry {
         name,
         command,
+        program,
+        args,
         env,
         mode,
         category,
@@ -229,6 +241,7 @@ fn has_capability(capabilities: &[Capability], required: Capability) -> bool {
 fn parse_command_mode(mode: &str) -> Option<CommandMode> {
     match mode.trim().to_lowercase().as_str() {
         "shell" | "run" => Some(CommandMode::Shell),
+        "argv" | "exec" | "process" => Some(CommandMode::Argv),
         "json" | "list" => Some(CommandMode::Json),
         _ => None,
     }
@@ -342,14 +355,14 @@ pub(crate) fn search_commands(
                 preferences: command_preferences(entry, &context.preferences),
                 now: context.now,
             };
-            let command = expand_placeholders_shell(&entry.command, &command_context);
             let env = command_env(entry, &command_context);
-            let shell_command = ShellCommand::with_env(command, env);
 
             if entry.mode == CommandMode::Json
                 && command_match.direct
                 && command_match.missing.is_empty()
             {
+                let command = expand_placeholders_shell(&entry.command, &command_context);
+                let shell_command = ShellCommand::with_env(command, env);
                 return Some(vec![json_command_action(
                     entry,
                     shell_command,
@@ -357,15 +370,25 @@ pub(crate) fn search_commands(
                 )]);
             }
 
-            let command = shell_command.command.clone();
-            let mut subtitle = command_subtitle(entry, &command, &command_match.missing);
+            let command_display = command_display(entry, &command_context);
+            let mut subtitle = command_subtitle(entry, &command_display, &command_match.missing);
             let (kind, icon_name) = if command_match.missing.is_empty() {
-                if has_capability(&entry.capabilities, Capability::Shell) {
-                    (ActionKind::Shell(shell_command), entry.icon_name.as_str())
-                } else {
-                    subtitle =
-                        "Blocked: command manifest lacks permissions = [\"shell\"]".to_string();
-                    (ActionKind::None, "dialog-warning-symbolic")
+                match entry.mode {
+                    CommandMode::Argv => (
+                        ActionKind::Command(argv_process_command(entry, &command_context, env)),
+                        entry.icon_name.as_str(),
+                    ),
+                    CommandMode::Shell | CommandMode::Json => {
+                        let command = expand_placeholders_shell(&entry.command, &command_context);
+                        let shell_command = ShellCommand::with_env(command, env);
+                        if has_capability(&entry.capabilities, Capability::Shell) {
+                            (ActionKind::Shell(shell_command), entry.icon_name.as_str())
+                        } else {
+                            subtitle = "Blocked: command manifest lacks permissions = [\"shell\"]"
+                                .to_string();
+                            (ActionKind::None, "dialog-warning-symbolic")
+                        }
+                    }
                 }
             } else {
                 let fields = entry
@@ -388,7 +411,7 @@ pub(crate) fn search_commands(
                 let form = ActionForm {
                     name: entry.name.clone(),
                     fields,
-                    command: entry.command.clone(),
+                    command: form_command(entry),
                     env: entry.env.clone(),
                     preferences: command_preferences(entry, &context.preferences),
                     current_args: command_match.args.clone(),
@@ -402,6 +425,7 @@ pub(crate) fn search_commands(
                     .with_subtitle(subtitle)
                     .with_icon(icon_name);
             if command_match.missing.is_empty()
+                && entry.mode != CommandMode::Argv
                 && has_capability(&entry.capabilities, Capability::Shell)
             {
                 action = action.with_risk(ActionRisk::Shell);
@@ -411,6 +435,43 @@ pub(crate) fn search_commands(
         })
         .flatten()
         .collect()
+}
+
+fn command_display(entry: &CommandEntry, context: &PlaceholderContext) -> String {
+    match entry.mode {
+        CommandMode::Argv => argv_process_command(entry, context, HashMap::new()).display(),
+        CommandMode::Shell | CommandMode::Json => {
+            expand_placeholders_shell(&entry.command, context)
+        }
+    }
+}
+
+fn argv_process_command(
+    entry: &CommandEntry,
+    context: &PlaceholderContext,
+    env: HashMap<String, String>,
+) -> ProcessCommand {
+    let program = entry
+        .program
+        .as_deref()
+        .map(|program| expand_placeholders(program, context))
+        .unwrap_or_default();
+    let args = entry
+        .args
+        .iter()
+        .map(|arg| expand_placeholders(arg, context))
+        .collect();
+    ProcessCommand::with_env(program, args, env)
+}
+
+fn form_command(entry: &CommandEntry) -> ActionFormCommand {
+    match entry.mode {
+        CommandMode::Argv => ActionFormCommand::Argv {
+            program: entry.program.clone().unwrap_or_default(),
+            args: entry.args.clone(),
+        },
+        CommandMode::Shell | CommandMode::Json => ActionFormCommand::Shell(entry.command.clone()),
+    }
 }
 
 fn json_command_action(entry: &CommandEntry, command: ShellCommand, score: i32) -> Action {

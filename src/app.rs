@@ -6,20 +6,20 @@ use std::time::SystemTime;
 
 use crate::services::storage;
 use crate::{
-    Action, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider, ClipboardProvider,
-    CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision, ExecutionPolicy, FileEntry,
-    FilesProvider, HyprlandProvider, LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS,
-    MediaProvider, NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider,
-    NotificationsProvider, PlaceholderContext, ProcessesProvider, ScriptEntry, ScriptsProvider,
-    SearchContext, SearchProvider, SecondaryAction, SecondaryActionKind, ShellCommand,
-    SwayProvider, SystemProvider, WebProvider, WindowsProvider, app_action, append_alias,
-    expand_placeholders, expand_placeholders_shell, fuzzy_score, home_dir, load_aliases, load_apps,
-    load_clipboard_history, load_command_entries, load_extension_command_entries,
-    load_extension_manifests, load_extension_script_entries, load_file_index, load_frequencies,
-    load_lines, load_named_values, load_preferences, load_script_entries, normalize_alias,
-    search_audio_actions, search_media_actions, search_network_actions,
-    search_notification_actions, search_system_actions, spawn_shell, write_lines,
-    write_preferences,
+    Action, ActionFormCommand, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider,
+    ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
+    ExecutionPolicy, ExecutionRequest, FileEntry, FilesProvider, HyprlandProvider, LauncherCommand,
+    MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider, NamedValue, NamedValuesProvider,
+    NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext, ProcessCommand,
+    ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext, SearchProvider,
+    SecondaryAction, SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider,
+    WindowsProvider, app_action, append_alias, expand_placeholders, expand_placeholders_shell,
+    fuzzy_score, home_dir, load_aliases, load_apps, load_clipboard_history, load_command_entries,
+    load_extension_command_entries, load_extension_manifests, load_extension_script_entries,
+    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences,
+    load_script_entries, normalize_alias, run_execution_request, search_audio_actions,
+    search_media_actions, search_network_actions, search_notification_actions,
+    search_system_actions, write_lines, write_preferences,
 };
 
 #[derive(Debug, Clone)]
@@ -1024,13 +1024,29 @@ impl Zeshicast {
             preferences: form.preferences.clone(),
             now: SystemTime::now(),
         };
-        let command = expand_placeholders_shell(&form.command, &context);
         let env = form
             .env
             .iter()
             .map(|(k, v)| (k.clone(), expand_placeholders(v, &context)))
             .collect();
-        spawn_shell(&ShellCommand::with_env(command, env));
+        match &form.command {
+            ActionFormCommand::Shell(command) => {
+                let command = expand_placeholders_shell(command, &context);
+                run_execution_request(ExecutionRequest::Shell {
+                    command: ShellCommand::with_env(command, env),
+                });
+            }
+            ActionFormCommand::Argv { program, args } => {
+                let program = expand_placeholders(program, &context);
+                let args = args
+                    .iter()
+                    .map(|arg| expand_placeholders(arg, &context))
+                    .collect();
+                run_execution_request(ExecutionRequest::Command(ProcessCommand::with_env(
+                    program, args, env,
+                )));
+            }
+        }
         if let Err(e) = self.record_recent(action) {
             eprintln!("failed to record recent: {e}");
         }

@@ -23,6 +23,7 @@ Zeshicast is a local-first app. It does not sandbox custom commands. Anything in
 Important boundaries:
 
 - GUI and CLI code run as the current user.
+- Custom argv commands run as the current user via direct `program` + `args`.
 - Custom shell commands run as the current user through `sh -c`.
 - JSON command producers run as shell commands and can return actions.
 - External tools such as `niri`, `hyprctl`, `swaymsg`, `wpctl`, `nmcli`,
@@ -37,6 +38,7 @@ The `permissions` field is enforced for custom commands.
 
 - Shell-mode commands require `shell`.
 - JSON-mode producer commands require `shell`.
+- Argv-mode commands do not require `shell` because they do not invoke `sh -c`.
 - Returned JSON actions require matching capabilities:
   - `shell` for shell actions;
   - `network` or `open_url` for remote URL opening;
@@ -52,7 +54,8 @@ appropriate.
 Placeholder values such as `{{query}}`, `{{clipboard}}`, `{{arg:*}}`, and
 `{{pref:*}}` are shell-quoted before expansion into shell commands. This protects
 against user input like `$(...)` or `; reboot` being interpreted as extra shell
-syntax.
+syntax. In argv mode, placeholders are expanded as literal argument strings and
+are never passed through a shell.
 
 The command template itself is still executable shell code. Review the whole
 template before installing a command, especially when it uses `{{clipboard}}` or
