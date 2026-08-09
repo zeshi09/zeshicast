@@ -7,9 +7,7 @@ freedesktop **notification daemon** (no swaync/dunst needed), reads media via
 history. The headless `zeshicast` CLI works without any GUI dependency; the
 GTK4 launcher and daemon are behind the `gui` feature.
 
-See [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the
-roadmap. For threat model and local data handling, read
-[docs/security.md](docs/security.md) and [docs/privacy.md](docs/privacy.md).
+See [docs/README.md](docs/README.md) for the complete documentation sitemap and [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the roadmap. For threat model and local data handling, read [docs/security.md](docs/security.md) and [docs/privacy.md](docs/privacy.md).
 For contributor workflows, read [docs/development.md](docs/development.md).
 
 ## Screenshots
