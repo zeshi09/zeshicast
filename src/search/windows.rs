@@ -459,7 +459,7 @@ fn load_backend_snapshot(backend: WindowBackend) -> Option<WindowSnapshot> {
         WindowBackend::Sway => {
             let tree = command_json_value("swaymsg", &["-t", "get_tree"])?;
             let mut nodes = Vec::new();
-            collect_sway_windows(&tree, &mut nodes);
+            collect_sway_windows(&tree, &mut nodes, 0);
             nodes.into_iter().cloned().collect()
         }
     };
@@ -587,7 +587,16 @@ fn hyprland_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<A
         .collect()
 }
 
-fn collect_sway_windows<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json::Value>) {
+const MAX_SWAY_TREE_DEPTH: usize = 32;
+
+fn collect_sway_windows<'a>(
+    node: &'a serde_json::Value,
+    out: &mut Vec<&'a serde_json::Value>,
+    depth: usize,
+) {
+    if depth > MAX_SWAY_TREE_DEPTH {
+        return;
+    }
     if node.get("type").and_then(|t| t.as_str()) == Some("con")
         && node
             .get("name")
@@ -598,12 +607,12 @@ fn collect_sway_windows<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde
     }
     if let Some(nodes) = node.get("nodes").and_then(|n| n.as_array()) {
         for child in nodes {
-            collect_sway_windows(child, out);
+            collect_sway_windows(child, out, depth + 1);
         }
     }
     if let Some(nodes) = node.get("floating_nodes").and_then(|n| n.as_array()) {
         for child in nodes {
-            collect_sway_windows(child, out);
+            collect_sway_windows(child, out, depth + 1);
         }
     }
 }

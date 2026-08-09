@@ -8,18 +8,18 @@ use crate::services::storage;
 use crate::{
     Action, ActionFormCommand, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider,
     ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
-    ExecutionPolicy, ExecutionRequest, FileEntry, FilesProvider, HyprlandProvider, LauncherCommand,
-    MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider, NamedValue, NamedValuesProvider,
-    NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext, ProcessCommand,
-    ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext, SearchProvider,
-    SecondaryAction, SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider,
-    WindowsProvider, app_action, append_alias, expand_placeholders, expand_placeholders_shell,
-    fuzzy_score, home_dir, load_aliases, load_apps, load_clipboard_history, load_command_entries,
-    load_extension_command_entries, load_extension_manifests, load_extension_script_entries,
-    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences,
-    load_script_entries, normalize_alias, run_execution_request, search_audio_actions,
-    search_media_actions, search_network_actions, search_notification_actions,
-    search_system_actions, write_lines, write_preferences,
+    ExecutionPolicy, ExecutionRequest, ExtensionManifest, FileEntry, FilesProvider,
+    HyprlandProvider, LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider,
+    NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider,
+    PlaceholderContext, ProcessCommand, ProcessesProvider, ScriptEntry, ScriptsProvider,
+    SearchContext, SearchProvider, SecondaryAction, SecondaryActionKind, ShellCommand,
+    SwayProvider, SystemProvider, WebProvider, WindowsProvider, app_action, append_alias,
+    expand_placeholders, expand_placeholders_shell, fuzzy_score, home_dir, load_aliases, load_apps,
+    load_clipboard_history, load_command_entries, load_extension_command_entries,
+    load_extension_manifests, load_extension_script_entries, load_file_index, load_frequencies,
+    load_lines, load_named_values, load_preferences, load_script_entries, normalize_alias,
+    run_execution_request, search_audio_actions, search_media_actions, search_network_actions,
+    search_notification_actions, search_system_actions, write_lines, write_preferences,
 };
 
 #[derive(Debug, Clone)]
@@ -307,6 +307,65 @@ pub fn classify_clipboard_text(text: &str) -> ClipboardKind {
     ClipboardKind::Text
 }
 
+fn migrate_legacy_storage_if_needed(config_dir: &Path) {
+    if !storage::clipboard_has_data(config_dir) {
+        let legacy = load_clipboard_history(&config_dir.join("clipboard.txt"));
+        if !legacy.is_empty() {
+            storage::migrate_clipboard(config_dir, &legacy).ok();
+        }
+    }
+    if !storage::usage_has_data(config_dir) {
+        let recent_legacy = load_lines(&config_dir.join("recent.txt"))
+            .into_iter()
+            .map(|l| l.to_lowercase())
+            .collect::<Vec<_>>();
+        let freq_legacy = load_frequencies(&config_dir.join("frequencies.txt"));
+        if !recent_legacy.is_empty() {
+            storage::migrate_usage(config_dir, &recent_legacy, &freq_legacy).ok();
+        }
+    }
+}
+
+struct LoadedClipboardAndUsage {
+    history: Vec<String>,
+    timestamps: HashMap<String, i64>,
+    recent: Vec<String>,
+    frequencies: HashMap<String, u32>,
+}
+
+fn load_clipboard_and_usage(
+    config_dir: &Path,
+    preferences: &HashMap<String, String>,
+) -> LoadedClipboardAndUsage {
+    let clipboard_retention = clipboard_retention_value(preferences);
+    let clip_rows = storage::clipboard_load_with_limit(config_dir, clipboard_retention);
+    let history: Vec<String> = clip_rows.iter().map(|(t, _)| t.clone()).collect();
+    let timestamps: HashMap<String, i64> = clip_rows.into_iter().collect();
+    let _ = prune_clipboard_image_cache(&history);
+
+    let recent = storage::usage_recent(config_dir, 50);
+    let frequencies = storage::usage_frequencies(config_dir);
+
+    LoadedClipboardAndUsage {
+        history,
+        timestamps,
+        recent,
+        frequencies,
+    }
+}
+
+fn load_commands_and_scripts(
+    config_dir: &Path,
+    script_dirs: &[PathBuf],
+    extensions: &[ExtensionManifest],
+) -> (Vec<CommandEntry>, Vec<ScriptEntry>) {
+    let mut commands = load_command_entries(&config_dir.join("commands"));
+    commands.extend(load_extension_command_entries(extensions));
+    let mut scripts = load_script_entries(script_dirs);
+    scripts.extend(load_extension_script_entries(extensions));
+    (commands, scripts)
+}
+
 impl Zeshicast {
     pub fn load() -> Self {
         Self::load_inner(true)
@@ -340,40 +399,10 @@ impl Zeshicast {
         let script_dirs = preference_script_dirs(&preferences, &config_dir);
         let extensions = load_extension_manifests(&config_dir);
 
-        // Migrate text-file clipboard to SQLite on first run
-        if !storage::clipboard_has_data(&config_dir) {
-            let legacy = load_clipboard_history(&config_dir.join("clipboard.txt"));
-            if !legacy.is_empty() {
-                storage::migrate_clipboard(&config_dir, &legacy).ok();
-            }
-        }
-
-        // Migrate text-file usage history to SQLite on first run
-        if !storage::usage_has_data(&config_dir) {
-            let recent_legacy = load_lines(&config_dir.join("recent.txt"))
-                .into_iter()
-                .map(|l| l.to_lowercase())
-                .collect::<Vec<_>>();
-            let freq_legacy = load_frequencies(&config_dir.join("frequencies.txt"));
-            if !recent_legacy.is_empty() {
-                storage::migrate_usage(&config_dir, &recent_legacy, &freq_legacy).ok();
-            }
-        }
-
-        let clipboard_retention = clipboard_retention_value(&preferences);
-        let clip_rows = storage::clipboard_load_with_limit(&config_dir, clipboard_retention);
-        let clipboard_history: Vec<String> = clip_rows.iter().map(|(t, _)| t.clone()).collect();
-        let clipboard_timestamps: HashMap<String, i64> = clip_rows.into_iter().collect();
-        let _ = prune_clipboard_image_cache(&clipboard_history);
-
-        let recent = storage::usage_recent(&config_dir, 50);
-        let frequencies = storage::usage_frequencies(&config_dir);
-
+        migrate_legacy_storage_if_needed(&config_dir);
+        let storage_data = load_clipboard_and_usage(&config_dir, &preferences);
+        let (commands, scripts) = load_commands_and_scripts(&config_dir, &script_dirs, &extensions);
         let calc_history = load_calc_history(&config_dir.join("calc_history.json"));
-        let mut commands = load_command_entries(&config_dir.join("commands"));
-        commands.extend(load_extension_command_entries(&extensions));
-        let mut scripts = load_script_entries(&script_dirs);
-        scripts.extend(load_extension_script_entries(&extensions));
 
         Self {
             apps: load_apps(&home),
@@ -381,8 +410,8 @@ impl Zeshicast {
             snippets: load_named_values(&config_dir.join("snippets.txt")),
             commands,
             scripts,
-            clipboard_history,
-            clipboard_timestamps,
+            clipboard_history: storage_data.history,
+            clipboard_timestamps: storage_data.timestamps,
             calc_history,
             preferences,
             aliases: load_aliases(&config_dir.join("aliases.txt")),
@@ -390,8 +419,8 @@ impl Zeshicast {
                 .into_iter()
                 .map(|line| line.to_lowercase())
                 .collect(),
-            recent,
-            frequencies,
+            recent: storage_data.recent,
+            frequencies: storage_data.frequencies,
             files: if index_files {
                 load_file_index(&home)
             } else {

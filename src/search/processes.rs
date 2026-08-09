@@ -78,7 +78,25 @@ fn load_process_entries() -> Vec<ProcessEntry> {
         .collect()
 }
 
+#[cfg(unix)]
+fn is_current_user_process(path: &Path) -> bool {
+    let current_uid = rustix::process::getuid().as_raw();
+    if let Ok(stat) = rustix::fs::stat(path) {
+        stat.st_uid == current_uid
+    } else {
+        false
+    }
+}
+
+#[cfg(not(unix))]
+fn is_current_user_process(_path: &Path) -> bool {
+    true
+}
+
 fn load_process_entry(pid: u32, path: &Path) -> Option<ProcessEntry> {
+    if !is_current_user_process(path) {
+        return None;
+    }
     let name = fs::read_to_string(path.join("comm"))
         .ok()
         .map(|value| value.trim().to_string())

@@ -260,6 +260,19 @@ impl SecondaryAction {
     }
 }
 
+#[allow(dead_code)]
+pub(crate) const SCORE_PIN_BOOST: i32 = 700;
+#[allow(dead_code)]
+pub(crate) const SCORE_WINDOW_BOOST: i32 = 280;
+#[allow(dead_code)]
+pub(crate) const SCORE_COMPOSITOR_BOOST: i32 = 260;
+#[allow(dead_code)]
+pub(crate) const SCORE_PROCESS_BOOST: i32 = 240;
+#[allow(dead_code)]
+pub(crate) const SCORE_APP_BOOST: i32 = 100;
+#[allow(dead_code)]
+pub(crate) const SCORE_CLIPBOARD_BOOST: i32 = 35;
+
 impl Action {
     pub(crate) fn new(
         category: impl Into<String>,

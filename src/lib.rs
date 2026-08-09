@@ -3,6 +3,7 @@ use std::process::{Command, Stdio};
 
 mod action;
 mod app;
+pub mod cli;
 mod config;
 mod extensions;
 mod placeholders;
@@ -200,12 +201,16 @@ fn copy_with(program: &str, args: &[&str], text: &str) -> bool {
         return false;
     };
 
-    let wrote = child
-        .stdin
-        .as_mut()
-        .and_then(|stdin| stdin.write_all(text.as_bytes()).ok())
-        .is_some();
-    wrote && child.wait().map(|status| status.success()).unwrap_or(false)
+    if let Some(mut stdin) = child.stdin.take() {
+        if stdin.write_all(text.as_bytes()).is_err() {
+            return false;
+        }
+        drop(stdin);
+    } else {
+        return false;
+    }
+
+    child.wait().map(|status| status.success()).unwrap_or(false)
 }
 
 #[cfg(test)]
