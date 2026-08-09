@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::{Action, ActionKind, ShellCommand, SystemActionEntry, fuzzy_score};
+use crate::{Action, ActionKind, ProcessCommand, ShellCommand, SystemActionEntry, fuzzy_score};
 
 const WINDOW_QUERY_TIMEOUT: Duration = Duration::from_millis(200);
 const WINDOW_CACHE_TTL: Duration = Duration::from_secs(2);
@@ -517,7 +517,6 @@ fn window_snapshot_actions(snapshot: &WindowSnapshot, needle: &str) -> Vec<Actio
         }
     }
 }
-
 fn niri_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Action> {
     windows
         .iter()
@@ -535,9 +534,16 @@ fn niri_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Actio
                 Action::new(
                     "Window",
                     title,
-                    ActionKind::Shell(ShellCommand::new(format!(
-                        "niri msg action focus-window --id {id}"
-                    ))),
+                    ActionKind::Command(ProcessCommand::new(
+                        "niri",
+                        vec![
+                            "msg".to_string(),
+                            "action".to_string(),
+                            "focus-window".to_string(),
+                            "--id".to_string(),
+                            id.to_string(),
+                        ],
+                    )),
                     score + 280,
                 )
                 .with_subtitle(app_id)
@@ -564,9 +570,14 @@ fn hyprland_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<A
                 Action::new(
                     "Window",
                     title,
-                    ActionKind::Shell(ShellCommand::new(format!(
-                        "hyprctl dispatch focuswindow address:{addr}"
-                    ))),
+                    ActionKind::Command(ProcessCommand::new(
+                        "hyprctl",
+                        vec![
+                            "dispatch".to_string(),
+                            "focuswindow".to_string(),
+                            format!("address:{addr}"),
+                        ],
+                    )),
                     score + 280,
                 )
                 .with_subtitle(class)
@@ -614,7 +625,10 @@ fn sway_window_actions(windows: &[&serde_json::Value], needle: &str) -> Vec<Acti
                 Action::new(
                     "Window",
                     title,
-                    ActionKind::Shell(ShellCommand::new(format!("swaymsg '[con_id={id}] focus'"))),
+                    ActionKind::Command(ProcessCommand::new(
+                        "swaymsg",
+                        vec![format!("[con_id={id}] focus")],
+                    )),
                     score + 280,
                 )
                 .with_subtitle(app_id)

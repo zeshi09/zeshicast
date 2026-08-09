@@ -52,6 +52,42 @@ pub struct Zeshicast {
 /// keeps it from colliding with any real copied text.
 pub const CLIPBOARD_IMAGE_PREFIX: &str = "\u{1}zeshicast-image:";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ClipboardItem {
+    Text(String),
+    Image(PathBuf),
+}
+
+#[allow(dead_code)]
+impl ClipboardItem {
+    pub fn parse(raw: &str) -> Self {
+        if let Some(path) = clipboard_image_path(raw) {
+            Self::Image(PathBuf::from(path))
+        } else {
+            Self::Text(raw.to_string())
+        }
+    }
+
+    pub fn to_raw(&self) -> String {
+        match self {
+            Self::Text(text) => text.clone(),
+            Self::Image(path) => format!("{CLIPBOARD_IMAGE_PREFIX}{}", path.display()),
+        }
+    }
+
+    pub fn is_image(&self) -> bool {
+        matches!(self, Self::Image(_))
+    }
+
+    pub fn image_path(&self) -> Option<&Path> {
+        match self {
+            Self::Image(path) => Some(path.as_path()),
+            Self::Text(_) => None,
+        }
+    }
+}
+
 /// If `value` is an image entry, return the cached PNG path.
 pub fn clipboard_image_path(value: &str) -> Option<&str> {
     value.strip_prefix(CLIPBOARD_IMAGE_PREFIX)
@@ -424,62 +460,58 @@ impl Zeshicast {
             query: trimmed,
             placeholders: &context,
         };
-        actions.extend(AppsProvider { apps: &self.apps }.search(&search_context));
-        actions.extend(
-            NamedValuesProvider {
+
+        let mut providers: Vec<Box<dyn SearchProvider + '_>> = vec![
+            Box::new(AppsProvider { apps: &self.apps }),
+            Box::new(NamedValuesProvider {
                 category: "Quicklink",
                 entries: &self.quicklinks,
                 target: ActionTarget::OpenUrl,
-            }
-            .search(&search_context),
-        );
-        actions.extend(
-            NamedValuesProvider {
+            }),
+            Box::new(NamedValuesProvider {
                 category: "Snippet",
                 entries: &self.snippets,
                 target: ActionTarget::CopyText,
-            }
-            .search(&search_context),
-        );
-        actions.extend(
-            CommandsProvider {
+            }),
+            Box::new(CommandsProvider {
                 commands: &self.commands,
-            }
-            .search(&search_context),
-        );
-        actions.extend(SystemProvider.search(&search_context));
-        actions.extend(AudioProvider.search(&search_context));
+            }),
+            Box::new(SystemProvider),
+            Box::new(AudioProvider),
+        ];
+
         if self.preference_enabled("network_enabled", true) {
-            actions.extend(NetworkProvider.search(&search_context));
+            providers.push(Box::new(NetworkProvider));
         }
         if self.preference_enabled("media_enabled", true) {
-            actions.extend(MediaProvider.search(&search_context));
+            providers.push(Box::new(MediaProvider));
         }
         if self.notifications_history_enabled() {
-            actions.extend(NotificationsProvider.search(&search_context));
+            providers.push(Box::new(NotificationsProvider));
         }
-        actions.extend(NiriProvider.search(&search_context));
-        actions.extend(HyprlandProvider.search(&search_context));
-        actions.extend(SwayProvider.search(&search_context));
-        actions.extend(WindowsProvider.search(&search_context));
+
+        providers.push(Box::new(NiriProvider));
+        providers.push(Box::new(HyprlandProvider));
+        providers.push(Box::new(SwayProvider));
+        providers.push(Box::new(WindowsProvider));
+
         if self.preference_enabled("ai_enabled", true) {
-            actions.extend(WebProvider.search(&search_context));
+            providers.push(Box::new(WebProvider));
         }
-        actions.extend(
-            ScriptsProvider {
-                entries: &self.scripts,
-            }
-            .search(&search_context),
-        );
-        actions.extend(EmojiProvider.search(&search_context));
-        actions.extend(
-            ClipboardProvider {
-                entries: &self.clipboard_history,
-            }
-            .search(&search_context),
-        );
-        actions.extend(FilesProvider { files: &self.files }.search(&search_context));
-        actions.extend(ProcessesProvider.search(&search_context));
+
+        providers.push(Box::new(ScriptsProvider {
+            entries: &self.scripts,
+        }));
+        providers.push(Box::new(EmojiProvider));
+        providers.push(Box::new(ClipboardProvider {
+            entries: &self.clipboard_history,
+        }));
+        providers.push(Box::new(FilesProvider { files: &self.files }));
+        providers.push(Box::new(ProcessesProvider));
+
+        for provider in providers {
+            actions.extend(provider.search(&search_context));
+        }
 
         if lower.starts_with("shell ") {
             let command = trimmed.strip_prefix("shell ").unwrap_or_default().trim();

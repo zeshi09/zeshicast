@@ -184,7 +184,7 @@ Pragmatic path:
 
 Current baseline:
 
-- `cargo test` passes with 38 tests.
+- `cargo test` passes with 100 tests.
 - `cargo check --features gui` requires a Rust toolchain new enough for gtk-rs
   0.22. In this repo, run it through Nix:
 

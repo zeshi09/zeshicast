@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn export_config(config_dir: &Path, dest: &Path) -> io::Result<()> {
@@ -41,18 +40,13 @@ pub fn export_config_with_options(
 }
 
 fn export_config_dir(config_dir: &Path, dest: &Path) -> io::Result<()> {
-    let status = Command::new("tar")
-        .args(["-czf"])
-        .arg(dest)
-        .arg("-C")
-        .arg(config_dir.parent().unwrap_or(config_dir))
-        .arg(config_dir.file_name().unwrap_or_default())
-        .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other("tar export failed"))
-    }
+    let dest_file = fs::File::create(dest)?;
+    let enc = flate2::write::GzEncoder::new(dest_file, flate2::Compression::default());
+    let mut builder = tar::Builder::new(enc);
+    let root_name = config_dir.file_name().unwrap_or_default();
+    builder.append_dir_all(root_name, config_dir)?;
+    builder.finish()?;
+    Ok(())
 }
 
 fn copy_config_sanitized(src: &Path, dest: &Path) -> io::Result<()> {
@@ -114,76 +108,62 @@ pub fn import_config(src: &Path, config_dir: &Path) -> io::Result<()> {
 
     let parent = config_dir.parent().unwrap_or(config_dir);
     fs::create_dir_all(parent)?;
-    let staging = parent.join(format!(
-        ".zeshicast-import-{}-{}",
-        std::process::id(),
-        unix_now()
-    ));
-    // Clean any stale staging dir, then extract into it.
-    let _ = fs::remove_dir_all(&staging);
-    fs::create_dir_all(&staging)?;
+    let temp_staging = tempfile::Builder::new()
+        .prefix(".zeshicast-import-")
+        .tempdir_in(parent)?;
+    let staging = temp_staging.path();
 
-    let extract = || -> io::Result<()> {
-        let status = Command::new("tar")
-            .args(["-xzf"])
-            .arg(src)
-            .args(["--no-same-owner", "-C"])
-            .arg(&staging)
-            .status()?;
-        if !status.success() {
-            return Err(io::Error::other("tar import failed"));
-        }
-        // The validated archive has a single `zeshicast/` root.
-        let imported = staging.join(config_dir.file_name().unwrap_or_default());
-        if !imported.is_dir() {
-            return Err(io::Error::other("archive missing zeshicast/ directory"));
-        }
-        reject_symlinks(&imported)?;
+    let file = fs::File::open(src)?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(gz);
+    archive.unpack(staging)?;
 
-        // Swap into place: move the old config aside, promote the import, drop
-        // the backup. On failure, restore the backup.
-        let backup = parent.join(format!(".zeshicast-backup-{}", unix_now()));
-        let had_old = config_dir.exists();
-        if had_old {
-            fs::rename(config_dir, &backup)?;
-        }
-        match fs::rename(&imported, config_dir) {
-            Ok(()) => {
-                if had_old {
-                    let _ = fs::remove_dir_all(&backup);
-                }
-                Ok(())
+    let imported = staging.join(config_dir.file_name().unwrap_or_default());
+    if !imported.is_dir() {
+        return Err(io::Error::other("archive missing zeshicast/ directory"));
+    }
+    reject_symlinks(&imported)?;
+
+    // Swap into place: move the old config aside, promote the import, drop
+    // the backup. On failure, restore the backup.
+    let backup = parent.join(format!(".zeshicast-backup-{}", unix_now()));
+    let had_old = config_dir.exists();
+    if had_old {
+        fs::rename(config_dir, &backup)?;
+    }
+    match fs::rename(&imported, config_dir) {
+        Ok(()) => {
+            if had_old {
+                let _ = fs::remove_dir_all(&backup);
             }
-            Err(err) => {
-                if had_old {
-                    let _ = fs::rename(&backup, config_dir);
-                }
-                Err(err)
-            }
+            Ok(())
         }
-    };
-
-    let result = extract();
-    let _ = fs::remove_dir_all(&staging);
-    result
+        Err(err) => {
+            if had_old {
+                let _ = fs::rename(&backup, config_dir);
+            }
+            Err(err)
+        }
+    }
 }
 
 /// Reject archives whose members are absolute, contain a `..` component, or sit
 /// outside a single top-level `zeshicast/` directory.
 fn validate_archive_members(src: &Path) -> io::Result<()> {
-    let output = Command::new("tar").args(["-tzf"]).arg(src).output()?;
-    if !output.status.success() {
-        return Err(io::Error::other("could not read archive"));
-    }
-    let listing = String::from_utf8_lossy(&output.stdout);
+    let file = fs::File::open(src)?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(gz);
     let mut saw_member = false;
-    for raw in listing.lines() {
+
+    for entry in archive.entries()? {
+        let entry = entry?;
+        let path = entry.path()?;
+        let raw = path.to_string_lossy();
         let member = raw.trim_end_matches('/').trim();
         if member.is_empty() {
             continue;
         }
         saw_member = true;
-        let path = Path::new(member);
         if path.is_absolute() {
             return Err(io::Error::other(format!("unsafe absolute path: {member}")));
         }
@@ -202,6 +182,11 @@ fn validate_archive_members(src: &Path) -> io::Result<()> {
             .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
         {
             return Err(io::Error::other(format!("unsafe path component: {member}")));
+        }
+        if entry.header().entry_type().is_symlink() || entry.header().entry_type().is_hard_link() {
+            return Err(io::Error::other(format!(
+                "archive contains a symlink/hardlink: {member}"
+            )));
         }
     }
     if !saw_member {
@@ -355,52 +340,28 @@ pub(crate) fn write_file_atomic(path: &Path, content: &[u8], mode: u32) -> io::R
         .file_name()
         .ok_or_else(|| io::Error::other("path has no file name"))?
         .to_string_lossy();
-    let temp_path = parent.join(format!(
-        ".{file_name}.tmp-{}-{}",
-        std::process::id(),
-        unix_now_nanos()
-    ));
 
-    let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)?;
-        set_file_mode(&file, mode)?;
-        file.write_all(content)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temp_path, path)?;
-        sync_parent_dir(parent)?;
-        Ok(())
-    })();
+    let mut temp_file = tempfile::Builder::new()
+        .prefix(&format!(".{file_name}.tmp-"))
+        .tempfile_in(parent)?;
 
-    if result.is_err() {
-        let _ = fs::remove_file(&temp_path);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        temp_file
+            .as_file_mut()
+            .set_permissions(fs::Permissions::from_mode(mode))?;
     }
-    result
-}
 
-#[cfg(unix)]
-fn set_file_mode(file: &fs::File, mode: u32) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    file.set_permissions(fs::Permissions::from_mode(mode))
-}
-
-#[cfg(not(unix))]
-fn set_file_mode(_file: &fs::File, _mode: u32) -> io::Result<()> {
+    temp_file.write_all(content)?;
+    temp_file.as_file_mut().sync_all()?;
+    temp_file.persist(path).map_err(|e| e.error)?;
+    sync_parent_dir(parent)?;
     Ok(())
 }
 
 fn sync_parent_dir(parent: &Path) -> io::Result<()> {
     fs::File::open(parent)?.sync_all()
-}
-
-fn unix_now_nanos() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
 }
 
 pub(crate) fn unix_now() -> i64 {
@@ -433,7 +394,7 @@ mod tests {
         std::env::temp_dir().join(format!(
             "zeshicast-{name}-{}-{}",
             std::process::id(),
-            unix_now_nanos()
+            unix_now()
         ))
     }
 

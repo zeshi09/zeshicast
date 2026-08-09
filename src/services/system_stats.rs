@@ -135,7 +135,24 @@ fn read_process_count() -> io::Result<usize> {
         .count())
 }
 
+#[cfg(unix)]
 fn read_root_disk_usage() -> io::Result<(u64, u64)> {
+    if let Ok(stat) = rustix::fs::statvfs("/") {
+        let block_size = stat.f_frsize;
+        let total_bytes = stat.f_blocks * block_size;
+        let free_bytes = stat.f_bavail * block_size;
+        let used_bytes = total_bytes.saturating_sub(free_bytes);
+        return Ok((total_bytes / 1024, used_bytes / 1024));
+    }
+    read_root_disk_usage_fallback()
+}
+
+#[cfg(not(unix))]
+fn read_root_disk_usage() -> io::Result<(u64, u64)> {
+    read_root_disk_usage_fallback()
+}
+
+fn read_root_disk_usage_fallback() -> io::Result<(u64, u64)> {
     let output = Command::new("df").args(["-kP", "/"]).output()?;
     if !output.status.success() {
         return Err(io::Error::other("df failed"));

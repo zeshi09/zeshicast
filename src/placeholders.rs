@@ -62,13 +62,35 @@ fn expand(template: &str, context: &PlaceholderContext, shell_escape: bool) -> S
         };
 
         let (placeholder, after_end) = after_start.split_at(end);
+        let mut trailing_quote_to_skip = 0;
+        let mut is_wrapped_in_single_quotes = false;
+        if shell_escape
+            && output.ends_with('\'')
+            && after_end.len() >= 3
+            && after_end[2..].starts_with('\'')
+        {
+            output.pop();
+            trailing_quote_to_skip = 1;
+            is_wrapped_in_single_quotes = true;
+        }
+
         match render_placeholder(placeholder.trim(), context) {
             Some(value) if shell_escape => output.push_str(&shell_quote(&value)),
-            Some(value) => output.push_str(&value),
+            Some(value) => {
+                if is_wrapped_in_single_quotes {
+                    output.push('\'');
+                }
+                output.push_str(&value);
+            }
             // Unknown placeholder: emit it literally, unquoted.
-            None => output.push_str(&format!("{{{{{}}}}}", placeholder.trim())),
+            None => {
+                if is_wrapped_in_single_quotes {
+                    output.push('\'');
+                }
+                output.push_str(&format!("{{{{{}}}}}", placeholder.trim()));
+            }
         }
-        rest = &after_end[2..];
+        rest = &after_end[2 + trailing_quote_to_skip..];
     }
 
     output.push_str(rest);
@@ -124,4 +146,16 @@ fn render_placeholder(placeholder: &str, context: &PlaceholderContext) -> Option
 
 pub(crate) fn format_local_time(time: SystemTime, format: &str) -> String {
     DateTime::<Local>::from(time).format(format).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_redundant_single_quotes_in_shell_placeholders() {
+        let context = PlaceholderContext::new("foo bar", None);
+        let result = expand_placeholders_shell("echo '{{query}}'", &context);
+        assert_eq!(result, "echo 'foo bar'");
+    }
 }

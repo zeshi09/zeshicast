@@ -31,7 +31,9 @@ pub fn start() {
     let cache = cache();
     std::thread::spawn(move || {
         let mut tick: u64 = 0;
+        let target_interval = Duration::from_secs(1);
         loop {
+            let start = std::time::Instant::now();
             // Audio reacts to volume keys and the keyboard layout to the switch
             // hotkey, so refresh both every tick. Network state rarely changes,
             // so refresh it less often to save power.
@@ -46,7 +48,10 @@ pub fn start() {
                 }
             }
             tick = tick.wrapping_add(1);
-            std::thread::sleep(Duration::from_secs(1));
+            let elapsed = start.elapsed();
+            if let Some(remaining) = target_interval.checked_sub(elapsed) {
+                std::thread::sleep(remaining);
+            }
         }
     });
 }

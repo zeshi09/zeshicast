@@ -424,6 +424,13 @@ pub(crate) fn run_execution_request(request: ExecutionRequest) {
                 if let Some(result) = execute_http_request(&req) {
                     copy_to_clipboard(&result);
                 } else {
+                    #[cfg(feature = "gui")]
+                    crate::push_notification(
+                        "Zeshicast",
+                        "HTTP Request Failed",
+                        "Check AI or translation endpoint configuration",
+                        0,
+                    );
                     eprintln!("http request failed");
                 }
             });
