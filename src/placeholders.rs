@@ -139,9 +139,24 @@ fn render_placeholder(placeholder: &str, context: &PlaceholderContext) -> Option
             .and_then(|expr| Calculator::new(expr).parse().ok())
             .map(format_number)
             .unwrap_or_default(),
+        "uuid" => generate_simple_uuid(),
         _ => return None,
     };
     Some(value)
+}
+
+fn generate_simple_uuid() -> String {
+    use std::time::UNIX_EPOCH;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let p1 = (nanos & 0xFFFFFFFF) as u32;
+    let p2 = ((nanos >> 32) & 0xFFFF) as u16;
+    let p3 = (((nanos >> 48) & 0x0FFF) | 0x4000) as u16;
+    let p4 = (((nanos >> 60) & 0x3FFF) | 0x8000) as u16;
+    let p5 = ((nanos >> 72) & 0xFFFFFFFFFFFF) as u64;
+    format!("{p1:08x}-{p2:04x}-{p3:04x}-{p4:04x}-{p5:012x}")
 }
 
 pub(crate) fn format_local_time(time: SystemTime, format: &str) -> String {
@@ -157,5 +172,15 @@ mod tests {
         let context = PlaceholderContext::new("foo bar", None);
         let result = expand_placeholders_shell("echo '{{query}}'", &context);
         assert_eq!(result, "echo 'foo bar'");
+    }
+
+    #[test]
+    fn test_uuid_placeholder_expansion() {
+        let context = PlaceholderContext::new("", None);
+        let result = expand_placeholders("id={{uuid}}", &context);
+        assert!(result.starts_with("id="));
+        assert_eq!(result.len(), 3 + 36);
+        assert_eq!(&result[11..12], "-");
+        assert_eq!(&result[16..17], "-");
     }
 }

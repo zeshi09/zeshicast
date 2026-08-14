@@ -3,6 +3,13 @@ use std::path::{Path, PathBuf};
 
 use crate::{Action, ActionKind, ExtensionManifest, ExtensionOrigin, ShellCommand, fuzzy_score};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScriptArgument {
+    pub(crate) arg_type: String,
+    pub(crate) placeholder: String,
+    pub(crate) optional: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ScriptEntry {
     pub(crate) title: String,
@@ -11,6 +18,8 @@ pub(crate) struct ScriptEntry {
     pub(crate) icon: String,
     pub(crate) path: PathBuf,
     pub(crate) origin: Option<ExtensionOrigin>,
+    #[allow(dead_code)]
+    pub(crate) arguments: Vec<ScriptArgument>,
 }
 
 #[allow(dead_code)]
@@ -89,6 +98,7 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
     let mut package = String::new();
     let mut icon = "text-x-script-symbolic".to_string();
     let mut _mode = ScriptMode::Compact;
+    let mut arguments = Vec::new();
 
     for line in content.lines().take(50) {
         let line = line.trim();
@@ -116,6 +126,17 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
                 "silent" => ScriptMode::Silent,
                 _ => ScriptMode::Compact,
             };
+        } else if let Some(arg_str) = raycast_argument_meta(comment) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(arg_str) {
+                let arg_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("text").to_string();
+                let placeholder = v.get("placeholder").and_then(|p| p.as_str()).unwrap_or("").to_string();
+                let optional = v.get("optional").and_then(|o| o.as_bool()).unwrap_or(false);
+                arguments.push(ScriptArgument {
+                    arg_type,
+                    placeholder,
+                    optional,
+                });
+            }
         }
     }
 
@@ -130,7 +151,18 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
         icon,
         path: path.to_path_buf(),
         origin: None,
+        arguments,
     })
+}
+
+fn raycast_argument_meta<'a>(comment: &'a str) -> Option<&'a str> {
+    for i in 1..=5 {
+        let key = format!("argument{i}");
+        if let Some(meta) = raycast_meta(comment, &key) {
+            return Some(meta);
+        }
+    }
+    None
 }
 
 fn raycast_meta<'a>(comment: &'a str, key: &str) -> Option<&'a str> {
@@ -212,3 +244,36 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
     matches.truncate(20);
     matches
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_raycast_metadata_with_arguments() {
+        let dir = tempfile::tempdir().unwrap();
+        let script_path = dir.path().join("weather.sh");
+        let content = r#"#!/usr/bin/env bash
+# @raycast.schemaVersion 1
+# @raycast.title Weather Forecast
+# @raycast.mode fullOutput
+# @raycast.packageName Weather
+# @raycast.icon 🌤️
+# @raycast.argument1 { "type": "text", "placeholder": "City", "optional": false }
+# @raycast.argument2 { "type": "text", "placeholder": "Format", "optional": true }
+
+curl "wttr.in/$1?format=$2"
+"#;
+        fs::write(&script_path, content).unwrap();
+
+        let entry = parse_script_entry(&script_path).expect("Failed to parse script");
+        assert_eq!(entry.title, "Weather Forecast");
+        assert_eq!(entry.package, "Weather");
+        assert_eq!(entry.arguments.len(), 2);
+        assert_eq!(entry.arguments[0].placeholder, "City");
+        assert!(!entry.arguments[0].optional);
+        assert_eq!(entry.arguments[1].placeholder, "Format");
+        assert!(entry.arguments[1].optional);
+    }
+}
+
