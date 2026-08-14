@@ -17,6 +17,7 @@
    - [Фаза 5: JSON-RPC 2.0 Process Isolation Extensions Protocol](#фаза-5-json-rpc-20-process-isolation-extensions-protocol)
    - [Фаза 6: Streaming Local AI (SSE) и живые Sparkline-графики](#фаза-6-streaming-local-ai-sse-и-живые-sparkline-графики)
    - [Фаза 7: Парсер метаданных Raycast Script (`@raycast.*`) и Сниппеты](#фаза-7-парсер-метаданных-raycast-script-raycast-и-сниппеты)
+   - [Фаза 8: UI/UX Micro-Interactions & Design Polish](#фаза-8-uiux-micro-interactions--design-polish)
 5. [Безопасность, приватность и политика отказоустойчивости](#5-безопасность-приватность-и-политика-отказоустойчивости)
 6. [Протокол верификации и тестирования](#6-протокол-верификации-и-тестирования)
 
@@ -63,6 +64,7 @@
 | **JSON-RPC Extensions Protocol** | ⏳ Интеграция | Стандартизированный протокол изолированных плагинов |
 | **Streaming Local AI (SSE)** | ⏳ Интеграция | Потоковый вывод токенов + кнопка отмены генерации |
 | **Raycast Script Metadata Parser** | ⏳ Интеграция | Полная поддержка `@raycast.*` аргументов и генерации форм |
+| **UI/UX Micro-Interactions & Polish** | ⏳ Интеграция | Физические кейкапы, интерактивный Dashboard, Selected row bar |
 
 ---
 
@@ -78,6 +80,7 @@ graph TD
     P4 --> P5
     P5 --> P6[Фаза 6: Streaming Local AI & Sparklines]
     P6 --> P7[Фаза 7: Raycast Metadata & Snippets Engine]
+    P7 --> P8[Фаза 8: UI/UX Micro-Interactions & Polish]
 ```
 
 ---
@@ -185,6 +188,30 @@ graph TD
    - Эмуляция ввода текста через `wtype` / `ydotool` или копирование в буфер обмена.
 3. **Критерий приемки:**
    - Корректная подстановка всех токенов и запуск скриптов с динамическими аргументами.
+
+---
+
+### Фаза 8: UI/UX Micro-Interactions & Design Polish
+**Цель:** Доведение тактильности, микровзаимодействий и визуальной иерархии до совершенства на основе дизайн-аудита.
+
+1. **⌨️ Физические бейджи клавиш (Keycap Badges & Categories):**
+   - Стилизация хоткеев (`[Enter]`, `[Ctrl+K]`, `[H]`, `[L]`) и категорийных плашек (`SYSTEM`, `APP`, `FILE`): шрифт `JetBrains Mono`, `11px`, `letter-spacing: 0.5px`, `text-transform: uppercase`, тонкая рамка `1px solid alpha(@window_fg_color, 0.12)` и подложка `alpha(@window_fg_color, 0.08)`.
+2. **⚡ Интерактивный переход из Dashboard (`Ctrl+D`):**
+   - Клик или нажатие `Enter` на карточке CPU/RAM -> мгновенный переход в **System Monitor** (`View::SystemMonitor`).
+   - На карточке Audio -> переход в **Audio Control** (`View::Audio`).
+   - На карточке Network -> переход в **Network Manager** (`View::Network`).
+   - На карточке Media -> переход в **Media Player** (`View::Media`).
+3. **🎯 Индикатор фокуса выбранной строки (Selected Row Cue):**
+   - Добавление тонкого вертикального акцентного штриха слева (`box-shadow: inset 3px 0 0 @accent_color;`) на активном элементе списка.
+4. **💡 Умный пустой экран поиска (Smart Empty State):**
+   - При отсутствии совпадений по запросу предлагать контекстные fallback-действия: `[↵ Спросить у Local AI]`, `[↵ Найти в Web]`, `[↵ Создать Quicklink]`.
+5. **🤖 Статус генерации в AI Chat и вывод скриптов:**
+   - В заголовке чата бейдж `Ollama · qwen2.5 · Streaming...` с мигающим курсором `▋`.
+   - В `ScriptOutputView` таймер исполнения (`⏱ 0.35s · Exit 0`).
+6. **⚠️ Визуальное выделение опасных действий:**
+   - Мягкая предупреждающая подсветка (`#ff6b5f`) иконки и хоткея для деструктивных действий (Power Off, Reboot, Kill -9, Clear Clipboard).
+7. **Критерий приемки:**
+   - Полное сохранение дизайн-токенов Raycast v2, нулевые фризы анимаций, мгновенная тактильная обратная связь.
 
 ---
 
