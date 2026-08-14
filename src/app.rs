@@ -8,7 +8,7 @@ use crate::services::storage;
 use crate::{
     Action, ActionFormCommand, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider,
     BrowserTabsProvider, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
-    ExecutionPolicy, ExecutionRequest, ExtensionManifest, FileEntry, FilesProvider,
+    ExecutionPolicy, ExecutionRequest, ExtensionManifest, ExtensionsProvider, FileEntry, FilesProvider,
     HyprlandProvider, LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider,
     NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider,
     PlaceholderContext, ProcessCommand, ProcessesProvider, ScriptEntry, ScriptsProvider,
@@ -43,6 +43,7 @@ pub struct Zeshicast {
     pub(crate) pins: HashSet<String>,
     pub(crate) recent: Vec<String>,
     pub(crate) frequencies: HashMap<String, u32>,
+    pub(crate) extensions: Vec<ExtensionManifest>,
     pub(crate) files: Vec<FileEntry>,
     pub(crate) config_dir: PathBuf,
 }
@@ -421,6 +422,7 @@ impl Zeshicast {
                 .collect(),
             recent: storage_data.recent,
             frequencies: storage_data.frequencies,
+            extensions,
             files: if index_files {
                 load_file_index(&home)
             } else {
@@ -538,6 +540,9 @@ impl Zeshicast {
         providers.push(Box::new(FilesProvider { files: &self.files }));
         providers.push(Box::new(ProcessesProvider));
         providers.push(Box::new(BrowserTabsProvider));
+        providers.push(Box::new(ExtensionsProvider {
+            manifests: &self.extensions,
+        }));
 
         for provider in providers {
             actions.extend(provider.search(&search_context));
@@ -1432,6 +1437,7 @@ mod tests {
             pins: HashSet::new(),
             recent: Vec::new(),
             frequencies: HashMap::new(),
+            extensions: Vec::new(),
             files: Vec::new(),
             config_dir,
         }

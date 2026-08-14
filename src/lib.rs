@@ -74,7 +74,7 @@ pub(crate) use search::windows::{
     search_hyprland_actions, search_niri_actions, search_sway_actions, search_windows,
 };
 pub(crate) use search::{
-    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider, EmojiProvider, FilesProvider,
+    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider, EmojiProvider, ExtensionsProvider, FilesProvider,
     HyprlandProvider, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
     NotificationsProvider, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
     SearchProvider, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
@@ -389,6 +389,7 @@ mod tests {
             pins: HashSet::new(),
             recent: Vec::new(),
             frequencies: HashMap::new(),
+            extensions: Vec::new(),
             files: Vec::new(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
@@ -422,6 +423,7 @@ mod tests {
             pins: HashSet::new(),
             recent: Vec::new(),
             frequencies: HashMap::new(),
+            extensions: Vec::new(),
             files: Vec::new(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
@@ -1078,6 +1080,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             pins: HashSet::new(),
             recent: Vec::new(),
             frequencies: HashMap::new(),
+            extensions: Vec::new(),
             files: Vec::new(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
@@ -1140,6 +1143,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             pins: HashSet::new(),
             recent: Vec::new(),
             frequencies: HashMap::new(),
+            extensions: Vec::new(),
             files: Vec::new(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };

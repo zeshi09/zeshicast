@@ -4,6 +4,7 @@ pub(crate) mod calculator;
 pub(crate) mod clipboard;
 pub(crate) mod commands;
 pub(crate) mod emoji;
+pub(crate) mod extensions;
 pub(crate) mod files;
 pub(crate) mod media;
 pub(crate) mod named_values;
@@ -245,3 +246,24 @@ impl SearchProvider for BrowserTabsProvider {
         browser_tabs::search_browser_tabs(context.query)
     }
 }
+
+pub(crate) struct ExtensionsProvider<'a> {
+    pub(crate) manifests: &'a [crate::ExtensionManifest],
+}
+
+impl SearchProvider for ExtensionsProvider<'_> {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        let mut actions = Vec::new();
+        for manifest in self.manifests {
+            for cmd_path in &manifest.commands {
+                actions.extend(extensions::search_extension(
+                    cmd_path,
+                    &manifest.origin.name,
+                    context.query,
+                ));
+            }
+        }
+        actions
+    }
+}
+
