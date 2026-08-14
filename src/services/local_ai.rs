@@ -106,16 +106,13 @@ pub fn ask_local_ai_streaming(
                 return;
             }
             let Ok(line) = line else { break };
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
-                continue;
-            };
-            if let Some(token) = value.get("response").and_then(|v| v.as_str())
-                && !token.is_empty()
-            {
-                sender.send(StreamChunk::Token(token.to_string())).ok();
+            if let Some(token) = parse_streaming_line(&line) {
+                sender.send(StreamChunk::Token(token)).ok();
             }
-            if value.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
-                break;
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                if value.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    break;
+                }
             }
         }
         sender.send(StreamChunk::Done).ok();
@@ -124,10 +121,70 @@ pub fn ask_local_ai_streaming(
     cancel
 }
 
-#[derive(Debug)]
+/// Parses a single line from an Ollama or OpenAI-compatible streaming response.
+pub fn parse_streaming_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() || line == "data: [DONE]" {
+        return None;
+    }
+
+    let payload = line.strip_prefix("data: ").unwrap_or(line);
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return None;
+    };
+
+    // 1. Ollama format: {"response": "..."}
+    if let Some(token) = value.get("response").and_then(|v| v.as_str()) {
+        if !token.is_empty() {
+            return Some(token.to_string());
+        }
+    }
+
+    // 2. OpenAI format: {"choices": [{"delta": {"content": "..."}}]}
+    if let Some(choices) = value.get("choices").and_then(|c| c.as_array()) {
+        if let Some(first) = choices.first() {
+            if let Some(token) = first
+                .get("delta")
+                .and_then(|d| d.get("content"))
+                .and_then(|c| c.as_str())
+            {
+                if !token.is_empty() {
+                    return Some(token.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum StreamChunk {
     Token(String),
     Done,
     Cancelled,
     Error(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ollama_stream_line() {
+        let line = r#"{"model":"llama3","response":"Hello","done":false}"#;
+        assert_eq!(parse_streaming_line(line), Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn parse_openai_sse_stream_line() {
+        let line = r#"data: {"choices":[{"delta":{"content":" world"}}]}"#;
+        assert_eq!(parse_streaming_line(line), Some(" world".to_string()));
+    }
+
+    #[test]
+    fn parse_openai_done_marker() {
+        assert_eq!(parse_streaming_line("data: [DONE]"), None);
+        assert_eq!(parse_streaming_line(""), None);
+    }
 }
