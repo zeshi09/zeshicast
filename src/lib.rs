@@ -74,7 +74,7 @@ pub(crate) use search::windows::{
     search_hyprland_actions, search_niri_actions, search_sway_actions, search_windows,
 };
 pub(crate) use search::{
-    AppsProvider, AudioProvider, ClipboardProvider, CommandsProvider, EmojiProvider, FilesProvider,
+    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider, EmojiProvider, FilesProvider,
     HyprlandProvider, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
     NotificationsProvider, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
     SearchProvider, SwayProvider, SystemProvider, WebProvider, WindowsProvider,

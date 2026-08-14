@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use crate::services::storage;
 use crate::{
     Action, ActionFormCommand, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider,
-    ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
+    BrowserTabsProvider, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
     ExecutionPolicy, ExecutionRequest, ExtensionManifest, FileEntry, FilesProvider,
     HyprlandProvider, LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider,
     NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider,
@@ -537,6 +537,7 @@ impl Zeshicast {
         }));
         providers.push(Box::new(FilesProvider { files: &self.files }));
         providers.push(Box::new(ProcessesProvider));
+        providers.push(Box::new(BrowserTabsProvider));
 
         for provider in providers {
             actions.extend(provider.search(&search_context));

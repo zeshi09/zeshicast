@@ -1,4 +1,5 @@
 pub(crate) mod apps;
+pub(crate) mod browser_tabs;
 pub(crate) mod calculator;
 pub(crate) mod clipboard;
 pub(crate) mod commands;
@@ -234,5 +235,13 @@ pub(crate) struct EmojiProvider;
 impl SearchProvider for EmojiProvider {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         search_emoji(context.query)
+    }
+}
+
+pub(crate) struct BrowserTabsProvider;
+
+impl SearchProvider for BrowserTabsProvider {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        browser_tabs::search_browser_tabs(context.query)
     }
 }
