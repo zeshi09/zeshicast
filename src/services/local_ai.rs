@@ -87,10 +87,91 @@ pub fn ask_local_ai_streaming(
     cancel
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
 #[derive(Debug)]
 pub enum StreamChunk {
     Token(String),
     Done,
     Cancelled,
     Error(String),
+}
+
+/// Streaming multi-turn chat version: queries Ollama /api/chat with full conversation messages history.
+#[allow(dead_code)]
+pub fn ask_local_ai_chat_streaming(
+    config: LocalAiConfig,
+    messages: Vec<ChatMessage>,
+    sender: std::sync::mpsc::SyncSender<StreamChunk>,
+) -> Arc<AtomicBool> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = Arc::clone(&cancel);
+
+    std::thread::spawn(move || {
+        let endpoint = config.endpoint.trim_end_matches('/').to_string();
+        let url = format!("{endpoint}/api/chat");
+
+        let response = match ureq::post(&url).send_json(serde_json::json!({
+            "model": config.model,
+            "messages": messages,
+            "stream": true,
+        })) {
+            Ok(r) => r,
+            Err(e) => {
+                sender.send(StreamChunk::Error(e.to_string())).ok();
+                return;
+            }
+        };
+
+        let reader = BufReader::new(response.into_reader());
+        for line in reader.lines() {
+            if cancel_clone.load(Ordering::Relaxed) {
+                sender.send(StreamChunk::Cancelled).ok();
+                return;
+            }
+            let Ok(line) = line else { break };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if let Some(token) = value
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|v| v.as_str())
+            {
+                if !token.is_empty() {
+                    sender.send(StreamChunk::Token(token.to_string())).ok();
+                }
+            } else if let Some(token) = value.get("response").and_then(|v| v.as_str()) {
+                if !token.is_empty() {
+                    sender.send(StreamChunk::Token(token.to_string())).ok();
+                }
+            }
+            if value.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                break;
+            }
+        }
+        sender.send(StreamChunk::Done).ok();
+    });
+
+    cancel
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_message_serialization() {
+        let msg = ChatMessage {
+            role: "user".to_string(),
+            content: "Hello AI".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"role\":\"user\""));
+        assert!(json.contains("\"content\":\"Hello AI\""));
+    }
 }

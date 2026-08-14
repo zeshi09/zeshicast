@@ -67,6 +67,7 @@ pub struct Action {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecondaryActionKind {
     Run,
+    RunInTerminal,
     CopyValue,
     TypeText,
     OpenParent,
@@ -108,6 +109,7 @@ pub enum LauncherCommand {
     Network,
     Notifications,
     SystemMonitor,
+    WindowGrid,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +201,10 @@ impl Action {
 
     pub fn copy_value(&self) {
         copy_to_clipboard(&self.value());
+    }
+
+    pub fn type_value(&self) {
+        crate::type_text(&self.value());
     }
 
     pub fn value(&self) -> String {

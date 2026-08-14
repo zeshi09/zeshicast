@@ -3,8 +3,8 @@
 Raycast-like launcher for Linux, written in Rust. The CLI works without GUI
 dependencies; the GTK4 launcher is behind the `gui` feature.
 
-See [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the
-plan to evolve Zeshicast toward a Vicinae-like Rust/GTK application.
+See [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md) for the master engineering plan,
+architecture, and implementation roadmap.
 
 ## Run
 

@@ -1,8 +1,10 @@
 pub(crate) mod apps;
-pub(crate) mod emoji;
+pub(crate) mod browser_tabs;
 pub(crate) mod calculator;
 pub(crate) mod clipboard;
 pub(crate) mod commands;
+pub(crate) mod emoji;
+pub(crate) mod extensions;
 pub(crate) mod files;
 pub(crate) mod media;
 pub(crate) mod named_values;
@@ -13,15 +15,21 @@ pub(crate) mod system;
 pub(crate) mod web;
 pub(crate) mod windows;
 
+pub use browser_tabs::BrowserTab;
+use browser_tabs::search_browser_tabs;
+use emoji::search_emoji;
+pub use extensions::ExtensionManifest;
+use extensions::search_extensions;
+use scripts::search_scripts;
+pub(crate) use scripts::{ScriptEntry, load_script_entries};
+
 use crate::{
     Action, ActionTarget, AppEntry, CommandEntry, FileEntry, NamedValue, PlaceholderContext,
     search_ai, search_apps, search_audio_actions, search_clipboard, search_commands, search_files,
     search_hyprland_actions, search_media_actions, search_named_values, search_network_actions,
     search_niri_actions, search_notification_actions, search_processes, search_sway_actions,
-    search_system_actions, search_translate, search_windows,
+    search_system_actions, search_terminal_actions, search_translate, search_windows,
 };
-use emoji::search_emoji;
-use scripts::search_scripts;
 
 pub(crate) struct SearchContext<'a> {
     pub(crate) query: &'a str,
@@ -74,7 +82,12 @@ pub(crate) struct SystemProvider;
 
 impl SearchProvider for SystemProvider {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
-        search_system_actions(context.query)
+        let mut actions = search_system_actions(context.query);
+        actions.extend(search_terminal_actions(
+            context.query,
+            &context.placeholders.preferences,
+        ));
+        actions
     }
 }
 
@@ -227,12 +240,30 @@ impl SearchProvider for ScriptsProvider<'_> {
     }
 }
 
-pub(crate) use scripts::{ScriptEntry, load_script_entries};
-
 pub(crate) struct EmojiProvider;
 
 impl SearchProvider for EmojiProvider {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         search_emoji(context.query)
+    }
+}
+
+pub(crate) struct BrowserTabsProvider<'a> {
+    pub(crate) tabs: &'a [BrowserTab],
+}
+
+impl SearchProvider for BrowserTabsProvider<'_> {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        search_browser_tabs(self.tabs, context.query)
+    }
+}
+
+pub(crate) struct ExtensionsProvider<'a> {
+    pub(crate) manifests: &'a [ExtensionManifest],
+}
+
+impl SearchProvider for ExtensionsProvider<'_> {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        search_extensions(self.manifests, context.query)
     }
 }

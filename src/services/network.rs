@@ -178,7 +178,54 @@ fn parse_nmcli_wifi_list(output: &str) -> Vec<WifiNetworkSnapshot> {
         .collect()
 }
 
+pub fn nm_dbus_vpn_connections() -> Option<Vec<VpnConnectionSnapshot>> {
+    use zbus::blocking::Connection;
+    let connection = Connection::system().ok()?;
+    let nm_proxy = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.NetworkManager",
+        "/org/freedesktop/NetworkManager",
+        "org.freedesktop.NetworkManager",
+    )
+    .ok()?;
+
+    let active_paths: Vec<zbus::zvariant::OwnedObjectPath> =
+        nm_proxy.get_property("ActiveConnections").ok()?;
+    let mut vpns = Vec::new();
+
+    for path in active_paths {
+        let Ok(conn_proxy) = zbus::blocking::Proxy::new(
+            &connection,
+            "org.freedesktop.NetworkManager",
+            path.as_str(),
+            "org.freedesktop.NetworkManager.Connection.Active",
+        ) else {
+            continue;
+        };
+
+        let id: String = conn_proxy.get_property("Id").unwrap_or_default();
+        let conn_type: String = conn_proxy.get_property("Type").unwrap_or_default();
+        let is_vpn = conn_proxy.get_property::<bool>("Vpn").unwrap_or(false)
+            || conn_type.contains("vpn")
+            || conn_type.contains("wireguard");
+
+        if is_vpn && !id.is_empty() {
+            vpns.push(VpnConnectionSnapshot {
+                name: id,
+                kind: conn_type,
+            });
+        }
+    }
+    Some(vpns)
+}
+
 fn read_vpn_connections() -> io::Result<Vec<VpnConnectionSnapshot>> {
+    if let Some(vpns) = nm_dbus_vpn_connections() {
+        if !vpns.is_empty() {
+            return Ok(vpns);
+        }
+    }
+
     let output = command_stdout(
         "nmcli",
         &["-t", "-f", "NAME,TYPE", "connection", "show", "--active"],

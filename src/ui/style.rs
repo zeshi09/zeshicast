@@ -33,6 +33,22 @@ pub fn install_css() {
     apply_gtk_theme(theme);
 
     let css = "
+        @define-color z_bg #0d0f14;
+        @define-color z_surface_0 #13161f;
+        @define-color z_surface_1 #181c27;
+        @define-color z_surface_2 #222736;
+        @define-color z_border rgba(255, 255, 255, 0.08);
+        @define-color z_border_subtle rgba(255, 255, 255, 0.05);
+        @define-color z_border_hover rgba(255, 255, 255, 0.18);
+        @define-color z_text_primary #f0f2f8;
+        @define-color z_text_secondary #8b93a7;
+        @define-color z_text_tertiary #555d72;
+        @define-color z_accent #ff4a5a;
+        @define-color z_accent_glow rgba(255, 74, 90, 0.22);
+        @define-color z_success #34d399;
+        @define-color z_warning #fbbf24;
+        @define-color z_danger #f87171;
+
         entry,
         entry:focus,
         entry:focus-visible {
@@ -41,40 +57,50 @@ pub fn install_css() {
         }
 
         .launcher-window {
-          background: alpha(@window_bg_color, 0.985);
-          border: 1px solid alpha(@window_fg_color, 0.12);
+          background: alpha(@z_bg, 0.985);
+          border: 1px solid @z_border;
           border-radius: 12px;
-          box-shadow: 0 22px 56px alpha(black, 0.36);
+          box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
           font-family: __FONT_FAMILY__;
         }
 
         .action-panel {
-          background: alpha(@window_bg_color, 0.99);
-          border: 1px solid alpha(@accent_color, 0.35);
+          background: alpha(@z_bg, 0.99);
+          border: 1px solid @z_accent_glow;
           border-radius: 12px;
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
           font-family: __FONT_FAMILY__;
         }
 
         .action-panel-title {
           font-size: __PANEL_TITLE_SIZE__px;
           font-weight: 600;
+          color: @z_text_primary;
           min-height: 24px;
         }
 
         .search-shell {
-          padding: 0 14px;
-          border-bottom: 1px solid alpha(@window_fg_color, 0.08);
+          padding: 0 16px;
+          border-bottom: 1px solid @z_border;
         }
 
         .search-entry {
-          min-height: 60px;
+          min-height: 58px;
           font-size: __SEARCH_SIZE__px;
+          font-weight: 500;
+          letter-spacing: -0.2px;
+          color: @z_text_primary;
           border-radius: 0;
           padding: 0 4px;
           background: transparent;
           border: none;
           box-shadow: none;
           outline: none;
+        }
+
+        .search-entry placeholder {
+          color: @z_text_tertiary;
+          font-weight: 400;
         }
 
         .search-entry:focus {
@@ -84,7 +110,7 @@ pub fn install_css() {
 
         .results-list {
           background: transparent;
-          padding: 4px 0;
+          padding: 6px 8px;
         }
 
         .results-scroll {
@@ -94,17 +120,20 @@ pub fn install_css() {
         }
 
         .result-row {
-          border-radius: 0;
+          border-radius: 8px;
           min-height: __ROW_HEIGHT__px;
+          margin: 1px 0;
+          transition: background 100ms ease;
         }
 
         .result-row:selected {
-          background: alpha(@window_fg_color, 0.085);
-          color: @window_fg_color;
+          background: alpha(@z_text_primary, 0.085);
+          color: @z_text_primary;
+          box-shadow: inset 3px 0 0 @z_accent;
         }
 
         .result-row:hover {
-          background: alpha(@window_fg_color, 0.055);
+          background: alpha(@z_text_primary, 0.045);
         }
 
         .section-header-row {
@@ -112,102 +141,119 @@ pub fn install_css() {
         }
 
         .section-header {
-          color: alpha(@window_fg_color, 0.58);
-          font-size: __SUBTITLE_SIZE__px;
-          font-weight: 600;
+          color: @z_text_tertiary;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.8px;
+          text-transform: uppercase;
           min-height: 18px;
         }
 
         .category-pill {
-          color: alpha(@window_fg_color, 0.7);
-          font-size: __SUBTITLE_SIZE__px;
-          padding: 2px 6px;
-          border-radius: 6px;
-          background: alpha(@window_fg_color, 0.075);
+          color: @z_text_secondary;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+          padding: 2px 7px;
+          border-radius: 5px;
+          background: @z_surface_1;
+          border: 1px solid @z_border;
           min-height: 18px;
         }
 
         .result-title {
           font-size: __FONT_SIZE__px;
-          font-weight: 500;
+          font-weight: 600;
+          color: @z_text_primary;
           min-height: 22px;
         }
 
         .result-subtitle {
-          color: alpha(@window_fg_color, 0.52);
+          color: @z_text_secondary;
           font-size: __SUBTITLE_SIZE__px;
+          font-weight: 400;
           min-height: 18px;
         }
 
         .result-icon {
-          color: alpha(@window_fg_color, 0.8);
+          color: @z_text_primary;
         }
 
         .fa-icon {
           font-family: 'Font Awesome 6 Free', 'Font Awesome 6 Free Solid',
                        'FontAwesome', 'Font Awesome 5 Free';
           font-weight: 900;
-          color: alpha(@window_fg_color, 0.72);
+          color: @z_text_secondary;
         }
 
         .action-bar {
-          padding: 7px 12px;
-          border-top: 1px solid alpha(@window_fg_color, 0.08);
+          padding: 8px 14px;
+          border-top: 1px solid @z_border;
+          background: alpha(@z_surface_0, 0.6);
         }
 
         .action-button {
           min-width: 38px;
-          min-height: 34px;
-          border-radius: 7px;
+          min-height: 32px;
+          border-radius: 6px;
         }
 
         .footer-action {
-          min-height: 30px;
+          min-height: 28px;
           padding: 0 10px;
-          border-radius: 7px;
-          font-size: __SUBTITLE_SIZE__px;
-          background: transparent;
-          border: 1px solid alpha(@window_fg_color, 0.10);
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 500;
+          color: @z_text_secondary;
+          background: @z_surface_1;
+          border: 1px solid @z_border;
+          transition: all 120ms ease;
         }
 
         .footer-action:hover {
-          background: alpha(@window_fg_color, 0.06);
+          background: @z_surface_2;
+          color: @z_text_primary;
+          border-color: @z_border_hover;
         }
 
         .status-strip {
-          padding: 7px 14px 10px 14px;
-          border-top: 1px solid alpha(@window_fg_color, 0.08);
+          padding: 6px 16px 8px 16px;
+          border-top: 1px solid @z_border;
         }
 
         .status-clock {
           font-size: __SUBTITLE_SIZE__px;
           font-weight: 600;
+          color: @z_text_primary;
         }
 
         .status-date {
-          color: alpha(@window_fg_color, 0.58);
+          color: @z_text_secondary;
           font-size: __SUBTITLE_SIZE__px;
         }
 
         .dashboard-clock {
           font-size: __DASHBOARD_CLOCK_SIZE__px;
           font-weight: 700;
-          letter-spacing: -0.5px;
+          letter-spacing: -0.6px;
+          color: @z_text_primary;
         }
 
         .dashboard-date {
-          color: alpha(@window_fg_color, 0.52);
+          color: @z_text_secondary;
           font-size: __FONT_SIZE__px;
           font-weight: 400;
         }
 
         .dashboard-stat-chip {
-          color: alpha(@window_fg_color, 0.68);
-          font-size: __SUBTITLE_SIZE__px;
+          color: @z_text_secondary;
+          font-size: 12px;
+          font-weight: 500;
           padding: 3px 10px;
-          border-radius: 20px;
-          background: alpha(@window_fg_color, 0.06);
-          border: 1px solid alpha(@window_fg_color, 0.09);
+          border-radius: 16px;
+          background: @z_surface_1;
+          border: 1px solid @z_border;
         }
 
         .dashboard-header {
@@ -217,66 +263,77 @@ pub fn install_css() {
         .dashboard-header-stat {
           padding: 7px 10px;
           border-radius: 8px;
-          background: alpha(@window_fg_color, 0.055);
-          border: 1px solid alpha(@window_fg_color, 0.08);
+          background: @z_surface_0;
+          border: 1px solid @z_border;
         }
 
         .dashboard-card {
           min-height: 86px;
-          padding: 10px 12px;
+          padding: 12px 14px;
           border-radius: 10px;
-          background: alpha(@window_fg_color, 0.042);
-          border: 1px solid alpha(@window_fg_color, 0.07);
+          background: @z_surface_0;
+          border: 1px solid @z_border;
+          transition: border-color 150ms ease;
+        }
+
+        .dashboard-card:hover {
+          border-color: @z_border_hover;
         }
 
         .dashboard-card-title {
-          color: alpha(@window_fg_color, 0.60);
-          font-size: __SUBTITLE_SIZE__px;
-          font-weight: 600;
+          color: @z_text_secondary;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.6px;
+          text-transform: uppercase;
           min-height: 16px;
         }
 
         .dashboard-metric-value {
-          color: @window_fg_color;
+          color: @z_text_primary;
           font-size: __FONT_SIZE__px;
           font-weight: 700;
           min-height: 20px;
         }
 
         .dashboard-card-value {
-          color: alpha(@window_fg_color, 0.80);
+          color: @z_text_primary;
           font-size: __SUBTITLE_SIZE__px;
           min-height: 16px;
         }
 
         .dashboard-card-actions {
           padding-top: 4px;
-          gap: 4px;
+          gap: 6px;
         }
 
         .dashboard-button {
-          min-height: 24px;
-          padding: 0 8px;
+          min-height: 26px;
+          padding: 0 10px;
           border-radius: 6px;
-          font-size: __SUBTITLE_SIZE__px;
-          background: alpha(@window_fg_color, 0.06);
-          border: 1px solid alpha(@window_fg_color, 0.09);
+          font-size: 12px;
+          font-weight: 500;
+          color: @z_text_primary;
+          background: @z_surface_1;
+          border: 1px solid @z_border;
+          transition: all 120ms ease;
         }
 
         .dashboard-button:hover {
-          background: alpha(@window_fg_color, 0.10);
+          background: @z_surface_2;
+          border-color: @z_border_hover;
         }
 
         .dashboard-metric-bar trough {
-          min-height: 3px;
+          min-height: 4px;
           border-radius: 2px;
-          background: alpha(@window_fg_color, 0.10);
+          background: @z_surface_2;
         }
 
         .dashboard-metric-bar progress {
-          min-height: 3px;
+          min-height: 4px;
           border-radius: 2px;
-          background: alpha(@accent_color, 0.72);
+          background: @z_accent;
         }
 
         .metric-graph {
@@ -288,17 +345,19 @@ pub fn install_css() {
         .audio-volume-bar trough {
           min-height: 10px;
           border-radius: 6px;
-          background: alpha(@window_fg_color, 0.12);
+          background: @z_surface_2;
         }
 
         .audio-volume-bar progress {
           min-height: 10px;
           border-radius: 6px;
-          background: @accent_color;
+          background: @z_accent;
         }
 
         .audio-volume-value {
           font-weight: 700;
+          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          color: @z_text_primary;
           min-width: 42px;
         }
 
@@ -310,14 +369,14 @@ pub fn install_css() {
         .process-memory-bar trough {
           min-height: 8px;
           border-radius: 5px;
-          background: alpha(@window_fg_color, 0.10);
+          background: @z_surface_2;
         }
 
         .resource-bar progress,
         .process-memory-bar progress {
           min-height: 8px;
           border-radius: 5px;
-          background: @accent_color;
+          background: @z_accent;
         }
 
         .process-memory-bar trough,
@@ -330,82 +389,90 @@ pub fn install_css() {
         }
 
         .action-section-label {
-          color: alpha(@window_fg_color, 0.50);
-          font-size: __SUBTITLE_SIZE__px;
-          font-weight: 600;
+          color: @z_text_tertiary;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.8px;
+          text-transform: uppercase;
           min-height: 14px;
-          padding-top: 6px;
+          padding-top: 8px;
           padding-bottom: 2px;
         }
 
         .result-row.danger {
-          color: #ff6b5f;
+          color: @z_danger;
         }
 
         .result-row.danger .result-title {
-          color: #ff6b5f;
+          color: @z_danger;
         }
 
         .result-row.danger .result-icon {
-          color: #ff6b5f;
+          color: @z_danger;
         }
 
         .pref-sidebar {
-          background: alpha(@window_fg_color, 0.04);
-          border-right: 1px solid alpha(@window_fg_color, 0.08);
+          background: @z_surface_0;
+          border-right: 1px solid @z_border;
           min-width: 160px;
         }
 
         .pref-sidebar-row {
           min-height: 36px;
-          border-radius: 0;
+          border-radius: 6px;
+          margin: 2px 6px;
         }
 
         .pref-sidebar-row:selected {
-          background: alpha(@accent_color, 0.18);
-          color: @window_fg_color;
+          background: @z_accent_glow;
+          color: @z_text_primary;
         }
 
         .pref-sidebar-label {
           font-size: __FONT_SIZE__px;
           font-weight: 500;
+          color: @z_text_primary;
         }
 
         .pref-content {
-          padding: 12px 14px;
+          padding: 12px 16px;
         }
 
         .pref-field-row {
-          padding: 5px 0;
+          padding: 6px 0;
         }
 
         .pref-field-label {
           font-size: __SUBTITLE_SIZE__px;
-          color: alpha(@window_fg_color, 0.85);
+          color: @z_text_primary;
+          font-weight: 500;
         }
 
         .clipboard-ago {
-          color: alpha(@window_fg_color, 0.45);
-          font-size: __SUBTITLE_SIZE__px;
+          color: @z_text_tertiary;
+          font-size: 11px;
+          font-family: 'JetBrains Mono', 'Fira Code', monospace;
           min-width: 60px;
         }
 
         .ai-context-chip {
-          background: alpha(@accent_color, 0.14);
-          border: 1px solid alpha(@accent_color, 0.3);
+          background: @z_accent_glow;
+          border: 1px solid @z_accent;
           border-radius: 8px;
           padding: 2px 8px;
-          font-size: __SUBTITLE_SIZE__px;
-          color: @accent_color;
+          font-size: 11px;
+          font-weight: 600;
+          color: @z_accent;
         }
 
         .ai-model-chip {
-          background: alpha(@window_fg_color, 0.07);
-          border: 1px solid alpha(@window_fg_color, 0.12);
+          background: @z_surface_1;
+          border: 1px solid @z_border;
           border-radius: 8px;
           padding: 2px 8px;
-          font-size: __SUBTITLE_SIZE__px;
-          color: alpha(@window_fg_color, 0.65);
+          font-size: 11px;
+          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          color: @z_text_secondary;
         }
         "
     .replace("__FONT_FAMILY__", &font_family)

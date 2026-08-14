@@ -230,3 +230,71 @@ fn network_action_entries() -> Vec<SystemActionEntry> {
         },
     ]
 }
+
+pub(crate) fn search_terminal_actions(
+    query: &str,
+    preferences: &std::collections::HashMap<String, String>,
+) -> Vec<Action> {
+    let lower = query.trim().to_lowercase();
+    let explicit = lower.starts_with("terminal ")
+        || lower.starts_with("term ")
+        || lower == "terminal"
+        || lower == "term";
+    let needle = if explicit {
+        query
+            .split_once(' ')
+            .map(|(_, v)| v.trim())
+            .unwrap_or_default()
+    } else {
+        query.trim()
+    };
+
+    let default_term = crate::services::terminal::resolve_default_terminal(preferences);
+    let mut actions = Vec::new();
+
+    let default_haystack = format!("launch default terminal {}", default_term.name);
+    let default_score = if needle.is_empty() {
+        if explicit { Some(320) } else { None }
+    } else {
+        fuzzy_score(&default_haystack, needle)
+    };
+
+    if let Some(score) = default_score {
+        actions.push(
+            Action::new(
+                "Terminal",
+                format!("Launch Terminal ({})", default_term.name),
+                ActionKind::Shell(ShellCommand::new(&default_term.binary)),
+                score + if explicit { 280 } else { 40 },
+            )
+            .with_subtitle(format!("Default terminal emulator: {}", default_term.binary))
+            .with_icon("utilities-terminal-symbolic"),
+        );
+    }
+
+    for term in crate::services::terminal::detected_terminals() {
+        if !term.available {
+            continue;
+        }
+        let haystack = format!("terminal {} {}", term.name, term.binary);
+        let score = if needle.is_empty() {
+            if explicit { Some(200) } else { None }
+        } else {
+            fuzzy_score(&haystack, needle)
+        };
+        if let Some(s) = score {
+            actions.push(
+                Action::new(
+                    "Terminal",
+                    format!("Launch {}", term.name),
+                    ActionKind::Shell(ShellCommand::new(&term.binary)),
+                    s + if explicit { 250 } else { 30 },
+                )
+                .with_subtitle(format!("Open {} ({})", term.name, term.binary))
+                .with_icon("utilities-terminal-symbolic"),
+            );
+        }
+    }
+
+    actions
+}

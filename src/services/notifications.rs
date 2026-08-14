@@ -25,9 +25,105 @@ pub struct NotificationEntrySnapshot {
 }
 
 pub fn notification_snapshot() -> NotificationSnapshot {
+    if let Some(snapshot) = dbus_notifications_snapshot() {
+        if snapshot.is_available() {
+            return snapshot;
+        }
+    }
     swaync_snapshot()
         .or_else(|_| dunst_snapshot())
         .unwrap_or_default()
+}
+
+pub fn dbus_notifications_snapshot() -> Option<NotificationSnapshot> {
+    use zbus::blocking::Connection;
+    let connection = Connection::session().ok()?;
+
+    if let Ok(dunst_proxy) = zbus::blocking::Proxy::new(
+        &connection,
+        "org.dunstproject.cmd0",
+        "/org/dunstproject/cmd0",
+        "org.dunstproject.cmd0",
+    ) {
+        let is_paused: Option<bool> = dunst_proxy.call("NotificationIsPaused", &()).ok();
+        let history_str: Option<String> = dunst_proxy.call("NotificationHistoryGet", &()).ok();
+        let history = history_str
+            .as_deref()
+            .and_then(|s| parse_dunst_history(s).ok())
+            .unwrap_or_default();
+        let count = Some(history.len() as u32);
+
+        return Some(NotificationSnapshot {
+            backend: Some("dunst".to_string()),
+            count,
+            dnd: is_paused,
+            history,
+        });
+    }
+
+    if let Ok(notif_proxy) = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.Notifications",
+        "/org/freedesktop/Notifications",
+        "org.freedesktop.Notifications",
+    ) {
+        let server_info: Option<(String, String, String, String)> =
+            notif_proxy.call("GetServerInformation", &()).ok();
+        if let Some((name, _, _, _)) = server_info {
+            return Some(NotificationSnapshot {
+                backend: Some(name.to_lowercase()),
+                count: None,
+                dnd: None,
+                history: Vec::new(),
+            });
+        }
+    }
+
+    None
+}
+
+#[allow(dead_code)]
+pub fn toggle_dnd_dbus() -> bool {
+    use zbus::blocking::Connection;
+    let Ok(connection) = Connection::session() else {
+        return false;
+    };
+
+    if let Ok(dunst_proxy) = zbus::blocking::Proxy::new(
+        &connection,
+        "org.dunstproject.cmd0",
+        "/org/dunstproject/cmd0",
+        "org.dunstproject.cmd0",
+    ) {
+        let res: zbus::Result<()> = dunst_proxy.call("NotificationTogglePaused", &());
+        if res.is_ok() {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[allow(dead_code)]
+pub fn close_all_notifications_dbus() -> bool {
+    use zbus::blocking::Connection;
+    let Ok(connection) = Connection::session() else {
+        return false;
+    };
+
+    if let Ok(dunst_proxy) = zbus::blocking::Proxy::new(
+        &connection,
+        "org.dunstproject.cmd0",
+        "/org/dunstproject/cmd0",
+        "org.dunstproject.cmd0",
+    ) {
+        let res: zbus::Result<()> = dunst_proxy.call("NotificationCloseAll", &());
+        if res.is_ok() {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn swaync_snapshot() -> io::Result<NotificationSnapshot> {

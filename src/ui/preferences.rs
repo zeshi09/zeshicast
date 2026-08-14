@@ -3,6 +3,10 @@ pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
     ("ui_font_size", "UI base font size 12-22 (restart required)"),
     ("ui_density", "Row density: comfortable (default) or compact"),
     ("ui_theme", "Theme: system (default), dark, or light"),
+    (
+        "default_terminal",
+        "Default terminal emulator (ghostty, foot, kitty, alacritty, wezterm...)",
+    ),
     ("show_status_strip", "Show status strip (true/false)"),
     (
         "status_items",
@@ -59,6 +63,10 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
     PrefSection {
         name: "General",
         keys: &[
+            (
+                "default_terminal",
+                "Default terminal (ghostty, foot, kitty, alacritty, wezterm...)",
+            ),
             ("show_status_strip", "Show status strip (true/false)"),
             (
                 "status_items",

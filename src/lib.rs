@@ -53,23 +53,31 @@ pub(crate) use search::processes::search_processes;
 pub(crate) use search::processes::{ProcessEntry, decode_cmdline, search_process_entries};
 pub(crate) use search::system::{
     SystemActionEntry, search_audio_actions, search_network_actions, search_system_actions,
+    search_terminal_actions,
 };
 pub(crate) use search::web::{execute_http_request, search_ai, search_translate};
 pub(crate) use search::windows::{
     search_hyprland_actions, search_niri_actions, search_sway_actions, search_windows,
 };
+pub use search::browser_tabs::{BrowserTab, load_browser_tabs, search_browser_tabs};
+pub use search::extensions::{
+    ExtensionItem, ExtensionManifest, load_extension_manifests, search_extensions,
+};
 pub(crate) use search::{
-    AppsProvider, AudioProvider, ClipboardProvider, CommandsProvider, EmojiProvider, FilesProvider,
-    HyprlandProvider, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
-    NotificationsProvider, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
-    SearchProvider, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
-    load_script_entries,
+    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider,
+    EmojiProvider, ExtensionsProvider, FilesProvider, HyprlandProvider, MediaProvider,
+    NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, ProcessesProvider,
+    ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SwayProvider, SystemProvider,
+    WebProvider, WindowsProvider, load_script_entries,
 };
 pub use services::audio::{
     AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
 };
 pub use services::battery::{BatteryDeviceSnapshot, BatterySnapshot, battery_snapshot};
-pub use services::local_ai::{LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming};
+pub use services::local_ai::{
+    ChatMessage, LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_chat_streaming,
+    ask_local_ai_streaming,
+};
 pub use services::storage as storage_service;
 pub use services::media::{MediaSnapshot, media_snapshot};
 pub use services::network::{
@@ -79,6 +87,10 @@ pub use services::network::{
 pub use services::notifications::{NotificationSnapshot, notification_snapshot};
 pub use services::system_stats::{
     ProcessSummary, SystemSnapshot, system_snapshot, top_processes_by_memory,
+};
+pub use services::terminal::{
+    KNOWN_TERMINALS, TerminalEmulator, detected_terminals, resolve_default_terminal,
+    spawn_in_terminal,
 };
 pub use services::thermal::{ThermalSnapshot, ThermalZoneSnapshot, thermal_snapshot};
 
@@ -157,6 +169,23 @@ fn copy_to_clipboard(text: &str) {
 }
 
 pub fn copy_text(text: &str) {
+    copy_to_clipboard(text);
+}
+
+pub fn type_text(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    if let Ok(mut child) = Command::new("wtype").arg(text).spawn() {
+        if child.wait().map(|s| s.success()).unwrap_or(false) {
+            return;
+        }
+    }
+    if let Ok(mut child) = Command::new("ydotool").args(["type", "--", text]).spawn() {
+        if child.wait().map(|s| s.success()).unwrap_or(false) {
+            return;
+        }
+    }
     copy_to_clipboard(text);
 }
 
@@ -344,8 +373,10 @@ mod tests {
             quicklinks: Vec::new(),
             snippets: Vec::new(),
             commands: Vec::new(),
-            clipboard_history: Vec::new(),
             scripts: Vec::new(),
+            extensions: Vec::new(),
+            browser_tabs: Vec::new(),
+            clipboard_history: Vec::new(),
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences: HashMap::new(),
@@ -377,8 +408,10 @@ mod tests {
             quicklinks: Vec::new(),
             snippets: Vec::new(),
             commands: Vec::new(),
-            clipboard_history: vec!["secret".to_string()],
             scripts: Vec::new(),
+            extensions: Vec::new(),
+            browser_tabs: Vec::new(),
+            clipboard_history: vec!["secret".to_string()],
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences: HashMap::new(),
@@ -784,8 +817,10 @@ DEPLOY_TOKEN = "{{pref:token}}"
             quicklinks: Vec::new(),
             snippets: Vec::new(),
             commands: Vec::new(),
-            clipboard_history: Vec::new(),
             scripts: Vec::new(),
+            extensions: Vec::new(),
+            browser_tabs: Vec::new(),
+            clipboard_history: Vec::new(),
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences: HashMap::new(),
@@ -832,6 +867,11 @@ DEPLOY_TOKEN = "{{pref:token}}"
                 .iter()
                 .any(|action| action.launcher_command() == Some(LauncherCommand::AiChat))
         );
+        assert!(
+            app.search("window grid")
+                .iter()
+                .any(|action| action.launcher_command() == Some(LauncherCommand::WindowGrid))
+        );
     }
 
     #[test]
@@ -846,8 +886,10 @@ DEPLOY_TOKEN = "{{pref:token}}"
             quicklinks: Vec::new(),
             snippets: Vec::new(),
             commands: Vec::new(),
-            clipboard_history: Vec::new(),
             scripts: Vec::new(),
+            extensions: Vec::new(),
+            browser_tabs: Vec::new(),
+            clipboard_history: Vec::new(),
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences,
@@ -974,5 +1016,25 @@ DEPLOY_TOKEN = "{{pref:token}}"
             decode_cmdline(b"zeshicast-gtk\0--daemon\0"),
             "zeshicast-gtk --daemon"
         );
+    }
+
+    #[test]
+    fn terminal_actions_show_on_terminal_prefix() {
+        let prefs = std::collections::HashMap::new();
+        let actions = search_terminal_actions("terminal", &prefs);
+        assert!(!actions.is_empty());
+        assert!(actions.iter().any(|a| a.category == "Terminal"));
+    }
+
+    #[test]
+    fn terminal_detection_supports_custom_and_known() {
+        let mut prefs = std::collections::HashMap::new();
+        prefs.insert("default_terminal".to_string(), "alacritty".to_string());
+        let term = resolve_default_terminal(&prefs);
+        assert_eq!(term.id, "alacritty");
+        assert_eq!(term.binary, "alacritty");
+
+        let actions = search_terminal_actions("terminal", &prefs);
+        assert!(actions.iter().any(|a| a.title.contains("Alacritty")));
     }
 }

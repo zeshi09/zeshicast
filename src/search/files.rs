@@ -130,7 +130,7 @@ fn visit_files(dir: &Path, depth: usize, files: &mut Vec<FileEntry>, seen: &mut 
     }
 }
 
-fn should_skip_file(name: &str) -> bool {
+pub(crate) fn should_skip_file(name: &str) -> bool {
     if name.starts_with('.') {
         return true;
     }
@@ -148,4 +148,105 @@ fn should_skip_file(name: &str) -> bool {
             | ".var"
             | "Trash"
     )
+}
+
+#[allow(dead_code)]
+pub(crate) fn should_skip_path(path: &Path) -> bool {
+    for component in path.components() {
+        let name = component.as_os_str().to_string_lossy();
+        if should_skip_file(&name) {
+            return true;
+        }
+    }
+    false
+}
+
+#[allow(dead_code)]
+pub(crate) fn add_file_entry(files: &mut Vec<FileEntry>, path: PathBuf) {
+    if should_skip_path(&path) {
+        return;
+    }
+    if let Some(file_name) = path.file_name() {
+        let name = file_name.to_string_lossy().to_string();
+        let is_dir = path.is_dir();
+        // Remove existing entry with same path if present
+        files.retain(|f| f.path != path);
+        if files.len() < MAX_INDEXED_FILES {
+            files.push(FileEntry { name, path, is_dir });
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn remove_file_entry(files: &mut Vec<FileEntry>, path: &Path) {
+    files.retain(|f| f.path != path && !f.path.starts_with(path));
+}
+
+pub(crate) struct FileWatcherHandle {
+    _watcher: Option<notify::RecommendedWatcher>,
+}
+
+#[allow(dead_code)]
+impl FileWatcherHandle {
+    pub(crate) fn start<F>(home: &Path, on_event: F) -> Self
+    where
+        F: Fn(notify::Event) + Send + Sync + 'static,
+    {
+        use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+
+        let mut watcher = match RecommendedWatcher::new(
+            move |res: Result<notify::Event, notify::Error>| {
+                if let Ok(event) = res {
+                    on_event(event);
+                }
+            },
+            Config::default(),
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("Failed to initialize file watcher: {}", e);
+                return Self { _watcher: None };
+            }
+        };
+
+        for name in ["Code", "Documents", "Downloads", "Desktop", "Projects"] {
+            let dir = home.join(name);
+            if dir.is_dir() {
+                let _ = watcher.watch(&dir, RecursiveMode::Recursive);
+            }
+        }
+
+        Self {
+            _watcher: Some(watcher),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_skip_files_and_paths() {
+        assert!(should_skip_file(".git"));
+        assert!(should_skip_file("node_modules"));
+        assert!(should_skip_file("target"));
+        assert!(!should_skip_file("main.rs"));
+
+        assert!(should_skip_path(Path::new("/home/user/project/target/debug/app")));
+        assert!(should_skip_path(Path::new("/home/user/project/node_modules/pkg/index.js")));
+        assert!(!should_skip_path(Path::new("/home/user/Documents/report.pdf")));
+    }
+
+    #[test]
+    fn test_add_and_remove_file_entry() {
+        let mut files = Vec::new();
+        let path = PathBuf::from("/tmp/test_file.txt");
+        add_file_entry(&mut files, path.clone());
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, "test_file.txt");
+
+        remove_file_entry(&mut files, &path);
+        assert_eq!(files.len(), 0);
+    }
 }

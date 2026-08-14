@@ -29,7 +29,8 @@ pub use views::{
     set_dashboard_notification_snapshot, set_dashboard_snapshot, set_dashboard_thermal, set_media_snapshot,
     set_network_snapshot, set_notification_snapshot, set_script_output, set_snippet_items,
     set_system_monitor_snapshot, set_system_monitor_thermal_snapshot, snippet_manager_view,
-    system_monitor_view,
+    system_monitor_view, GridSnapTarget, WindowGridView, execute_close_focused_window,
+    execute_column_resize, execute_grid_snap, window_grid_view,
 };
 pub use widgets::{
     action_button, action_panel, control_card, metric_card, move_selection, panel_root,

@@ -5,17 +5,19 @@ use std::time::SystemTime;
 
 use crate::services::storage;
 use crate::{
-    Action, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider, ClipboardProvider,
-    CommandEntry, CommandsProvider, EmojiProvider, FileEntry, FilesProvider, HyprlandProvider,
+    Action, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider, BrowserTab,
+    BrowserTabsProvider, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider,
+    ExtensionManifest, ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider,
     LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider, NamedValue,
     NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, PlaceholderContext,
     ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SecondaryAction,
     SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
     app_action, append_alias, expand_placeholders, fuzzy_score, home_dir, load_aliases, load_apps,
-    load_clipboard_history, load_command_entries, load_file_index, load_frequencies, load_lines,
-    load_named_values, load_preferences, load_script_entries, normalize_alias,
-    search_audio_actions, search_media_actions, search_network_actions,
-    search_notification_actions, search_system_actions, spawn_shell, write_lines, write_preferences,
+    load_browser_tabs, load_clipboard_history, load_command_entries, load_extension_manifests,
+    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences,
+    load_script_entries, normalize_alias, search_audio_actions, search_media_actions,
+    search_network_actions, search_notification_actions, search_system_actions,
+    search_terminal_actions, spawn_shell, write_lines, write_preferences,
 };
 
 #[derive(Debug, Clone)]
@@ -31,6 +33,8 @@ pub struct Zeshicast {
     pub(crate) snippets: Vec<NamedValue>,
     pub(crate) commands: Vec<CommandEntry>,
     pub(crate) scripts: Vec<ScriptEntry>,
+    pub(crate) extensions: Vec<ExtensionManifest>,
+    pub(crate) browser_tabs: Vec<BrowserTab>,
     pub(crate) clipboard_history: Vec<String>,
     pub(crate) clipboard_timestamps: HashMap<String, i64>,
     pub(crate) calc_history: Vec<CalcHistoryEntry>,
@@ -214,6 +218,8 @@ impl Zeshicast {
             snippets: load_named_values(&config_dir.join("snippets.txt")),
             commands: load_command_entries(&config_dir.join("commands")),
             scripts: load_script_entries(&script_dirs),
+            extensions: load_extension_manifests(&config_dir.join("extensions")),
+            browser_tabs: load_browser_tabs(),
             clipboard_history,
             clipboard_timestamps,
             calc_history,
@@ -331,6 +337,8 @@ impl Zeshicast {
             actions.extend(WebProvider.search(&search_context));
         }
         actions.extend(ScriptsProvider { entries: &self.scripts }.search(&search_context));
+        actions.extend(ExtensionsProvider { manifests: &self.extensions }.search(&search_context));
+        actions.extend(BrowserTabsProvider { tabs: &self.browser_tabs }.search(&search_context));
         actions.extend(EmojiProvider.search(&search_context));
         actions.extend(
             ClipboardProvider {
@@ -407,6 +415,19 @@ impl Zeshicast {
                 SecondaryActionKind::TypeText,
                 "Expand (type text)",
                 "input-keyboard-symbolic",
+                S::Primary,
+            ));
+        }
+
+        let is_shell_action = matches!(
+            action.kind,
+            ActionKind::Launch(_) | ActionKind::Shell(_) | ActionKind::Form(_)
+        ) || matches!(action.category.as_str(), "Command" | "Script" | "Extension");
+        if is_shell_action {
+            actions.push(SecondaryAction::new(
+                SecondaryActionKind::RunInTerminal,
+                "Run in Terminal",
+                "utilities-terminal-symbolic",
                 S::Primary,
             ));
         }
@@ -488,6 +509,10 @@ impl Zeshicast {
     ) -> io::Result<()> {
         match secondary {
             SecondaryActionKind::Run => self.run_action(action),
+            SecondaryActionKind::RunInTerminal => {
+                let cmd = action.value();
+                let _ = crate::services::terminal::spawn_in_terminal(&cmd, &self.preferences);
+            }
             SecondaryActionKind::CopyValue => action.copy_value(),
             SecondaryActionKind::TypeText => type_text_via_wtype(&action.value()),
             SecondaryActionKind::OpenParent => action.open_parent_dir(),
@@ -567,6 +592,15 @@ impl Zeshicast {
     }
 
     pub fn add_snippet(&mut self, name: &str, value: &str) -> io::Result<()> {
+        self.add_snippet_with_tags(name, value, vec!["ai".to_string()])
+    }
+
+    pub fn add_snippet_with_tags(
+        &mut self,
+        name: &str,
+        value: &str,
+        tags: Vec<String>,
+    ) -> io::Result<()> {
         let name = name.trim();
         let value = value.trim();
         if name.is_empty() || value.is_empty() {
@@ -578,7 +612,7 @@ impl Zeshicast {
         self.snippets.push(NamedValue {
             name: name.to_string(),
             value: value.to_string(),
-            tags: vec!["ai".to_string()],
+            tags,
         });
         self.write_snippets()
     }
@@ -657,6 +691,7 @@ impl Zeshicast {
         if self.preference_enabled("notifications_enabled", true) {
             actions.extend(search_notification_actions("notify"));
         }
+        actions.extend(search_terminal_actions("terminal", &self.preferences));
         actions.extend(
             NamedValuesProvider {
                 category: "Quicklink",
@@ -753,6 +788,14 @@ impl Zeshicast {
                 "notifications notification center dnd history alerts",
                 LauncherCommand::Notifications,
                 "notifications_enabled",
+            ),
+            (
+                "Window Grid & Snap",
+                "Visual grid for tiling and snapping windows",
+                "view-grid-symbolic",
+                "window grid snap tile layout position half maximize screen niri hyprland sway",
+                LauncherCommand::WindowGrid,
+                "window_grid_enabled",
             ),
         ];
 

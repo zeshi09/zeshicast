@@ -117,6 +117,17 @@ pub(super) fn show_script_output_view(
     navigation.push(crate::ui::LauncherView::ScriptOutput);
 }
 
+pub(super) fn show_window_grid_view(
+    navigation: &crate::ui::NavigationStack,
+    entry: &Entry,
+    action_bar: &GtkBox,
+    _view: &crate::ui::WindowGridView,
+) {
+    entry.set_visible(false);
+    action_bar.set_visible(false);
+    navigation.push(crate::ui::LauncherView::WindowGrid);
+}
+
 pub(super) fn run_launcher_command(
     command: crate::LauncherCommand,
     navigation: &crate::ui::NavigationStack,
@@ -129,6 +140,7 @@ pub(super) fn run_launcher_command(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    window_grid_view: &crate::ui::WindowGridView,
 ) {
     match command {
         crate::LauncherCommand::AiChat => {
@@ -147,6 +159,9 @@ pub(super) fn run_launcher_command(
         }
         crate::LauncherCommand::Notifications => {
             show_notifications_view(navigation, entry, action_bar, notifications_view)
+        }
+        crate::LauncherCommand::WindowGrid => {
+            show_window_grid_view(navigation, entry, action_bar, window_grid_view)
         }
     }
 }

@@ -152,6 +152,44 @@ fn clean_wpctl_tree_prefix(line: &str) -> &str {
         .trim()
 }
 
+#[allow(dead_code)]
+pub fn set_audio_volume(target: &str, percent: u8) -> bool {
+    let fraction = (percent.min(150) as f32) / 100.0;
+    Command::new("wpctl")
+        .args(["set-volume", target, &format!("{:.2}", fraction)])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[allow(dead_code)]
+pub fn toggle_audio_mute(target: &str) -> bool {
+    Command::new("wpctl")
+        .args(["set-mute", target, "toggle"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[allow(dead_code)]
+pub fn set_stream_volume(stream_id: u32, percent: u8) -> bool {
+    let fraction = (percent.min(150) as f32) / 100.0;
+    Command::new("wpctl")
+        .args(["set-volume", &stream_id.to_string(), &format!("{:.2}", fraction)])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[allow(dead_code)]
+pub fn set_default_audio_device(node_id: u32) -> bool {
+    Command::new("wpctl")
+        .args(["set-default", &node_id.to_string()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

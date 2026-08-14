@@ -33,29 +33,42 @@ impl PlaceholderContext {
 
 pub(crate) fn expand_placeholders(template: &str, context: &PlaceholderContext) -> String {
     let mut output = String::new();
-    let mut rest = template;
+    let chars: Vec<char> = template.chars().collect();
+    let mut i = 0;
 
-    while let Some(start) = rest.find("{{") {
-        let (before, after_start) = rest.split_at(start);
-        output.push_str(before);
-
-        let after_start = &after_start[2..];
-        let Some(end) = after_start.find("}}") else {
-            output.push_str("{{");
-            output.push_str(after_start);
-            return output;
-        };
-
-        let (placeholder, after_end) = after_start.split_at(end);
-        output.push_str(&render_placeholder(placeholder.trim(), context));
-        rest = &after_end[2..];
+    while i < chars.len() {
+        // Check for {{ ... }}
+        if i + 1 < chars.len() && chars[i] == '{' && chars[i + 1] == '{' {
+            let start = i + 2;
+            if let Some(rel_end) = template[start..].find("}}") {
+                let end = start + rel_end;
+                let placeholder = &template[start..end];
+                output.push_str(&render_placeholder(placeholder.trim(), context, true));
+                i = end + 2;
+                continue;
+            }
+        }
+        // Check for single { ... }
+        if chars[i] == '{' {
+            let start = i + 1;
+            if let Some(rel_end) = template[start..].find('}') {
+                let end = start + rel_end;
+                let placeholder = &template[start..end];
+                if !placeholder.contains('{') && !placeholder.contains('\n') {
+                    output.push_str(&render_placeholder(placeholder.trim(), context, false));
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        output.push(chars[i]);
+        i += 1;
     }
 
-    output.push_str(rest);
     output
 }
 
-fn render_placeholder(placeholder: &str, context: &PlaceholderContext) -> String {
+fn render_placeholder(placeholder: &str, context: &PlaceholderContext, double_brace: bool) -> String {
     let (name, argument) = placeholder
         .split_once(':')
         .map(|(name, argument)| (name.trim(), Some(argument.trim())))
@@ -81,10 +94,45 @@ fn render_placeholder(placeholder: &str, context: &PlaceholderContext) -> String
             .and_then(|expr| Calculator::new(expr).parse().ok())
             .map(format_number)
             .unwrap_or_default(),
-        _ => format!("{{{{{placeholder}}}}}"),
+        "user" => std::env::var("USER").unwrap_or_else(|_| "user".to_string()),
+        "hostname" => std::fs::read_to_string("/etc/hostname")
+            .map(|h| h.trim().to_string())
+            .unwrap_or_else(|_| "localhost".to_string()),
+        "cursor" => String::new(),
+        "uuid" => {
+            let random = (context.now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() ^ 0x5a5a5a5a) as u64;
+            format!("{:08x}-{:04x}-4{:03x}-8{:03x}-{:012x}", (random >> 32) as u32, (random >> 16) as u16, (random & 0xfff) as u16, (random >> 48) as u16 & 0xfff, random & 0xffffffffffff)
+        }
+        _ => {
+            if double_brace {
+                format!("{{{{{placeholder}}}}}")
+            } else {
+                format!("{{{placeholder}}}")
+            }
+        }
     }
 }
 
 pub(crate) fn format_local_time(time: SystemTime, format: &str) -> String {
     DateTime::<Local>::from(time).format(format).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_brace_and_double_brace_placeholders() {
+        let ctx = PlaceholderContext::new("my query", Some(&"clipboard content".to_string()));
+        let expanded = expand_placeholders("Query: {query}, Clip: {{clipboard}}", &ctx);
+        assert_eq!(expanded, "Query: my query, Clip: clipboard content");
+    }
+
+    #[test]
+    fn raycast_tokens_expand() {
+        let ctx = PlaceholderContext::new("", None);
+        let expanded = expand_placeholders("Hello {user} at {date:%Y}", &ctx);
+        assert!(expanded.starts_with("Hello "));
+        assert!(expanded.contains(" at "));
+    }
 }

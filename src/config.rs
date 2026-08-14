@@ -121,6 +121,7 @@ pub(crate) fn load_frequencies(path: &Path) -> HashMap<String, u32> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub(crate) fn write_frequencies(path: &Path, frequencies: &HashMap<String, u32>) -> io::Result<()> {
     let mut entries: Vec<_> = frequencies.iter().collect();
     entries.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
@@ -169,6 +170,7 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
+#[allow(dead_code)]
 pub(crate) fn load_clipboard_timestamps(path: &Path) -> HashMap<String, i64> {
     let Ok(content) = fs::read_to_string(path) else {
         return HashMap::new();
@@ -189,6 +191,7 @@ pub(crate) fn load_clipboard_timestamps(path: &Path) -> HashMap<String, i64> {
         .collect()
 }
 
+#[allow(dead_code)]
 pub(crate) fn write_clipboard_timestamps(
     path: &Path,
     entries: &[String],
@@ -208,6 +211,7 @@ pub(crate) fn write_clipboard_timestamps(
     fs::write(path, content)
 }
 
+#[allow(dead_code)]
 pub(crate) fn format_time_ago(ts: i64) -> String {
     let now = unix_now();
     let delta = now.saturating_sub(ts);

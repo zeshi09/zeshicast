@@ -6,4 +6,5 @@ pub mod media;
 pub mod network;
 pub mod notifications;
 pub mod system_stats;
+pub mod terminal;
 pub mod thermal;

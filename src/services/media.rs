@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::process::Command;
+use zbus::blocking::Connection;
+use zbus::zvariant::Value;
 
 #[derive(Debug, Clone, Default)]
 pub struct MediaSnapshot {
@@ -15,6 +18,115 @@ impl MediaSnapshot {
 }
 
 pub fn media_snapshot() -> MediaSnapshot {
+    if let Some(snapshot) = mpris_dbus_snapshot() {
+        if snapshot.is_active() {
+            return snapshot;
+        }
+    }
+    playerctl_snapshot()
+}
+
+pub fn mpris_dbus_snapshot() -> Option<MediaSnapshot> {
+    let connection = Connection::session().ok()?;
+    let dbus_proxy = zbus::blocking::fdo::DBusProxy::new(&connection).ok()?;
+    let names = dbus_proxy.list_names().ok()?;
+
+    let mpris_name = names
+        .into_iter()
+        .find(|name| name.starts_with("org.mpris.MediaPlayer2."))?;
+    let player_name = mpris_name
+        .strip_prefix("org.mpris.MediaPlayer2.")
+        .unwrap_or(&mpris_name)
+        .to_string();
+
+    let player_proxy = zbus::blocking::Proxy::new(
+        &connection,
+        mpris_name.as_str(),
+        "/org/mpris/MediaPlayer2",
+        "org.mpris.MediaPlayer2.Player",
+    )
+    .ok()?;
+
+    let status: Option<String> = player_proxy.get_property("PlaybackStatus").ok();
+    let metadata: Option<HashMap<String, Value>> = player_proxy.get_property("Metadata").ok();
+
+    let mut title = None;
+    let mut artist = None;
+
+    if let Some(meta) = metadata {
+        if let Some(Value::Str(t)) = meta.get("xesam:title") {
+            title = Some(t.to_string());
+        }
+        if let Some(Value::Array(arr)) = meta.get("xesam:artist") {
+            let artists: Vec<String> = arr
+                .iter()
+                .filter_map(|v| {
+                    if let Value::Str(s) = v {
+                        Some(s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !artists.is_empty() {
+                artist = Some(artists.join(", "));
+            }
+        } else if let Some(Value::Str(a)) = meta.get("xesam:artist") {
+            artist = Some(a.to_string());
+        }
+    }
+
+    Some(MediaSnapshot {
+        player: Some(player_name),
+        status,
+        artist,
+        title,
+    })
+}
+
+#[allow(dead_code)]
+pub fn mpris_dbus_command(command: &str) -> bool {
+    let Ok(connection) = Connection::session() else {
+        return false;
+    };
+    let Ok(dbus_proxy) = zbus::blocking::fdo::DBusProxy::new(&connection) else {
+        return false;
+    };
+    let Ok(names) = dbus_proxy.list_names() else {
+        return false;
+    };
+
+    let Some(mpris_name) = names
+        .into_iter()
+        .find(|name| name.starts_with("org.mpris.MediaPlayer2."))
+    else {
+        return false;
+    };
+
+    let Ok(player_proxy) = zbus::blocking::Proxy::new(
+        &connection,
+        mpris_name.as_str(),
+        "/org/mpris/MediaPlayer2",
+        "org.mpris.MediaPlayer2.Player",
+    ) else {
+        return false;
+    };
+
+    let method_name = match command {
+        "play_pause" | "PlayPause" => "PlayPause",
+        "next" | "Next" => "Next",
+        "previous" | "Previous" => "Previous",
+        "stop" | "Stop" => "Stop",
+        "play" | "Play" => "Play",
+        "pause" | "Pause" => "Pause",
+        _ => return false,
+    };
+
+    let res: zbus::Result<()> = player_proxy.call(method_name, &());
+    res.is_ok()
+}
+
+fn playerctl_snapshot() -> MediaSnapshot {
     let Ok(output) = Command::new("playerctl")
         .args([
             "metadata",
@@ -60,5 +172,19 @@ mod tests {
         assert_eq!(snapshot.status.as_deref(), Some("Playing"));
         assert_eq!(snapshot.artist.as_deref(), Some("Artist"));
         assert_eq!(snapshot.title.as_deref(), Some("Track"));
+    }
+
+    #[test]
+    fn media_snapshot_is_active() {
+        let active = MediaSnapshot {
+            player: Some("mpv".into()),
+            status: Some("Playing".into()),
+            artist: None,
+            title: Some("Song".into()),
+        };
+        assert!(active.is_active());
+
+        let inactive = MediaSnapshot::default();
+        assert!(!inactive.is_active());
     }
 }
