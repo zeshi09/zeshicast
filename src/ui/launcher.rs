@@ -9,7 +9,7 @@ use crate::ui::launcher_helpers::{
 use crate::ui::launcher_views::{
     run_launcher_command, show_ai_chat_view, show_audio_view, show_dashboard_view, show_emoji_view,
     show_font_browser_view, show_media_view, show_network_view, show_notifications_view,
-    show_script_output_view, show_system_monitor_view,
+    show_script_output_view, show_system_monitor_view, show_window_grid_view,
 };
 use crate::{
     Action, ActionKind, ActionPanelSection, ActionRisk, ClipboardKind, ClipboardSummary,
@@ -201,6 +201,7 @@ fn build_ui(
     let font_view = crate::ui::font_browser_view();
     let preferences_view = crate::ui::preferences_view(launcher.borrow().get_preferences());
     let script_output_view = crate::ui::script_output_view();
+    let window_grid_view = crate::ui::window_grid_view();
 
     navigation.add_page(crate::ui::LauncherView::Root, &search_page);
     navigation.add_page(crate::ui::LauncherView::Actions, &action_panel_view.root);
@@ -227,6 +228,10 @@ fn build_ui(
         crate::ui::LauncherView::SystemMonitor,
         &system_monitor_view.root,
     );
+    navigation.add_page(
+        crate::ui::LauncherView::WindowGrid,
+        &window_grid_view.root,
+    );
 
     let (action_bar, result_counter) = action_bar(
         &window,
@@ -250,6 +255,7 @@ fn build_ui(
         &media_view,
         &network_view.list,
         &notifications_view,
+        &window_grid_view,
     );
 
     let status_strip = crate::ui::StatusStrip::new();
@@ -367,6 +373,7 @@ fn build_ui(
         let network_list = network_view.list.clone();
         let notifications_view = notifications_view.clone();
         let script_output_view = script_output_view.clone();
+        let window_grid_view = window_grid_view.clone();
         list.connect_row_activated(move |_, row| {
             if let Some(action) = action_for_row(&list_ref, &results, row) {
                 if let Some(command) = action.launcher_command() {
@@ -384,6 +391,7 @@ fn build_ui(
                         &media_view,
                         &network_list,
                         &notifications_view,
+                        &window_grid_view,
                     );
                 } else if action.form_data().is_some() {
                     show_form_for_action(
@@ -432,6 +440,7 @@ fn build_ui(
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
         let notifications_view = notifications_view.clone();
+        let window_grid_view = window_grid_view.clone();
         let current_action = Rc::clone(&current_action);
         let action_panel_items = Rc::clone(&action_panel_items);
         let filtered_action_panel_items = Rc::clone(&filtered_action_panel_items);
@@ -466,6 +475,7 @@ fn build_ui(
                 &media_view,
                 &network_list,
                 &notifications_view,
+                &window_grid_view,
                 &current_action,
                 &action_panel_items,
                 &filtered_action_panel_items,
@@ -1037,6 +1047,7 @@ fn build_ui(
         let notifications_view = notifications_view.clone();
         let emoji_view = emoji_view.clone();
         let font_view = font_view.clone();
+        let window_grid_view = window_grid_view.clone();
         Rc::new(move |view: &str| {
             match view {
                 "dashboard" => {
@@ -1064,6 +1075,7 @@ fn build_ui(
                 }
                 "emoji" => show_emoji_view(&navigation, &entry, &action_bar, &emoji_view),
                 "fonts" => show_font_browser_view(&navigation, &entry, &action_bar, &font_view),
+                "grid" | "window-grid" => show_window_grid_view(&navigation, &entry, &action_bar, &window_grid_view),
                 _ => return false,
             }
             true
@@ -1665,6 +1677,7 @@ fn handle_key(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    window_grid_view: &crate::ui::WindowGridView,
     current_action: &Rc<RefCell<Option<Action>>>,
     action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
     filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
@@ -1694,6 +1707,7 @@ fn handle_key(
             media_view,
             network_list,
             notifications_view,
+            window_grid_view,
             current_action,
             displayed_action_panel_rows,
             clipboard_view,
@@ -1733,6 +1747,7 @@ fn handle_key(
                     media_view,
                     network_list,
                     notifications_view,
+                    window_grid_view,
                 );
             }
             glib::Propagation::Stop
@@ -1847,6 +1862,7 @@ fn handle_view_key(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    window_grid_view: &crate::ui::WindowGridView,
     current_action: &Rc<RefCell<Option<Action>>>,
     displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
     clipboard_view: &crate::ui::ClipboardHistoryView,
@@ -1896,6 +1912,39 @@ fn handle_view_key(
             crate::ui::LauncherView::Extensions => {
                 show_root_view(navigation, entry, action_bar);
                 glib::Propagation::Stop
+            }
+            crate::ui::LauncherView::WindowGrid => {
+                use crate::services::compositor::{WindowSnapPosition, snap_window};
+                let pos = match key {
+                    gdk::Key::h | gdk::Key::H | gdk::Key::Left => Some(WindowSnapPosition::LeftHalf),
+                    gdk::Key::l | gdk::Key::L | gdk::Key::Right => Some(WindowSnapPosition::RightHalf),
+                    gdk::Key::k | gdk::Key::K | gdk::Key::Up => Some(WindowSnapPosition::TopHalf),
+                    gdk::Key::j | gdk::Key::J | gdk::Key::Down => Some(WindowSnapPosition::BottomHalf),
+                    gdk::Key::f | gdk::Key::F => Some(WindowSnapPosition::Fullscreen),
+                    gdk::Key::c | gdk::Key::C => Some(WindowSnapPosition::Center),
+                    gdk::Key::_1 => Some(WindowSnapPosition::FirstThird),
+                    gdk::Key::_2 => Some(WindowSnapPosition::CenterThird),
+                    gdk::Key::_3 => Some(WindowSnapPosition::RightThird),
+                    gdk::Key::_4 => Some(WindowSnapPosition::LeftTwoThirds),
+                    gdk::Key::_5 => Some(WindowSnapPosition::RightTwoThirds),
+                    gdk::Key::u | gdk::Key::U => Some(WindowSnapPosition::TopLeftQuarter),
+                    gdk::Key::i | gdk::Key::I => Some(WindowSnapPosition::TopRightQuarter),
+                    gdk::Key::n | gdk::Key::N => Some(WindowSnapPosition::BottomLeftQuarter),
+                    gdk::Key::m | gdk::Key::M => Some(WindowSnapPosition::BottomRightQuarter),
+                    _ => None,
+                };
+                if let Some(target_pos) = pos {
+                    *window_grid_view.current_position.borrow_mut() = target_pos;
+                    window_grid_view.drawing_area.queue_draw();
+                    snap_window(target_pos);
+                    window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
+                    glib::Propagation::Stop
+                } else if key == gdk::Key::Return || key == gdk::Key::KP_Enter {
+                    show_root_view(navigation, entry, action_bar);
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
             }
             crate::ui::LauncherView::Dashboard => {
                 show_root_view(navigation, entry, action_bar);
@@ -1951,6 +2000,39 @@ fn handle_view_key(
                 crate::ui::move_selection(extension_list, 1);
                 glib::Propagation::Stop
             }
+            crate::ui::LauncherView::WindowGrid => {
+                use crate::services::compositor::{WindowSnapPosition, snap_window};
+                let pos = match key {
+                    gdk::Key::h | gdk::Key::H | gdk::Key::Left => Some(WindowSnapPosition::LeftHalf),
+                    gdk::Key::l | gdk::Key::L | gdk::Key::Right => Some(WindowSnapPosition::RightHalf),
+                    gdk::Key::k | gdk::Key::K | gdk::Key::Up => Some(WindowSnapPosition::TopHalf),
+                    gdk::Key::j | gdk::Key::J | gdk::Key::Down => Some(WindowSnapPosition::BottomHalf),
+                    gdk::Key::f | gdk::Key::F => Some(WindowSnapPosition::Fullscreen),
+                    gdk::Key::c | gdk::Key::C => Some(WindowSnapPosition::Center),
+                    gdk::Key::_1 => Some(WindowSnapPosition::FirstThird),
+                    gdk::Key::_2 => Some(WindowSnapPosition::CenterThird),
+                    gdk::Key::_3 => Some(WindowSnapPosition::RightThird),
+                    gdk::Key::_4 => Some(WindowSnapPosition::LeftTwoThirds),
+                    gdk::Key::_5 => Some(WindowSnapPosition::RightTwoThirds),
+                    gdk::Key::u | gdk::Key::U => Some(WindowSnapPosition::TopLeftQuarter),
+                    gdk::Key::i | gdk::Key::I => Some(WindowSnapPosition::TopRightQuarter),
+                    gdk::Key::n | gdk::Key::N => Some(WindowSnapPosition::BottomLeftQuarter),
+                    gdk::Key::m | gdk::Key::M => Some(WindowSnapPosition::BottomRightQuarter),
+                    _ => None,
+                };
+                if let Some(target_pos) = pos {
+                    *window_grid_view.current_position.borrow_mut() = target_pos;
+                    window_grid_view.drawing_area.queue_draw();
+                    snap_window(target_pos);
+                    window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
+                    glib::Propagation::Stop
+                } else if key == gdk::Key::Return || key == gdk::Key::KP_Enter {
+                    show_root_view(navigation, entry, action_bar);
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            }
             crate::ui::LauncherView::Dashboard => {
                 crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
                 glib::Propagation::Stop
@@ -1996,6 +2078,39 @@ fn handle_view_key(
             crate::ui::LauncherView::Extensions => {
                 crate::ui::move_selection(extension_list, -1);
                 glib::Propagation::Stop
+            }
+            crate::ui::LauncherView::WindowGrid => {
+                use crate::services::compositor::{WindowSnapPosition, snap_window};
+                let pos = match key {
+                    gdk::Key::h | gdk::Key::H | gdk::Key::Left => Some(WindowSnapPosition::LeftHalf),
+                    gdk::Key::l | gdk::Key::L | gdk::Key::Right => Some(WindowSnapPosition::RightHalf),
+                    gdk::Key::k | gdk::Key::K | gdk::Key::Up => Some(WindowSnapPosition::TopHalf),
+                    gdk::Key::j | gdk::Key::J | gdk::Key::Down => Some(WindowSnapPosition::BottomHalf),
+                    gdk::Key::f | gdk::Key::F => Some(WindowSnapPosition::Fullscreen),
+                    gdk::Key::c | gdk::Key::C => Some(WindowSnapPosition::Center),
+                    gdk::Key::_1 => Some(WindowSnapPosition::FirstThird),
+                    gdk::Key::_2 => Some(WindowSnapPosition::CenterThird),
+                    gdk::Key::_3 => Some(WindowSnapPosition::RightThird),
+                    gdk::Key::_4 => Some(WindowSnapPosition::LeftTwoThirds),
+                    gdk::Key::_5 => Some(WindowSnapPosition::RightTwoThirds),
+                    gdk::Key::u | gdk::Key::U => Some(WindowSnapPosition::TopLeftQuarter),
+                    gdk::Key::i | gdk::Key::I => Some(WindowSnapPosition::TopRightQuarter),
+                    gdk::Key::n | gdk::Key::N => Some(WindowSnapPosition::BottomLeftQuarter),
+                    gdk::Key::m | gdk::Key::M => Some(WindowSnapPosition::BottomRightQuarter),
+                    _ => None,
+                };
+                if let Some(target_pos) = pos {
+                    *window_grid_view.current_position.borrow_mut() = target_pos;
+                    window_grid_view.drawing_area.queue_draw();
+                    snap_window(target_pos);
+                    window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
+                    glib::Propagation::Stop
+                } else if key == gdk::Key::Return || key == gdk::Key::KP_Enter {
+                    show_root_view(navigation, entry, action_bar);
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
             }
             crate::ui::LauncherView::Dashboard => {
                 crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
@@ -2526,6 +2641,7 @@ fn action_bar(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    window_grid_view: &crate::ui::WindowGridView,
 ) -> (GtkBox, Label) {
     let bar = GtkBox::new(Orientation::Horizontal, 6);
     bar.add_css_class("action-bar");
@@ -2565,6 +2681,7 @@ fn action_bar(
         let media_view = media_view.clone();
         let network_list = network_list.clone();
         let notifications_view = notifications_view.clone();
+        let window_grid_view = window_grid_view.clone();
         run.connect_clicked(move |_| {
             run_selected_with_views(
                 &window,
@@ -2584,6 +2701,7 @@ fn action_bar(
                 &media_view,
                 &network_list,
                 &notifications_view,
+                &window_grid_view,
             )
         });
     }
@@ -2723,6 +2841,7 @@ fn run_selected_with_views(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    window_grid_view: &crate::ui::WindowGridView,
 ) {
     if let Some(action) = selected_action(list, results) {
         if let Some(command) = action.launcher_command() {
@@ -2740,6 +2859,7 @@ fn run_selected_with_views(
                 media_view,
                 network_list,
                 notifications_view,
+                window_grid_view,
             );
         } else if action.form_data().is_some() {
             show_form_for_action(window, launcher, hold, entry, list, results, action);

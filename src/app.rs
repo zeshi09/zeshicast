@@ -1015,6 +1015,14 @@ impl Zeshicast {
                 LauncherCommand::Fonts,
                 "dashboard_enabled",
             ),
+            (
+                "Window Grid",
+                "Tile and snap active window across monitor",
+                "view-grid-symbolic",
+                "window grid tile snap split resize left right fullscreen thirds",
+                LauncherCommand::WindowGrid,
+                "dashboard_enabled",
+            ),
         ];
 
         candidates

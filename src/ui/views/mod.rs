@@ -13,6 +13,7 @@ mod preferences;
 mod script_output;
 mod snippets;
 mod system_monitor;
+mod window_grid;
 
 pub use action_panel::{ActionPanelDisplayItem, ActionPanelView, action_panel_view, set_action_panel_items, set_action_panel_list};
 pub use ai_chat::{AiChatView, ai_chat_view};
@@ -36,3 +37,4 @@ pub use system_monitor::{
     SystemMonitorView, set_system_monitor_snapshot,
     set_system_monitor_thermal_snapshot, system_monitor_view,
 };
+pub use window_grid::{WindowGridView, window_grid_view};

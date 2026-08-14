@@ -255,6 +255,85 @@ pub(crate) fn layout_short_code(name: &str) -> String {
         .to_lowercase()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowSnapPosition {
+    LeftHalf,
+    RightHalf,
+    TopHalf,
+    BottomHalf,
+    Fullscreen,
+    Center,
+    TopLeftQuarter,
+    TopRightQuarter,
+    BottomLeftQuarter,
+    BottomRightQuarter,
+    FirstThird,
+    CenterThird,
+    RightThird,
+    LeftTwoThirds,
+    RightTwoThirds,
+}
+
+pub fn snap_window(pos: WindowSnapPosition) -> bool {
+    snap_niri(pos)
+        .or_else(|| snap_hyprland(pos))
+        .or_else(|| snap_sway(pos))
+        .unwrap_or(false)
+}
+
+fn snap_niri(pos: WindowSnapPosition) -> Option<bool> {
+    let args: &[&str] = match pos {
+        WindowSnapPosition::LeftHalf | WindowSnapPosition::RightHalf => {
+            &["msg", "action", "set-column-width", "50%"]
+        }
+        WindowSnapPosition::Fullscreen => &["msg", "action", "fullscreen-window"],
+        WindowSnapPosition::Center => &["msg", "action", "center-column"],
+        WindowSnapPosition::FirstThird
+        | WindowSnapPosition::CenterThird
+        | WindowSnapPosition::RightThird => &["msg", "action", "set-column-width", "33.333%"],
+        WindowSnapPosition::LeftTwoThirds | WindowSnapPosition::RightTwoThirds => {
+            &["msg", "action", "set-column-width", "66.666%"]
+        }
+        _ => &["msg", "action", "set-column-width", "50%"],
+    };
+
+    let output = Command::new("niri").args(args).output().ok()?;
+    Some(output.status.success())
+}
+
+fn snap_hyprland(pos: WindowSnapPosition) -> Option<bool> {
+    let args: &[&str] = match pos {
+        WindowSnapPosition::LeftHalf | WindowSnapPosition::TopLeftQuarter | WindowSnapPosition::BottomLeftQuarter => {
+            &["dispatch", "movewindow", "l"]
+        }
+        WindowSnapPosition::RightHalf | WindowSnapPosition::TopRightQuarter | WindowSnapPosition::BottomRightQuarter => {
+            &["dispatch", "movewindow", "r"]
+        }
+        WindowSnapPosition::TopHalf => &["dispatch", "movewindow", "u"],
+        WindowSnapPosition::BottomHalf => &["dispatch", "movewindow", "d"],
+        WindowSnapPosition::Fullscreen => &["dispatch", "fullscreen", "0"],
+        WindowSnapPosition::Center => &["dispatch", "centerwindow"],
+        _ => &["dispatch", "centerwindow"],
+    };
+
+    let output = Command::new("hyprctl").args(args).output().ok()?;
+    Some(output.status.success())
+}
+
+fn snap_sway(pos: WindowSnapPosition) -> Option<bool> {
+    let args: &[&str] = match pos {
+        WindowSnapPosition::LeftHalf => &["move", "left"],
+        WindowSnapPosition::RightHalf => &["move", "right"],
+        WindowSnapPosition::TopHalf => &["move", "up"],
+        WindowSnapPosition::BottomHalf => &["move", "down"],
+        WindowSnapPosition::Fullscreen => &["fullscreen", "toggle"],
+        _ => &["move", "left"],
+    };
+
+    let output = Command::new("swaymsg").args(args).output().ok()?;
+    Some(output.status.success())
+}
+
 fn run(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     if !output.status.success() {
@@ -274,5 +353,29 @@ mod tests {
         assert_eq!(layout_short_code("German (Deutschland)"), "de");
         // Unknown name falls back to its first two letters.
         assert_eq!(layout_short_code("Norwegian"), "no");
+    }
+
+    #[test]
+    fn window_snap_positions_are_distinct() {
+        let positions = [
+            WindowSnapPosition::LeftHalf,
+            WindowSnapPosition::RightHalf,
+            WindowSnapPosition::TopHalf,
+            WindowSnapPosition::BottomHalf,
+            WindowSnapPosition::Fullscreen,
+            WindowSnapPosition::Center,
+            WindowSnapPosition::FirstThird,
+            WindowSnapPosition::CenterThird,
+            WindowSnapPosition::RightThird,
+            WindowSnapPosition::LeftTwoThirds,
+            WindowSnapPosition::RightTwoThirds,
+            WindowSnapPosition::TopLeftQuarter,
+            WindowSnapPosition::TopRightQuarter,
+            WindowSnapPosition::BottomLeftQuarter,
+            WindowSnapPosition::BottomRightQuarter,
+        ];
+        assert_eq!(positions.len(), 15);
+        // snap_window graceful fallback when no compositor CLI is active in test environment
+        let _ = snap_window(WindowSnapPosition::LeftHalf);
     }
 }

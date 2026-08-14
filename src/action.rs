@@ -234,6 +234,7 @@ pub enum LauncherCommand {
     Network,
     Notifications,
     SystemMonitor,
+    WindowGrid,
 }
 
 #[derive(Debug, Clone)]

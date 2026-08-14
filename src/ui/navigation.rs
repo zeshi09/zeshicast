@@ -22,6 +22,7 @@ pub enum LauncherView {
     ScriptOutput,
     Snippets,
     SystemMonitor,
+    WindowGrid,
 }
 
 impl LauncherView {
@@ -43,6 +44,7 @@ impl LauncherView {
             Self::ScriptOutput => "script-output",
             Self::Snippets => "snippets",
             Self::SystemMonitor => "system-monitor",
+            Self::WindowGrid => "window-grid",
         }
     }
 
@@ -63,6 +65,7 @@ impl LauncherView {
             Self::ScriptOutput => "Output",
             Self::Snippets => "Snippets",
             Self::SystemMonitor => "System Monitor",
+            Self::WindowGrid => "Window Grid",
         }
     }
 }

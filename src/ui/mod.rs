@@ -36,6 +36,7 @@ pub use views::{
     set_dashboard_thermal, set_media_snapshot, set_network_snapshot, set_notification_snapshot,
     set_script_output, set_snippet_items, set_system_monitor_snapshot,
     set_system_monitor_thermal_snapshot, snippet_manager_view, system_monitor_view,
+    WindowGridView, window_grid_view,
 };
 pub use widgets::{
     action_panel, control_card, letter_icon, metric_card, move_selection, panel_root, panel_title,
