@@ -3036,7 +3036,7 @@ fn run_secondary_action(
 
 fn secondary_action_risk(action: &Action, kind: SecondaryActionKind) -> ActionRisk {
     match kind {
-        SecondaryActionKind::Run => action.risk,
+        SecondaryActionKind::Run | SecondaryActionKind::RunInTerminal => action.risk,
         SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
         SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
         _ => ActionRisk::Normal,

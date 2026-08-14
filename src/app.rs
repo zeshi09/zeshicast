@@ -629,6 +629,19 @@ impl Zeshicast {
             ));
         }
 
+        let is_app_or_script = matches!(
+            action.category.as_str(),
+            "Application" | "Script" | "Command" | "System"
+        );
+        if is_app_or_script {
+            actions.push(SecondaryAction::new(
+                SecondaryActionKind::RunInTerminal,
+                "Run in Terminal",
+                "utilities-terminal-symbolic",
+                S::Primary,
+            ));
+        }
+
         if action.parent_dir().is_some() {
             actions.push(SecondaryAction::new(
                 SecondaryActionKind::OpenParent,
@@ -710,6 +723,14 @@ impl Zeshicast {
         match secondary {
             SecondaryActionKind::Run => {
                 self.run_action(action);
+            }
+            SecondaryActionKind::RunInTerminal => {
+                let pref = self
+                    .get_preferences()
+                    .get("default_terminal")
+                    .map(|s| s.as_str());
+                let cmd = action.value();
+                let _ = crate::services::terminal::launch_in_terminal(&cmd, pref, true);
             }
             SecondaryActionKind::CopyValue => action.copy_value(),
             SecondaryActionKind::TypeText => type_text_via_wtype(&action.value()),

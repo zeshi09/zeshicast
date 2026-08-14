@@ -191,6 +191,7 @@ impl ActionRisk {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecondaryActionKind {
     Run,
+    RunInTerminal,
     CopyValue,
     TypeText,
     OpenParent,

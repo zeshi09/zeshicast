@@ -9,4 +9,5 @@ pub mod notifications;
 pub mod poll_cache;
 pub mod storage;
 pub mod system_stats;
+pub mod terminal;
 pub mod thermal;
