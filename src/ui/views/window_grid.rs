@@ -17,6 +17,7 @@ pub struct WindowGridView {
 
 pub fn window_grid_view() -> WindowGridView {
     let root = GtkBox::new(Orientation::Vertical, 12);
+    root.add_css_class("window-grid-view");
     root.set_vexpand(true);
     root.set_hexpand(true);
     root.set_margin_start(16);
@@ -31,7 +32,7 @@ pub fn window_grid_view() -> WindowGridView {
     title.set_hexpand(true);
 
     let status_label = Label::new(Some("Select window tile region"));
-    status_label.add_css_class("result-subtitle");
+    status_label.add_css_class("window-grid-status");
     status_label.set_xalign(1.0);
 
     title_box.append(&title);

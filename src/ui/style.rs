@@ -1317,6 +1317,33 @@ window.osd-window,
   color: alpha(@window_fg_color, 0.95);
 }
 
+/* ════════════════════════════════════════════════════════════
+   WINDOW GRID OVERLAY
+   ════════════════════════════════════════════════════════════ */
+
+.window-grid-view {
+  padding: 16px 20px;
+}
+
+.window-grid-hint {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: alpha(@window_fg_color, 0.50);
+  background: alpha(@window_fg_color, 0.05);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.window-grid-status {
+  font-size: 13px;
+  font-weight: 600;
+  color: @accent_color;
+}
+
+
 "
     .replace("__FONT_FAMILY__", &font_family)
     .replace("__FONT_SIZE__", &font_size.to_string())
