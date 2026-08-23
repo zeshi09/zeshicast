@@ -222,6 +222,21 @@
 ### P2-4. Graceful shutdown
 
 - **Where:** `bin/zeshicast-gtk.rs` / launcher
+- [x] **Done.** SIGINT (Ctrl-C) и SIGTERM (`systemctl --user stop`, `kill`)
+  теперь маршрутизируются в тот же чистый quit-путь, что и `--quit`:
+  обработчик ставится через `g_unix_signal_add_full` (self-pipe источник на
+  default main context — колбэк выполняется обычным main-loop callback'ом без
+  async-signal-safety ограничений) и вызывает `app.quit()`. Нюанс: обёртка
+  `glib::unix_signal_add_local` в крейте glib 0.22 отсутствует (проверено по
+  исходникам registry), поэтому FFI-биндинг объявлен локально в bin-файле;
+  D-Bus имя освобождается штатно при shutdown приложения, вотчеры
+  (`wl-paste --watch`, `niri event-stream`) завершаются существующей
+  liveness-логикой: при выходе из main loop их приёмники каналов умирают и
+  reconnect-проба завершает поток. Юнит-тест `unix_signal_handler_runs_on_the_default_main_context`
+  проверяет FFI-проводку end-to-end (SIGUSR1 → замыкание на default main
+  context); сам SIGTERM/SIGINT-путь юнит-тестом не покрывается — ручная
+  проверка: `systemctl --user stop zeshicast-gtk` / `kill -TERM <pid>` должны
+  завершать процесс аккуратно, без гонки «main loop умер раньше потока».
 - **Do:** `glib::unix_signal_add_local` на SIGTERM/SIGINT → `app.quit()`;
   задокументировать поведение вотчеров (EPIPE/EOF-reconnect уже работает).
 - **Accept:** `systemctl --user stop zeshicast-gtk` завершает процесс аккуратно.
