@@ -313,9 +313,6 @@ fn build_ui(
             if q.starts_with('=') {
                 mode_badge.set_text("Calculator");
                 mode_badge.set_visible(true);
-            } else if q.starts_with("ssh ") {
-                mode_badge.set_text("SSH");
-                mode_badge.set_visible(true);
             } else if q.starts_with("file ") || q.starts_with("find ") {
                 mode_badge.set_text("File Search");
                 mode_badge.set_visible(true);

@@ -147,7 +147,7 @@ entry, entry:focus, entry:focus-visible {
   box-shadow: none;
 }
 
-/* Mode badge (Calculator, File Search, SSH…) */
+/* Mode badge (Calculator, File Search…) */
 .mode-badge {
   background: alpha(@accent_color, 0.110);
   border: 1px solid alpha(@accent_color, 0.260);

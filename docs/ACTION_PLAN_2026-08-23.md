@@ -130,7 +130,7 @@
   демона (только имя операции/ошибку IO).
 - **Accept:** `cargo test --features gui` зелёный; права кэша проверить `ls -la`.
 
-### P1-4. Решить судьбу мёртвого search/ssh.rs
+### P1-4. Решить судьбу мёртвого search/ssh.rs — [x] Done (variant B)
 
 - **Where:** `src/search/ssh.rs` (не объявлен в `search/mod.rs`),
   `src/ui/launcher.rs:316-318` (SSH-бейдж)
