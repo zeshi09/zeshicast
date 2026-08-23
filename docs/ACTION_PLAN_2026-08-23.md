@@ -143,6 +143,16 @@
 
 - **Where:** `src/main.rs:21` vs `src/config.rs:7-10` (`export_config` — мёртвый
   код), тумблер в `ui/preferences.rs:157`
+- [x] **Done.** CLI-экспорт теперь совпадает с UI: без явного флага
+  `--include-secrets` читается preference `export_include_secrets` из
+  preferences.toml; явный флаг (`--include-secrets`, `--include-secrets=true|false`)
+  имеет приоритет. Разрешение вынесено в чистую функцию
+  `config::resolve_include_secrets(cli_flag: Option<bool>, preferences) -> bool`,
+  парсер (`CliCommand::Export`) различает «флаг не указан» (None) и явное
+  значение. Мёртвая `export_config` удалена, вместо неё pub-API:
+  `load_global_preferences` + `resolve_include_secrets`. Тесты: preference=true
+  + нет флага → секреты включены; preference=true + флаг false → исключены;
+  preference отсутствует/мусорная → исключены.
 - **Do:** при отсутствии явного `--include-secrets` читать preference; либо
   убрать строку из PREFERENCE_SECTIONS.
 - **Accept:** поведение экспорта предсказуемо и совпадает с UI.

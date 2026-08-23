@@ -18,6 +18,10 @@ fn main() {
         } => {
             let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
             let config_dir = home.join(".config/zeshicast");
+            // Explicit --include-secrets wins; otherwise fall back to the
+            // `export_include_secrets` preference from preferences.toml.
+            let preferences = zeshicast::load_global_preferences(&config_dir);
+            let include_secrets = zeshicast::resolve_include_secrets(include_secrets, &preferences);
             match zeshicast::export_config_with_options(&config_dir, &dest, include_secrets) {
                 Ok(()) => println!("exported to {}", dest.display()),
                 Err(err) => eprintln!("export failed: {err}"),
@@ -179,9 +183,10 @@ fn print_help() {
 Usage:
   zeshicast                 Start interactive command palette
   zeshicast <query>         Print matching actions
-  zeshicast --export [file] Export config to tar.gz without API keys by default
-  zeshicast --export [file] --include-secrets
-                            Export config including API keys and secret-like preferences
+  zeshicast --export [file] Export config to tar.gz without API keys unless
+                            the export_include_secrets preference or the flag says otherwise
+  zeshicast --export [file] --include-secrets[=true|false]
+                            Override the export_include_secrets preference for this export
   zeshicast --import <file> Import config from tar.gz
 
 Queries:

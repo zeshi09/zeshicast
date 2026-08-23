@@ -4,10 +4,22 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn export_config(config_dir: &Path, dest: &Path) -> io::Result<()> {
-    let preferences = load_preferences(&config_dir.join("preferences.toml"));
-    let include_secrets = preference_bool(&preferences, "export_include_secrets", false);
-    export_config_with_options(config_dir, dest, include_secrets)
+const EXPORT_SECRETS_PREFERENCE_KEY: &str = "export_include_secrets";
+
+/// Resolve the `--include-secrets` CLI flag against the global preferences.
+/// An explicit CLI value wins; without one the `export_include_secrets`
+/// preference decides (missing/unparseable preference means secrets excluded).
+pub fn resolve_include_secrets(
+    cli_flag: Option<bool>,
+    preferences: &HashMap<String, String>,
+) -> bool {
+    cli_flag
+        .unwrap_or_else(|| preference_bool(preferences, EXPORT_SECRETS_PREFERENCE_KEY, false))
+}
+
+/// Load the global preferences.toml used by CLI export resolution.
+pub fn load_global_preferences(config_dir: &Path) -> HashMap<String, String> {
+    load_preferences(&config_dir.join("preferences.toml"))
 }
 
 pub fn export_config_with_options(
@@ -76,7 +88,7 @@ fn copy_config_sanitized(src: &Path, dest: &Path) -> io::Result<()> {
 fn sanitize_export_preferences(path: &Path) -> io::Result<()> {
     let mut preferences = load_preferences(path);
     preferences.retain(|key, _| !is_secret_preference_key(key));
-    preferences.remove("export_include_secrets");
+    preferences.remove(EXPORT_SECRETS_PREFERENCE_KEY);
     write_preferences(path, &preferences)
 }
 
@@ -427,6 +439,36 @@ mod tests {
         assert!(!preferences.contains_key("db_password"));
         assert!(!preferences.contains_key("export_include_secrets"));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resolve_include_secrets_preference_true_without_flag_includes_secrets() {
+        let preferences = HashMap::from([(
+            EXPORT_SECRETS_PREFERENCE_KEY.to_string(),
+            "true".to_string(),
+        )]);
+        assert!(resolve_include_secrets(None, &preferences));
+    }
+
+    #[test]
+    fn resolve_include_secrets_explicit_flag_overrides_preference() {
+        let preferences = HashMap::from([(
+            EXPORT_SECRETS_PREFERENCE_KEY.to_string(),
+            "true".to_string(),
+        )]);
+        assert!(!resolve_include_secrets(Some(false), &preferences));
+        assert!(resolve_include_secrets(Some(true), &preferences));
+    }
+
+    #[test]
+    fn resolve_include_secrets_defaults_to_excluded() {
+        assert!(!resolve_include_secrets(None, &HashMap::new()));
+        // Unparseable preference values fall back to excluded as well.
+        let garbage = HashMap::from([(
+            EXPORT_SECRETS_PREFERENCE_KEY.to_string(),
+            "maybe".to_string(),
+        )]);
+        assert!(!resolve_include_secrets(None, &garbage));
     }
 
     #[cfg(unix)]

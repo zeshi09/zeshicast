@@ -30,7 +30,9 @@ pub(crate) use config::{
     normalize_alias, toml_value_string, unix_now, write_file_atomic, write_lines,
     write_preferences,
 };
-pub use config::{export_config, export_config_with_options, import_config};
+pub use config::{
+    export_config_with_options, import_config, load_global_preferences, resolve_include_secrets,
+};
 pub(crate) use extensions::{ExtensionManifest, ExtensionOrigin, load_extension_manifests};
 #[cfg(test)]
 pub(crate) use placeholders::format_local_time;

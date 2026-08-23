@@ -3243,6 +3243,116 @@ fn segmented_choice(options: &[(&str, &str)], current: &str, entry: &Entry) -> G
     btn_box
 }
 
+/// Render one preference key as a field row bound to an auto-saving entry.
+/// Boolean defaults get a switch; known enum/numeric keys get specialized
+/// widgets; everything else is a text entry. Shared by the generic sections
+/// and special sections (Privacy) that also carry dynamic keys.
+fn preference_field_row(
+    key: &str,
+    description: &str,
+    current: &HashMap<String, String>,
+    fields_box: &GtkBox,
+    fields: &mut Vec<(String, Entry)>,
+) {
+    let row = GtkBox::new(Orientation::Horizontal, 10);
+    row.add_css_class("pref-field-row");
+
+    let label = Label::new(Some(description));
+    label.add_css_class("pref-field-label");
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.set_valign(gtk::Align::Center);
+    row.append(&label);
+
+    let default_val = super::preferences::PREFERENCE_DEFAULTS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, v)| *v)
+        .unwrap_or("");
+    let effective_val = current.get(key).map(String::as_str).unwrap_or(default_val);
+
+    // A preference is boolean when its default is true/false.
+    let is_bool = matches!(default_val, "true" | "false");
+    let is_numeric = key.contains("_ms") || key.contains("_size");
+
+    let entry = Entry::new();
+    entry.add_css_class("pref-entry");
+    entry.set_width_chars(if is_bool { 0 } else { 14 });
+    entry.set_valign(gtk::Align::Center);
+    entry.set_text(effective_val);
+    entry.set_placeholder_text(Some(default_val));
+
+    if is_bool {
+        let current_val = effective_val;
+        let sw = gtk::Switch::new();
+        sw.set_active(current_val != "false");
+        sw.set_valign(gtk::Align::Center);
+        let entry_c = entry.clone();
+        sw.connect_active_notify(move |sw| {
+            entry_c.set_text(if sw.is_active() { "true" } else { "false" });
+        });
+        row.append(&sw);
+    } else if key == "ui_font_size" {
+        let scale = gtk::Scale::with_range(Orientation::Horizontal, 12.0, 22.0, 1.0);
+        scale.set_hexpand(true);
+        scale.set_draw_value(true);
+        scale.set_value_pos(gtk::PositionType::Right);
+        scale.set_value(effective_val.parse::<f64>().unwrap_or(15.0));
+        scale.set_valign(gtk::Align::Center);
+        let entry_c = entry.clone();
+        scale.connect_value_changed(move |s| {
+            entry_c.set_text(&format!("{}", s.value() as u32));
+        });
+        row.append(&scale);
+    } else if key == "ui_density" {
+        row.append(&segmented_choice(
+            &[("compact", "Compact"), ("comfortable", "Comfortable")],
+            effective_val,
+            &entry,
+        ));
+    } else if key == "ui_theme" {
+        row.append(&segmented_choice(
+            &[("system", "System"), ("dark", "Dark"), ("light", "Light")],
+            effective_val,
+            &entry,
+        ));
+    } else if key == "ai_provider" {
+        row.append(&segmented_choice(
+            &[("ollama", "Ollama"), ("openai", "OpenAI")],
+            effective_val,
+            &entry,
+        ));
+    } else if key == "dashboard_poll_interval_ms" {
+        let spin = gtk::SpinButton::with_range(500.0, 5000.0, 100.0);
+        spin.add_css_class("pref-entry");
+        spin.set_value(effective_val.parse::<f64>().unwrap_or(1000.0));
+        spin.set_valign(gtk::Align::Center);
+        let entry_c = entry.clone();
+        spin.connect_value_changed(move |s| {
+            entry_c.set_text(&format!("{}", s.value() as u32));
+        });
+        row.append(&spin);
+    } else if is_numeric {
+        entry.set_input_purpose(gtk::InputPurpose::Digits);
+        row.append(&entry);
+    } else {
+        // Text values (lists, endpoints…) can be long: let the
+        // field take the row's free width so they aren't clipped.
+        label.set_hexpand(false);
+        entry.set_hexpand(true);
+        entry.set_width_chars(0);
+        // Mask secrets.
+        if key.ends_with("_api_key") {
+            entry.set_visibility(false);
+            entry.set_input_purpose(gtk::InputPurpose::Password);
+        }
+        row.append(&entry);
+    }
+
+    fields.push((key.to_string(), entry));
+    fields_box.append(&row);
+}
+
 pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
     let outer = super::panel_root(0, 0);
     outer.set_vexpand(true);
@@ -3373,108 +3483,16 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                     row.append(&text);
                     fields_box.append(&row);
                 }
+                // Dynamic keys of this section (e.g. export_include_secrets)
+                // render through the same auto-saving field mechanism as the
+                // generic sections so the toggle actually exists in the UI.
+                for (key, description) in section.keys {
+                    preference_field_row(key, description, current, &fields_box, &mut fields);
+                }
             }
             _ => {
                 for (key, description) in section.keys {
-                    let row = GtkBox::new(Orientation::Horizontal, 10);
-                    row.add_css_class("pref-field-row");
-
-                    let label = Label::new(Some(description));
-                    label.add_css_class("pref-field-label");
-                    label.set_xalign(0.0);
-                    label.set_hexpand(true);
-                    label.set_valign(gtk::Align::Center);
-                    row.append(&label);
-
-                    let default_val = super::preferences::PREFERENCE_DEFAULTS
-                        .iter()
-                        .find(|(k, _)| *k == *key)
-                        .map(|(_, v)| *v)
-                        .unwrap_or("");
-                    let effective_val =
-                        current.get(*key).map(String::as_str).unwrap_or(default_val);
-
-                    // A preference is boolean when its default is true/false.
-                    let is_bool = matches!(default_val, "true" | "false");
-                    let is_numeric = key.contains("_ms") || key.contains("_size");
-
-                    let entry = Entry::new();
-                    entry.add_css_class("pref-entry");
-                    entry.set_width_chars(if is_bool { 0 } else { 14 });
-                    entry.set_valign(gtk::Align::Center);
-                    entry.set_text(effective_val);
-                    entry.set_placeholder_text(Some(default_val));
-
-                    if is_bool {
-                        let current_val = effective_val;
-                        let sw = gtk::Switch::new();
-                        sw.set_active(current_val != "false");
-                        sw.set_valign(gtk::Align::Center);
-                        let entry_c = entry.clone();
-                        sw.connect_active_notify(move |sw| {
-                            entry_c.set_text(if sw.is_active() { "true" } else { "false" });
-                        });
-                        row.append(&sw);
-                    } else if *key == "ui_font_size" {
-                        let scale =
-                            gtk::Scale::with_range(Orientation::Horizontal, 12.0, 22.0, 1.0);
-                        scale.set_hexpand(true);
-                        scale.set_draw_value(true);
-                        scale.set_value_pos(gtk::PositionType::Right);
-                        scale.set_value(effective_val.parse::<f64>().unwrap_or(15.0));
-                        scale.set_valign(gtk::Align::Center);
-                        let entry_c = entry.clone();
-                        scale.connect_value_changed(move |s| {
-                            entry_c.set_text(&format!("{}", s.value() as u32));
-                        });
-                        row.append(&scale);
-                    } else if *key == "ui_density" {
-                        row.append(&segmented_choice(
-                            &[("compact", "Compact"), ("comfortable", "Comfortable")],
-                            effective_val,
-                            &entry,
-                        ));
-                    } else if *key == "ui_theme" {
-                        row.append(&segmented_choice(
-                            &[("system", "System"), ("dark", "Dark"), ("light", "Light")],
-                            effective_val,
-                            &entry,
-                        ));
-                    } else if *key == "ai_provider" {
-                        row.append(&segmented_choice(
-                            &[("ollama", "Ollama"), ("openai", "OpenAI")],
-                            effective_val,
-                            &entry,
-                        ));
-                    } else if *key == "dashboard_poll_interval_ms" {
-                        let spin = gtk::SpinButton::with_range(500.0, 5000.0, 100.0);
-                        spin.add_css_class("pref-entry");
-                        spin.set_value(effective_val.parse::<f64>().unwrap_or(1000.0));
-                        spin.set_valign(gtk::Align::Center);
-                        let entry_c = entry.clone();
-                        spin.connect_value_changed(move |s| {
-                            entry_c.set_text(&format!("{}", s.value() as u32));
-                        });
-                        row.append(&spin);
-                    } else if is_numeric {
-                        entry.set_input_purpose(gtk::InputPurpose::Digits);
-                        row.append(&entry);
-                    } else {
-                        // Text values (lists, endpoints…) can be long: let the
-                        // field take the row's free width so they aren't clipped.
-                        label.set_hexpand(false);
-                        entry.set_hexpand(true);
-                        entry.set_width_chars(0);
-                        // Mask secrets.
-                        if key.ends_with("_api_key") {
-                            entry.set_visibility(false);
-                            entry.set_input_purpose(gtk::InputPurpose::Password);
-                        }
-                        row.append(&entry);
-                    }
-
-                    fields.push((key.to_string(), entry));
-                    fields_box.append(&row);
+                    preference_field_row(key, description, current, &fields_box, &mut fields);
                 }
             }
         }

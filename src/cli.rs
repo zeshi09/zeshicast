@@ -5,7 +5,9 @@ pub enum CliCommand {
     Help,
     Export {
         dest: PathBuf,
-        include_secrets: bool,
+        /// None when --include-secrets was not passed on the CLI; then the
+        /// `export_include_secrets` preference decides.
+        include_secrets: Option<bool>,
     },
     Import {
         src: PathBuf,
@@ -34,7 +36,7 @@ where
             .filter(|a| !a.starts_with('-'))
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("zeshicast-config.tar.gz"));
-        let include_secrets = args.iter().any(|arg| arg == "--include-secrets");
+        let include_secrets = parse_include_secrets_flag(&args);
         return CliCommand::Export {
             dest,
             include_secrets,
@@ -52,6 +54,27 @@ where
     CliCommand::Query(args.join(" "))
 }
 
+/// Parse the `--include-secrets` flag into an explicit tri-state:
+/// - `None`: flag absent (fall back to the `export_include_secrets` preference)
+/// - `Some(true)` / `Some(false)`: explicit CLI override
+fn parse_include_secrets_flag(args: &[String]) -> Option<bool> {
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--include-secrets" {
+            // Only consume a following value when it is explicitly true/false;
+            // otherwise this is the bare boolean form of the flag.
+            return match args.get(index + 1).map(String::as_str) {
+                Some("true") => Some(true),
+                Some("false") => Some(false),
+                _ => Some(true),
+            };
+        }
+        if let Some(value) = arg.strip_prefix("--include-secrets=") {
+            return Some(matches!(value.to_ascii_lowercase().as_str(), "true" | "1" | "yes"));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,7 +87,33 @@ mod tests {
             parse_cli_args(vec!["--export", "out.tar.gz"]),
             CliCommand::Export {
                 dest: PathBuf::from("out.tar.gz"),
-                include_secrets: false,
+                include_secrets: None,
+            }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--export", "out.tar.gz", "--include-secrets"]),
+            CliCommand::Export {
+                dest: PathBuf::from("out.tar.gz"),
+                include_secrets: Some(true),
+            }
+        );
+        assert_eq!(
+            parse_cli_args(vec![
+                "--export",
+                "out.tar.gz",
+                "--include-secrets",
+                "false"
+            ]),
+            CliCommand::Export {
+                dest: PathBuf::from("out.tar.gz"),
+                include_secrets: Some(false),
+            }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--export", "--include-secrets=false"]),
+            CliCommand::Export {
+                dest: PathBuf::from("zeshicast-config.tar.gz"),
+                include_secrets: Some(false),
             }
         );
         assert_eq!(
