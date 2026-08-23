@@ -816,6 +816,38 @@ permissions = ["shell"]
         assert_eq!(results[0].value(), "echo '$(rm -rf ~); reboot'");
     }
 
+    /// End-to-end: an apostrophe in the query must be escaped with the POSIX
+    /// `'\''` sequence so the payload stays a single literal argument under
+    /// `sh -c` instead of terminating the quoted token and executing.
+    #[test]
+    fn command_placeholders_neutralize_apostrophe_injection() {
+        let entries = vec![
+            parse_command_entry(
+                r#"
+name = "Echo"
+command = "echo {{query}}"
+keyword = "echo"
+argument_hint = "<text>"
+permissions = ["shell"]
+"#,
+            )
+            .unwrap(),
+        ];
+        let context = PlaceholderContext {
+            query: String::new(),
+            clipboard: String::new(),
+            args: HashMap::new(),
+            preferences: HashMap::new(),
+            now: UNIX_EPOCH,
+        };
+
+        let results = search_commands(&entries, "echo it'; rm -rf ~", &context);
+        assert_eq!(results.len(), 1);
+        // The embedded apostrophe is re-quoted (`'it'\''; rm -rf ~'`), so the
+        // whole payload remains one literal argument to `echo`.
+        assert_eq!(results[0].value(), "echo 'it'\\''; rm -rf ~'");
+    }
+
     #[test]
     fn command_placeholders_neutralize_shell_injection_inside_double_quotes() {
         let entries = vec![

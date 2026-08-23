@@ -307,6 +307,16 @@ mod tests {
         assert_eq!(result, "cmd \"\\$(reboot) x '\\$(reboot)' y\"");
     }
 
+    /// Regression: an apostrophe inside a substituted value must be escaped
+    /// via the POSIX `'\''` sequence so it cannot terminate the quoted token
+    /// early and smuggle in extra shell commands (`sh -c` contract).
+    #[test]
+    fn test_apostrophe_in_value_uses_posix_quote_escape() {
+        let context = PlaceholderContext::new("", Some(&"a'b".to_string()));
+        let result = expand_placeholders_shell("echo {{clipboard}}", &context);
+        assert_eq!(result, "echo 'a'\\''b'");
+    }
+
     #[test]
     fn test_inside_unclosed_double_quotes_scanner() {
         assert!(is_inside_unclosed_double_quotes("echo \"foo"));

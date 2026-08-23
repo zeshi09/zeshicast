@@ -342,4 +342,94 @@ mod tests {
         )
         .is_ok()
     }
+
+    fn clipboard_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM clipboard", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    /// Retention contract: pruning keeps only the newest `limit` rows and
+    /// drops the older ones, so the table stays bounded.
+    #[test]
+    fn clipboard_prune_keeps_only_newest_rows_within_limit() {
+        let dir = test_dir("prune-newest");
+        {
+            let conn = open(&dir).unwrap();
+            for i in 1..=105 {
+                conn.execute(
+                    "INSERT INTO clipboard (text, added_at) VALUES (?1, ?2)",
+                    params![format!("item-{i}"), i],
+                )
+                .unwrap();
+            }
+        }
+
+        clipboard_prune(&dir, 100).unwrap();
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(clipboard_count(&conn), 100);
+        // Rows 1..=5 (the oldest by added_at) were dropped; the newest 100,
+        // added_at 6..=105, survive.
+        let oldest: i64 = conn
+            .query_row("SELECT MIN(added_at) FROM clipboard", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(oldest, 6);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clipboard_prune_with_limit_above_row_count_removes_nothing() {
+        let dir = test_dir("prune-noop");
+        clipboard_insert(&dir, "only").unwrap();
+
+        clipboard_prune(&dir, 100).unwrap();
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(clipboard_count(&conn), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Legacy txt→SQLite migration deduplicates repeated entries via the
+    /// UNIQUE constraint on `clipboard.text` (INSERT OR IGNORE skips them).
+    #[test]
+    fn migrate_clipboard_deduplicates_duplicate_entries() {
+        let dir = test_dir("migrate-clipboard-dedup");
+        migrate_clipboard(
+            &dir,
+            &["a".to_string(), "a".to_string(), "b".to_string()],
+        )
+        .unwrap();
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(clipboard_count(&conn), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Same dedup contract for `usage`: `identity` is the PRIMARY KEY, so a
+    /// duplicated recent identity is ignored and keeps its first count.
+    #[test]
+    fn migrate_usage_deduplicates_duplicate_recent_identities() {
+        let dir = test_dir("migrate-usage-dedup");
+        let mut frequencies = HashMap::new();
+        frequencies.insert("x".to_string(), 3u32);
+        migrate_usage(
+            &dir,
+            &["x".to_string(), "x".to_string(), "y".to_string()],
+            &frequencies,
+        )
+        .unwrap();
+
+        let conn = open(&dir).unwrap();
+        let (count, x_count): (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(count), 0) FROM usage WHERE identity = 'x'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(x_count, 3);
+        assert_eq!(usage_recent(&dir, 10).len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

@@ -175,6 +175,14 @@
 
 ### P1-7. Тесты на security-контракты
 
+- [x] **Done.** `placeholders.rs`: ветка апострофа в `shell_quote`
+  (`a'b` → `'a'\''b'`); `lib.rs`: сквозной кейс через `search_commands`
+  (`echo it'; rm -rf ~` → `echo 'it'\''; rm -rf ~'`).
+  `services/storage.rs`: retention-prune (105 строк при limit=100 → COUNT==100,
+  новейшие; limit больше числа строк — no-op); `migrate_clipboard`
+  дедуплицирует `["a","a","b"]` → 2 строки, `migrate_usage` аналогично.
+  `src/search/windows.rs`: убран флакующий потолок elapsed 500ms — осталась
+  только проверка `is_none()` с комментарием о причине.
 - `placeholders.rs` / `lib.rs`: ветка апострофа в `shell_quote`
   (`it'; rm -rf ~` → `'it'\''; rm -rf ~'`) и P0-1 double-quote кейс.
 - `services/storage.rs`: retention-prune (вставить 105 строк при limit=100 →
