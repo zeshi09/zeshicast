@@ -50,14 +50,16 @@
 
 ### P0-4. Деструктивные операции с буфером через ExecutionPolicy на всех путях
 
-- **Where:** `src/app.rs:707-722` (`run_secondary_action`), CLI REPL в `src/main.rs`
-- **Problem:** clear/delete clipboard истории минуют ExecutionPolicy вне GTK UI;
-  в CLI REPL выполняются немедленно.
-- **Do:** единая точка — `run_secondary_action` проверяет risk и требует
-  confirmed-вызов (по образцу `run_action_confirmed`); CLI REPL печатает
-  сообщение «confirmation required» вместо молчаливого отказа.
-- **Accept:** из CLI REPL невозможно стереть историю без явного подтверждения;
-  тест на отказ без policy. После фикса убрать второй bullet из Known Gaps.
+- [x] **Done.** Где: `src/app.rs` (`run_secondary_action`), CLI REPL в `src/main.rs`.
+  Проблема: clear/delete clipboard истории миновали ExecutionPolicy вне GTK UI;
+  в CLI REPL выполнялись немедленно. Решение: единая точка защиты в `app.rs` —
+  `run_secondary_action` для рискованных secondary-операций
+  (`DeleteClipboardItem`, `ClearClipboardHistory`) без подтверждения возвращает
+  `ExecutionDecision::NeedsConfirmation(risk)` и не исполняет операцию;
+  подтверждённый путь — `run_secondary_action_confirmed`. GUI-лаунчер передаёт
+  подтверждение после своей панели; CLI REPL печатает «confirmation required;
+  use the GTK UI to run this action» вместо исполнения. Нерискованные secondary
+  действия работают как раньше. Bullet снят с Known Gaps в security.md.
 
 ---
 

@@ -2070,9 +2070,26 @@ fn handle_view_key(
                 });
             } else if let Some(row) = clipboard_view.list.selected_row()
                 && let Some(item) = clipboard_items.borrow().get(row.index() as usize)
-                && let Err(error) = launcher.borrow_mut().delete_clipboard_value(&item.value)
             {
-                eprintln!("failed to delete clipboard item: {error}");
+                // The Delete hotkey must pass the same destructive-action
+                // confirmation gate as the action panel entry.
+                let action = clipboard_item_action(&item.value);
+                let launcher_for_done = Rc::clone(launcher);
+                let clipboard_view = clipboard_view.clone();
+                let clipboard_items = Rc::clone(clipboard_items);
+                run_secondary_action_or_confirm(
+                    window,
+                    launcher,
+                    action,
+                    SecondaryActionKind::DeleteClipboardItem,
+                    move || {
+                        refresh_clipboard_view(
+                            &launcher_for_done,
+                            &clipboard_view,
+                            &clipboard_items,
+                        );
+                    },
+                );
             }
             if !state.contains(gdk::ModifierType::CONTROL_MASK) {
                 refresh_clipboard_view(launcher, clipboard_view, clipboard_items);
@@ -2925,11 +2942,7 @@ fn run_secondary_action_or_confirm<F>(
     let detail = secondary_action_confirmation_detail(&action, kind);
     let launcher = Rc::clone(launcher);
     crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
-        if kind == SecondaryActionKind::Run {
-            launcher.borrow_mut().run_action_confirmed(&action);
-        } else {
-            run_secondary_action(&launcher, &action, kind);
-        }
+        run_secondary_action_confirmed(&launcher, &action, kind);
         on_done();
     });
 }
@@ -2940,6 +2953,19 @@ fn run_secondary_action(
     kind: SecondaryActionKind,
 ) {
     if let Err(error) = launcher.borrow_mut().run_secondary_action(action, kind) {
+        eprintln!("failed to run secondary action: {error}");
+    }
+}
+
+fn run_secondary_action_confirmed(
+    launcher: &Rc<RefCell<Zeshicast>>,
+    action: &Action,
+    kind: SecondaryActionKind,
+) {
+    if let Err(error) = launcher
+        .borrow_mut()
+        .run_secondary_action_confirmed(action, kind)
+    {
         eprintln!("failed to run secondary action: {error}");
     }
 }
@@ -2972,19 +2998,24 @@ fn clear_clipboard_history_or_confirm<F>(
 ) where
     F: Fn() + 'static,
 {
-    let launcher = Rc::clone(launcher);
-    crate::ui::show_confirmation_panel(
+    run_secondary_action_or_confirm(
         window,
-        ActionRisk::ClipboardClear.label(),
-        "This clears all local clipboard history stored by Zeshicast.",
-        "Confirm",
-        move || {
-            if let Err(error) = launcher.borrow_mut().clear_clipboard_history() {
-                eprintln!("failed to clear clipboard history: {error}");
-            }
-            on_done();
-        },
+        launcher,
+        clipboard_item_action(""),
+        SecondaryActionKind::ClearClipboardHistory,
+        on_done,
     );
+}
+
+/// Builds a synthetic Clipboard-category action so clipboard secondary kinds
+/// route through the shared confirmation panel and app-level choke point.
+fn clipboard_item_action(value: &str) -> Action {
+    Action::new(
+        "Clipboard",
+        value.to_string(),
+        ActionKind::Copy(value.to_string()),
+        0,
+    )
 }
 
 fn finish_interaction(
@@ -3098,7 +3129,7 @@ mod tests {
     };
     use crate::{
         Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
-        SecondaryActionKind, ShellCommand, ui::ActionPanelDisplayItem,
+        SecondaryActionKind, ShellCommand, Zeshicast, ui::ActionPanelDisplayItem,
     };
 
     #[test]
@@ -3247,6 +3278,42 @@ mod tests {
             secondary_action_risk(&action, SecondaryActionKind::Run),
             ActionRisk::SystemPower
         );
+    }
+
+    #[test]
+    fn clipboard_delete_secondary_path_is_gated_behind_confirmation() {
+        // The Clipboard view Delete hotkey routes through the same gate as the
+        // action panel entry: an unconfirmed DeleteClipboardItem must be
+        // refused without touching the history.
+        let mut app = Zeshicast {
+            apps: Vec::new(),
+            quicklinks: Vec::new(),
+            snippets: Vec::new(),
+            commands: Vec::new(),
+            scripts: Vec::new(),
+            clipboard_history: vec!["secret".to_string()],
+            clipboard_timestamps: std::collections::HashMap::new(),
+            calc_history: Vec::new(),
+            preferences: std::collections::HashMap::new(),
+            aliases: std::collections::HashMap::new(),
+            pins: std::collections::HashSet::new(),
+            recent: Vec::new(),
+            frequencies: std::collections::HashMap::new(),
+            files: Vec::new(),
+            config_dir: std::env::temp_dir().join("zeshicast-launcher-delete-gate-test"),
+        };
+        let hotkey_action = super::clipboard_item_action("secret");
+
+        assert_eq!(
+            secondary_action_risk(&hotkey_action, SecondaryActionKind::DeleteClipboardItem),
+            ActionRisk::Destructive
+        );
+        assert_eq!(
+            app.run_secondary_action(&hotkey_action, SecondaryActionKind::DeleteClipboardItem)
+                .unwrap(),
+            ExecutionDecision::NeedsConfirmation(ActionRisk::Destructive)
+        );
+        assert_eq!(app.clipboard_history, vec!["secret"]);
     }
 
     fn action_panel_item(

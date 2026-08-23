@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use crate::services::storage;
 use crate::{
     Action, ActionFormCommand, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider,
-    ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
+    ActionRisk, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
     ExecutionPolicy, ExecutionRequest, ExtensionManifest, FileEntry, FilesProvider,
     HyprlandProvider, LauncherCommand, MAX_CLIPBOARD_ENTRIES, MAX_RESULTS, MediaProvider,
     NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider,
@@ -702,24 +702,87 @@ impl Zeshicast {
             .collect()
     }
 
+    /// Runs a secondary action under an interactive policy. Risky secondary
+    /// operations (`DeleteClipboardItem`, `ClearClipboardHistory`) are not
+    /// executed and return `ExecutionDecision::NeedsConfirmation` instead.
     pub fn run_secondary_action(
         &mut self,
         action: &Action,
         secondary: SecondaryActionKind,
-    ) -> io::Result<()> {
+    ) -> io::Result<ExecutionDecision> {
+        self.run_secondary_action_with_confirmation(action, secondary, false)
+    }
+
+    /// Runs a secondary action after the caller has obtained user
+    /// confirmation for its risk.
+    pub fn run_secondary_action_confirmed(
+        &mut self,
+        action: &Action,
+        secondary: SecondaryActionKind,
+    ) -> io::Result<ExecutionDecision> {
+        self.run_secondary_action_with_confirmation(action, secondary, true)
+    }
+
+    fn secondary_action_risk(
+        action: &Action,
+        secondary: SecondaryActionKind,
+    ) -> ActionRisk {
+        match secondary {
+            SecondaryActionKind::Run => action.risk,
+            SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
+            SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
+            _ => ActionRisk::Normal,
+        }
+    }
+
+    fn run_secondary_action_with_confirmation(
+        &mut self,
+        action: &Action,
+        secondary: SecondaryActionKind,
+        confirmed: bool,
+    ) -> io::Result<ExecutionDecision> {
+        let risk = Self::secondary_action_risk(action, secondary);
+        if risk.requires_confirmation() && !confirmed {
+            return Ok(ExecutionDecision::NeedsConfirmation(risk));
+        }
         match secondary {
             SecondaryActionKind::Run => {
-                self.run_action(action);
+                let policy = if confirmed {
+                    ExecutionPolicy::confirmed()
+                } else {
+                    ExecutionPolicy::interactive()
+                };
+                Ok(self.run_action_with_policy(action, policy))
             }
-            SecondaryActionKind::CopyValue => action.copy_value(),
-            SecondaryActionKind::TypeText => type_text_via_wtype(&action.value()),
-            SecondaryActionKind::OpenParent => action.open_parent_dir(),
-            SecondaryActionKind::Pin => self.pin_action(action)?,
-            SecondaryActionKind::Unpin => self.unpin_action(action)?,
-            SecondaryActionKind::DeleteClipboardItem => self.delete_clipboard_item(action)?,
-            SecondaryActionKind::ClearClipboardHistory => self.clear_clipboard_history()?,
+            SecondaryActionKind::CopyValue => {
+                action.copy_value();
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::TypeText => {
+                type_text_via_wtype(&action.value());
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::OpenParent => {
+                action.open_parent_dir();
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::Pin => {
+                self.pin_action(action)?;
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::Unpin => {
+                self.unpin_action(action)?;
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::DeleteClipboardItem => {
+                self.delete_clipboard_item(action)?;
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::ClearClipboardHistory => {
+                self.clear_clipboard_history()?;
+                Ok(ExecutionDecision::RunNow)
+            }
         }
-        Ok(())
     }
 
     pub fn add_clipboard_text(&mut self, text: &str) -> io::Result<bool> {
@@ -1478,5 +1541,78 @@ mod tests {
         assert!(!app.add_clipboard_text("secret").unwrap());
         assert!(app.clipboard_history.is_empty());
         assert!(!config_dir.join("zeshicast.db").exists());
+    }
+
+    fn clipboard_action(value: &str) -> Action {
+        Action::new(
+            "Clipboard",
+            value,
+            ActionKind::Copy(value.to_string()),
+            1,
+        )
+    }
+
+    #[test]
+    fn risky_secondary_actions_require_confirmation() {
+        let mut app = test_app(
+            test_cache_dir("secondary-risky-config"),
+            HashMap::new(),
+        );
+        app.clipboard_history = vec!["secret".to_string(), "other".to_string()];
+        let action = clipboard_action("secret");
+
+        let decision = app
+            .run_secondary_action(&action, SecondaryActionKind::DeleteClipboardItem)
+            .unwrap();
+        assert_eq!(decision, ExecutionDecision::NeedsConfirmation(ActionRisk::Destructive));
+
+        let decision = app
+            .run_secondary_action(&action, SecondaryActionKind::ClearClipboardHistory)
+            .unwrap();
+        assert_eq!(decision, ExecutionDecision::NeedsConfirmation(ActionRisk::ClipboardClear));
+
+        assert_eq!(app.clipboard_history, vec!["secret", "other"]);
+    }
+
+    #[test]
+    fn confirmed_secondary_actions_execute() {
+        let config_dir = test_cache_dir("secondary-confirmed-config");
+        let mut app = test_app(config_dir.clone(), HashMap::new());
+        app.clipboard_history = vec!["secret".to_string(), "other".to_string()];
+
+        let action = clipboard_action("secret");
+        let decision = app
+            .run_secondary_action_confirmed(&action, SecondaryActionKind::DeleteClipboardItem)
+            .unwrap();
+        assert_eq!(decision, ExecutionDecision::RunNow);
+        assert_eq!(app.clipboard_history, vec!["other"]);
+
+        let decision = app
+            .run_secondary_action_confirmed(&action, SecondaryActionKind::ClearClipboardHistory)
+            .unwrap();
+        assert_eq!(decision, ExecutionDecision::RunNow);
+        assert!(app.clipboard_history.is_empty());
+        assert!(!storage::clipboard_has_data(&config_dir));
+        let _ = fs::remove_dir_all(config_dir);
+    }
+
+    #[test]
+    fn normal_secondary_actions_run_without_confirmation() {
+        let config_dir = test_cache_dir("secondary-normal-config");
+        let mut app = test_app(config_dir, HashMap::new());
+        let action = clipboard_action("note");
+
+        let decision = app
+            .run_secondary_action(&action, SecondaryActionKind::Pin)
+            .unwrap();
+        assert_eq!(decision, ExecutionDecision::RunNow);
+        assert!(app.is_pinned(&action));
+
+        let decision = app
+            .run_secondary_action(&action, SecondaryActionKind::Unpin)
+            .unwrap();
+        assert_eq!(decision, ExecutionDecision::RunNow);
+        assert!(!app.is_pinned(&action));
+        let _ = fs::remove_dir_all(test_cache_dir("secondary-normal-config"));
     }
 }

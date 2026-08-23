@@ -80,13 +80,10 @@ the UI should not call raw process-spawn helpers directly.
 
 ## Known Gaps (as of 2026-08)
 
-One documented deviation from the model above is currently accepted and relies
-on the trusted-extension-code assumption. It is tracked for a code fix.
-
-- Clipboard history clear/delete operations are confirmation-gated in the GTK
-  UI only. The CLI REPL's secondary-action path (`run_secondary_action` in
-  `src/app.rs`) executes them directly, without the execution-policy
-  confirmation step used by the GUI.
+No known gaps as of 2026-08-23. The previously documented deviation (CLI REPL
+clear/delete of clipboard history executing without confirmation) was closed:
+risky secondary actions in `run_secondary_action` (`src/app.rs`) now require a
+confirmed execution path on all callers.
 
 ## Import And Export
 

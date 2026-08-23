@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use zeshicast::cli::{CliCommand, parse_cli_args};
-use zeshicast::{Action, SecondaryActionKind, Zeshicast};
+use zeshicast::{Action, ExecutionDecision, SecondaryActionKind, Zeshicast};
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -138,12 +138,19 @@ fn run_action_menu(app: &mut Zeshicast, action: &Action) {
     match choice.parse::<usize>() {
         Ok(number) if number > 0 && number <= secondary_actions.len() => {
             let secondary = secondary_actions[number - 1].kind;
-            if let Err(error) = app.run_secondary_action(action, secondary) {
-                eprintln!("failed to run action: {error}");
-            } else if matches!(secondary, SecondaryActionKind::Pin) {
-                println!("pinned");
-            } else if matches!(secondary, SecondaryActionKind::Unpin) {
-                println!("unpinned");
+            match app.run_secondary_action(action, secondary) {
+                Err(error) => eprintln!("failed to run action: {error}"),
+                Ok(ExecutionDecision::NeedsConfirmation(risk)) => println!(
+                    "confirmation required ({}); use the GTK UI to run this action.",
+                    risk.label()
+                ),
+                Ok(_) => {
+                    if matches!(secondary, SecondaryActionKind::Pin) {
+                        println!("pinned");
+                    } else if matches!(secondary, SecondaryActionKind::Unpin) {
+                        println!("unpinned");
+                    }
+                }
             }
         }
         Ok(number) if number == secondary_actions.len() + 1 => prompt_alias(app, action),
