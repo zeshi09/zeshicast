@@ -2045,8 +2045,8 @@ pub fn set_audio_snapshot(view: &AudioView, snapshot: &AudioSnapshot) {
     );
 
     // Real device lists (click a row to make it the default device).
-    populate_audio_device_list(&view.output_devices, &snapshot.output_devices, "Sinks");
-    populate_audio_device_list(&view.input_devices, &snapshot.input_devices, "Sources");
+    populate_audio_device_list(view, &view.output_devices, &snapshot.output_devices);
+    populate_audio_device_list(view, &view.input_devices, &snapshot.input_devices);
 
     // Reflect real volumes on the sliders without re-triggering set-volume.
     view.suppress_volume_cb.set(true);
@@ -2070,12 +2070,9 @@ fn set_default_volume(target: &str, percent: f64) {
 }
 
 /// Fill a device ListBox from real devices; clicking a row sets it as the
-/// system default (`wpctl set-default <id>`) and repopulates in place.
-fn populate_audio_device_list(
-    list: &ListBox,
-    devices: &[AudioDeviceOption],
-    section: &'static str,
-) {
+/// system default (`wpctl set-default <id>`) and repopulates from a fresh
+/// snapshot gathered off the main thread.
+fn populate_audio_device_list(view: &AudioView, list: &ListBox, devices: &[AudioDeviceOption]) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
@@ -2092,18 +2089,31 @@ fn populate_audio_device_list(
         let row = audio_device_row(&device.name, device.is_default);
         if let Some(id) = device.id {
             let gesture = gtk::GestureClick::new();
-            let list = list.clone();
+            let view = view.clone();
             gesture.connect_released(move |_, _, _, _| {
-                let _ = std::process::Command::new("wpctl")
-                    .args(["set-default", &id.to_string()])
-                    .status();
-                let snapshot = crate::audio_snapshot();
-                let devices = if section == "Sinks" {
-                    snapshot.output_devices
-                } else {
-                    snapshot.input_devices
-                };
-                populate_audio_device_list(&list, &devices, section);
+                // `wpctl set-default` plus the fresh snapshot run off-thread
+                // so the click never blocks the GTK main loop; the view is
+                // refreshed from the snapshot once both complete (same
+                // pattern as the deferred file index in launcher.rs).
+                let (sender, receiver) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("wpctl")
+                        .args(["set-default", &id.to_string()])
+                        .status();
+                    let _ = sender.send(crate::audio_snapshot());
+                });
+                let view = view.clone();
+                glib::timeout_add_local(
+                    std::time::Duration::from_millis(30),
+                    move || match receiver.try_recv() {
+                        Ok(snapshot) => {
+                            set_audio_snapshot(&view, &snapshot);
+                            glib::ControlFlow::Break
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+                    },
+                );
             });
             row.add_controller(gesture);
         }
@@ -2901,31 +2911,50 @@ pub fn font_browser_view() -> FontBrowserView {
         .build();
     root.append(&scroll);
 
-    // Populate initial list
-    let fonts = list_system_fonts();
-    populate_font_list(
-        &list,
-        &fonts,
-        "",
-        "The quick brown fox jumps over the lazy dog",
-    );
+    // Fonts load off-thread: the window must appear before `fc-list`
+    // finishes, so the list starts empty and is populated when the worker
+    // reports back (same deferred-load pattern as the launcher file index).
+    let fonts = Rc::new(RefCell::new(Vec::<String>::new()));
 
     // Wire up search filter
     {
         let list_c = list.clone();
         let preview_c = preview_entry.clone();
-        let fonts_c = fonts.clone();
+        let fonts_c = Rc::clone(&fonts);
         search.connect_changed(move |e| {
-            populate_font_list(&list_c, &fonts_c, &e.text(), &preview_c.text());
+            populate_font_list(&list_c, &fonts_c.borrow(), &e.text(), &preview_c.text());
         });
     }
     {
         let list_c = list.clone();
         let search_c = search.clone();
-        let fonts_c = fonts.clone();
+        let fonts_c = Rc::clone(&fonts);
         preview_entry.connect_changed(move |e| {
-            populate_font_list(&list_c, &fonts_c, &search_c.text(), &e.text());
+            populate_font_list(&list_c, &fonts_c.borrow(), &search_c.text(), &e.text());
         });
+    }
+
+    {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(list_system_fonts());
+        });
+        let fonts = Rc::clone(&fonts);
+        let list_c = list.clone();
+        let search_c = search.clone();
+        let preview_c = preview_entry.clone();
+        glib::timeout_add_local(
+            std::time::Duration::from_millis(100),
+            move || match receiver.try_recv() {
+                Ok(loaded) => {
+                    *fonts.borrow_mut() = loaded;
+                    populate_font_list(&list_c, &fonts.borrow(), &search_c.text(), &preview_c.text());
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            },
+        );
     }
 
     FontBrowserView {

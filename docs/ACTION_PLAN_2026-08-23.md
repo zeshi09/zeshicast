@@ -85,6 +85,18 @@
 - **Where:** `src/ui/views.rs:2095-2104` (wpctl set-default + audio_snapshot),
   `src/ui/views.rs:2939-2956` (fc-list в build_ui),
   `src/ui/launcher.rs:3037-3050` (пользовательский скрипт синхронно)
+- [x] **Done.** Все три блокирующих вызова вынесены в worker-потоки по
+  существующему паттерну (std::thread + mpsc + `glib::timeout_add_local`,
+  образец — `run_json_command_action_async` и отложенный файловый индекс):
+  клик по аудиоустройству выполняет `wpctl set-default` + свежий снапшот вне
+  main thread и обновляет view из снапшота; `fc-list` грузится фоном, окно и
+  font browser появляются сразу, список дозаполняется; скрипт после
+  подтверждения исполняется в worker-потоке с индикатором «Running…» в
+  script output view. Двойное исполнение устранено: `run_script_capture`
+  возвращает `ScriptCaptureOutcome` (`NotCapturable` / `RanWithoutOutput` /
+  `Output`) — «выполнен без вывода» больше не проваливается в fallback-спавн.
+  Тест `silent_script_run_is_not_confused_with_not_executed`; существующие
+  confirmation-тесты без изменений.
 - **Do:** паттерн уже в коде — worker-поток + mpsc +
   `glib::timeout_add_local` (как `run_json_command_action_async`,
   `launcher.rs:2776-2823`; отложенный файловый индекс `launcher.rs:105-126`).

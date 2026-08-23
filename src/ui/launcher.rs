@@ -416,23 +416,50 @@ fn build_ui(
                             &detail,
                             "Confirm",
                             move || {
-                                // Confirmed: capture first so a script with
-                                // output still shows its stdout afterwards.
-                                if let Some(stdout) = run_script_capture(&action) {
-                                    show_script_output_view(
-                                        &navigation,
-                                        &entry,
-                                        &action_bar,
-                                        &script_output_view,
-                                        &action.title,
-                                        &stdout,
-                                    );
-                                } else {
-                                    confirm_launcher
-                                        .borrow_mut()
-                                        .run_action_confirmed(&action);
-                                    finish_interaction(&confirm_window, &confirm_hold);
-                                }
+                                // Confirmed: run the script off the main thread
+                                // so activation never blocks rendering; the
+                                // outcome is delivered back over a channel and
+                                // applied on the main loop.
+                                let (sender, receiver) = std::sync::mpsc::channel();
+                                let worker_action = action.clone();
+                                std::thread::spawn(move || {
+                                    let _ = sender.send(run_script_capture(&worker_action));
+                                });
+                                show_script_output_view(
+                                    &navigation,
+                                    &entry,
+                                    &action_bar,
+                                    &script_output_view,
+                                    &action.title,
+                                    "Running…",
+                                );
+                                let script_output_view = script_output_view.clone();
+                                let action = action.clone();
+                                let confirm_launcher = Rc::clone(&confirm_launcher);
+                                let confirm_window = confirm_window.clone();
+                                let confirm_hold = Rc::clone(&confirm_hold);
+                                glib::timeout_add_local(
+                                    std::time::Duration::from_millis(30),
+                                    move || match receiver.try_recv() {
+                                        Ok(outcome) => {
+                                            finish_script_run(
+                                                outcome,
+                                                &script_output_view,
+                                                &action,
+                                                &confirm_launcher,
+                                                &confirm_window,
+                                                &confirm_hold,
+                                            );
+                                            glib::ControlFlow::Break
+                                        }
+                                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                                            glib::ControlFlow::Continue
+                                        }
+                                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                            glib::ControlFlow::Break
+                                        }
+                                    },
+                                );
                             },
                         );
                     }
@@ -3093,21 +3120,60 @@ fn action_index_for_row(list: &ListBox, row: &gtk::ListBoxRow) -> Option<usize> 
     None
 }
 
-/// Run a Script action and return stdout if the script produces output (fullOutput / compact).
-/// Returns None if the script should just be spawned without capturing output.
-fn run_script_capture(action: &Action) -> Option<String> {
+/// Outcome of the capture path for a Script action. Distinguishes "the script
+/// already ran but produced no stdout" (must never be spawned again — that was
+/// the P0-3 double-execution bug) from "nothing was ever executed" (the caller
+/// may fall back to a plain confirmed spawn).
+enum ScriptCaptureOutcome {
+    NotCapturable,
+    RanWithoutOutput,
+    Output(String),
+}
+
+/// Apply the outcome of an off-thread script capture run: show stdout when the
+/// script produced any, close the window when it already ran silently (no
+/// respawn), and fall back to `run_action_confirmed` only when nothing was
+/// executed so far.
+fn finish_script_run(
+    outcome: ScriptCaptureOutcome,
+    script_output_view: &crate::ui::ScriptOutputView,
+    action: &Action,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    window: &ApplicationWindow,
+    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+) {
+    match outcome {
+        ScriptCaptureOutcome::Output(stdout) => {
+            crate::ui::set_script_output(script_output_view, &action.title, &stdout);
+        }
+        ScriptCaptureOutcome::RanWithoutOutput => {
+            // The script already executed once; spawning it again would run
+            // it twice.
+            finish_interaction(window, hold);
+        }
+        ScriptCaptureOutcome::NotCapturable => {
+            launcher.borrow_mut().run_action_confirmed(action);
+            finish_interaction(window, hold);
+        }
+    }
+}
+
+/// Run a Script action's executable synchronously (call from a worker thread)
+/// and classify its result for the capture path.
+fn run_script_capture(action: &Action) -> ScriptCaptureOutcome {
     let ActionKind::Shell(cmd) = &action.kind else {
-        return None;
+        return ScriptCaptureOutcome::NotCapturable;
     };
     let path = std::path::Path::new(&cmd.command);
     if !path.exists() {
-        return None;
+        return ScriptCaptureOutcome::NotCapturable;
     }
-    let stdout = crate::search::scripts::run_script_stdout(path).ok()?;
-    if stdout.trim().is_empty() {
-        return None;
+    match crate::search::scripts::run_script_stdout(path) {
+        Ok(stdout) if !stdout.trim().is_empty() => ScriptCaptureOutcome::Output(stdout),
+        // Executed with empty stdout (or the spawn failed after we attempted
+        // it): the script was tried, so callers must never respawn it.
+        _ => ScriptCaptureOutcome::RanWithoutOutput,
     }
-    Some(stdout)
 }
 
 fn select_first_action_row(list: &ListBox) {
@@ -3124,8 +3190,9 @@ fn select_first_action_row(list: &ListBox) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, action_panel_display_items,
-        action_panel_display_rows, decode_clipboard_text, secondary_action_risk,
+        ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, ScriptCaptureOutcome,
+        action_panel_display_items, action_panel_display_rows, decode_clipboard_text,
+        run_script_capture, secondary_action_risk,
     };
     use crate::{
         Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
@@ -3155,6 +3222,67 @@ mod tests {
             ExecutionPolicy::confirmed().decide(&action),
             ExecutionDecision::RunNow
         );
+    }
+
+    /// Build a Shell-risk "Script" action whose command is a script path.
+    fn script_path_action(path: &std::path::Path) -> Action {
+        Action::new(
+            "Script",
+            "Capture Test",
+            ActionKind::Shell(ShellCommand::new(path.to_string_lossy().into_owned())),
+            0,
+        )
+        .with_risk(ActionRisk::Shell)
+    }
+
+    #[test]
+    fn silent_script_run_is_not_confused_with_not_executed() {
+        // P0-3 follow-up: a script that ran but printed nothing must be
+        // reported as executed-without-output so the confirmation fallback
+        // never spawns it a second time.
+        let dir = std::env::temp_dir().join(format!(
+            "zeshicast-capture-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let make_executable = |path: &std::path::Path| {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).unwrap();
+        };
+
+        let silent = dir.join("silent.sh");
+        std::fs::write(&silent, "#!/bin/sh\nexit 0\n").unwrap();
+        make_executable(&silent);
+
+        let loud = dir.join("loud.sh");
+        std::fs::write(&loud, "#!/bin/sh\necho capture-test-output\n").unwrap();
+        make_executable(&loud);
+
+        // Executed but empty stdout: must NOT look like "not executed".
+        assert!(matches!(
+            run_script_capture(&script_path_action(&silent)),
+            ScriptCaptureOutcome::RanWithoutOutput
+        ));
+        // Executed with stdout: captured output.
+        assert!(matches!(
+            run_script_capture(&script_path_action(&loud)),
+            ScriptCaptureOutcome::Output(_)
+        ));
+        // Missing path: nothing was ever executed — caller may fall back to
+        // a plain confirmed spawn.
+        assert!(matches!(
+            run_script_capture(&script_path_action(&dir.join("missing.sh"))),
+            ScriptCaptureOutcome::NotCapturable
+        ));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
