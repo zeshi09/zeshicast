@@ -144,11 +144,42 @@
               after = [ "graphical-session.target" ];
               wantedBy = [ "graphical-session.target" ];
               path = cfg.extraRuntimePackages;
+              # Hardening зеркален packaging/zeshicast-gtk.service (P2-6).
+              # Включать закомментированное ниже только после ручной проверки:
+              # GTK4/malloc/rustls могут ломаться под W^X и строгим фильтром.
               serviceConfig = {
                 ExecStart = "${lib.getExe cfg.package} --daemon";
                 ExecStop = "${lib.getExe cfg.package} --quit";
                 Restart = "on-failure";
                 RestartSec = 2;
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                ProtectSystem = "full";
+                ProtectHome = "read-only";
+                # %h корректен для user-юнитов; демону нужны запись конфига и кэша.
+                ReadWritePaths = [
+                  "%h/.config/zeshicast"
+                  "%h/.cache/zeshicast"
+                  "%h/.local/share/fonts/zeshicast"  # bundled font install (ui/fonts.rs)
+                ];
+                RestrictSUIDSGID = true;
+                LockPersonality = true;
+                RestrictRealtime = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                ProtectClock = true;
+                ProtectHostname = true;
+                CapabilityBoundingSet = [ ];
+                RestrictAddressFamilies = [
+                  "AF_UNIX"
+                  "AF_INET"
+                  "AF_INET6"
+                  "AF_NETLINK"
+                ];
+                #MemoryDenyWriteExecute = true;
+                #SystemCallFilter = [ "@system-service" ];
+                #SystemCallArchitectures = "native";
               };
             };
           };
@@ -171,11 +202,42 @@
                 PartOf = [ "graphical-session.target" ];
                 After = [ "graphical-session.target" ];
               };
+              # Hardening зеркален packaging/zeshicast-gtk.service (P2-6).
+              # Включать закомментированное ниже только после ручной проверки:
+              # GTK4/malloc/rustls могут ломаться под W^X и строгим фильтром.
               Service = {
                 ExecStart = "${lib.getExe cfg.package} --daemon";
                 ExecStop = "${lib.getExe cfg.package} --quit";
                 Restart = "on-failure";
                 RestartSec = 2;
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                ProtectSystem = "full";
+                ProtectHome = "read-only";
+                # %h корректен для user-юнитов; демону нужны запись конфига и кэша.
+                ReadWritePaths = [
+                  "%h/.config/zeshicast"
+                  "%h/.cache/zeshicast"
+                  "%h/.local/share/fonts/zeshicast"  # bundled font install (ui/fonts.rs)
+                ];
+                RestrictSUIDSGID = true;
+                LockPersonality = true;
+                RestrictRealtime = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                ProtectClock = true;
+                ProtectHostname = true;
+                CapabilityBoundingSet = [ ];
+                RestrictAddressFamilies = [
+                  "AF_UNIX"
+                  "AF_INET"
+                  "AF_INET6"
+                  "AF_NETLINK"
+                ];
+                #MemoryDenyWriteExecute = true;
+                #SystemCallFilter = [ "@system-service" ];
+                #SystemCallArchitectures = "native";
               };
               Install.WantedBy = [ "graphical-session.target" ];
             };

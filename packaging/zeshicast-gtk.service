@@ -9,5 +9,29 @@ ExecStart=@BIN@/zeshicast-gtk --daemon
 Restart=on-failure
 RestartSec=2
 
+# Hardening (P2-6). Демону нужны: session D-Bus, Wayland-сокет,
+# wl-paste/wl-copy, MPRIS D-Bus, сеть (AI endpoints) и запись в
+# ~/.config/zeshicast и ~/.cache/zeshicast. %h корректен для user-юнитов.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=%h/.config/zeshicast %h/.cache/zeshicast %h/.local/share/fonts/zeshicast
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Включать только после ручной проверки на живой сессии (clipboard/MPRIS/AI):
+# GTK4/malloc/rustls могут ломаться под W^X и строгим фильтром syscall'ов.
+#MemoryDenyWriteExecute=true
+#SystemCallFilter=@system-service
+#SystemCallArchitectures=native
+
 [Install]
 WantedBy=graphical-session.target

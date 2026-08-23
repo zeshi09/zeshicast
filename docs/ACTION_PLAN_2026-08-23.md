@@ -259,7 +259,7 @@
 - **Do:** параметризовать `PlaceholderContext` временем жизни / передавать ссылку.
 - **Accept:** профайлинг/код-ревью: аллокаций map на keypress нет.
 
-### P2-6. systemd hardening
+### P2-6. systemd hardening — [x] Done (безопасный стартовый набор)
 
 - **Where:** `packaging/zeshicast-gtk.service` + юнит во flake.nix
 - **Do:** начать с безопасного набора: NoNewPrivileges=true,
@@ -268,6 +268,22 @@
   ProtectKernel*, SystemCallFilter=@system-service. Проверять каждую опцию на
   живой сессии (D-Bus, Wayland-сокет, clipboard, MPRIS, сеть).
 - **Accept:** демон работает под юнитом с hardening; clipboard/notify/MPRIS живы.
+- [x] **Done (частично — до живой проверки).** Безопасный стартовый набор применён
+  зеркально в трёх местах: `packaging/zeshicast-gtk.service`, NixOS-модуль и
+  HM-модуль во flake.nix (`systemd.user.services.zeshicast`). Добавлены:
+  NoNewPrivileges/PrivateTmp/ProtectSystem=full/ProtectHome=read-only +
+  ReadWritePaths(%h/.config/zeshicast %h/.cache/zeshicast)/RestrictSUIDSGID/
+  LockPersonality/RestrictRealtime/ProtectKernel{Tunables,Modules}/
+  ProtectControlGroups/ProtectClock/ProtectHostname/CapabilityBoundingSet=/
+  RestrictAddressFamilies(AF_UNIX AF_INET AF_INET6 AF_NETLINK).
+  MemoryDenyWriteExecute и SystemCallFilter оставлены закомментированными
+  с пояснением (GTK4/malloc/rustls под W^X и строгим фильтром не проверены на
+  живой сессии). Известный нюанс: `ensure_fonts()` пишет встроенные шрифты в
+  `~/.local/share/fonts/zeshicast` при первом запуске (`src/ui/fonts.rs`) —
+  этот путь НЕ входит в ReadWritePaths, запись тихо не удастся (код деградирует
+  штатно), на свежих установках шрифты нужно поставить вручную либо добавить
+  `%h/.local/share/fonts/zeshicast` в ReadWritePaths после решения.
+  Живая проверка опций (clipboard/notify/MPRIS/AI) — за рамками этого коммита.
 
 ---
 
