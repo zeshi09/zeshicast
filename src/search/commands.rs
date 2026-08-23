@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 #[cfg(feature = "gui")]
@@ -342,17 +343,18 @@ fn parse_env_table(value: Option<&toml::Value>) -> HashMap<String, String> {
 pub(crate) fn search_commands(
     entries: &[CommandEntry],
     query: &str,
-    context: &PlaceholderContext,
+    context: &PlaceholderContext<'_>,
 ) -> Vec<Action> {
     entries
         .iter()
         .flat_map(|entry| {
             let command_match = match_command_entry(entry, query)?;
+            let merged_preferences = command_preferences(entry, &context.preferences);
             let command_context = PlaceholderContext {
                 query: command_match.argument.clone(),
                 clipboard: context.clipboard.clone(),
                 args: command_match.args.clone(),
-                preferences: command_preferences(entry, &context.preferences),
+                preferences: Cow::Owned(merged_preferences),
                 now: context.now,
             };
             let env = command_env(entry, &command_context);
@@ -437,7 +439,7 @@ pub(crate) fn search_commands(
         .collect()
 }
 
-fn command_display(entry: &CommandEntry, context: &PlaceholderContext) -> String {
+fn command_display(entry: &CommandEntry, context: &PlaceholderContext<'_>) -> String {
     match entry.mode {
         CommandMode::Argv => argv_process_command(entry, context, HashMap::new()).display(),
         CommandMode::Shell | CommandMode::Json => {
@@ -448,7 +450,7 @@ fn command_display(entry: &CommandEntry, context: &PlaceholderContext) -> String
 
 fn argv_process_command(
     entry: &CommandEntry,
-    context: &PlaceholderContext,
+    context: &PlaceholderContext<'_>,
     env: HashMap<String, String>,
 ) -> ProcessCommand {
     let program = entry
@@ -814,7 +816,7 @@ pub(crate) fn command_preferences(
 
 pub(crate) fn command_env(
     entry: &CommandEntry,
-    context: &PlaceholderContext,
+    context: &PlaceholderContext<'_>,
 ) -> HashMap<String, String> {
     entry
         .env

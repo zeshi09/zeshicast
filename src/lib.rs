@@ -224,6 +224,7 @@ fn copy_with(program: &str, args: &[&str], text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
     use std::time::UNIX_EPOCH;
@@ -318,7 +319,7 @@ mod tests {
             query: "rust gtk".to_string(),
             clipboard: "token".to_string(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -334,7 +335,7 @@ mod tests {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -358,7 +359,7 @@ mod tests {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -371,7 +372,7 @@ mod tests {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::from([("workspace".to_string(), "zeshicast".to_string())]),
+            preferences: Cow::Owned(HashMap::from([("workspace".to_string(), "zeshicast".to_string())])),
             now: UNIX_EPOCH,
         };
 
@@ -467,7 +468,7 @@ mod tests {
             query: "devops".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
         let results = search_named_values(
@@ -602,7 +603,7 @@ arguments = [
             query: String::new(),
             clipboard: "$(wl-paste); reboot".to_string(),
             args: HashMap::new(),
-            preferences: HashMap::from([("workspace".to_string(), "$(echo owned)".to_string())]),
+            preferences: Cow::Owned(HashMap::from([("workspace".to_string(), "$(echo owned)".to_string())])),
             now: UNIX_EPOCH,
         };
 
@@ -649,7 +650,7 @@ permissions = ["shell"]
             query: "printf".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -678,7 +679,7 @@ command = "rm -rf /tmp/example"
             query: "unsafe".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -707,7 +708,7 @@ permissions = ["shell", "network"]
             query: "docs gtk".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -740,7 +741,7 @@ arguments = [
             query: "gh rust gtk".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -776,7 +777,7 @@ arguments = [
             query: "deploy prod api worker".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -806,7 +807,7 @@ permissions = ["shell"]
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -838,7 +839,7 @@ permissions = ["shell"]
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -867,7 +868,7 @@ permissions = ["shell"]
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -899,7 +900,7 @@ arguments = [
             query: "deploy".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
 
@@ -932,7 +933,7 @@ workspace = "~/Code"
             query: "ws zeshicast".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: HashMap::from([("workspace".to_string(), "/src".to_string())]),
+            preferences: Cow::Owned(HashMap::from([("workspace".to_string(), "/src".to_string())])),
             now: UNIX_EPOCH,
         };
 
@@ -967,10 +968,10 @@ DEPLOY_TOKEN = "{{pref:token}}"
             query: command_match.argument,
             clipboard: String::new(),
             args: command_match.args,
-            preferences: command_preferences(
+            preferences: Cow::Owned(command_preferences(
                 &entry,
                 &HashMap::from([("token".to_string(), "user-token".to_string())]),
-            ),
+            )),
             now: UNIX_EPOCH,
         };
 

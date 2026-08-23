@@ -74,7 +74,7 @@ pub(crate) fn search_named_values(
     entries: &[NamedValue],
     query: &str,
     target: ActionTarget,
-    context: &PlaceholderContext,
+    context: &PlaceholderContext<'_>,
 ) -> Vec<Action> {
     entries
         .iter()

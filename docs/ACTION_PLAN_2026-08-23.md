@@ -241,10 +241,21 @@
   задокументировать поведение вотчеров (EPIPE/EOF-reconnect уже работает).
 - **Accept:** `systemctl --user stop zeshicast-gtk` завершает процесс аккуратно.
 
-### P2-5. Убрать clone preferences на каждое нажатие клавиши
+### P2-5. Убрать clone preferences на каждое нажатие клавиши — [x] Done
 
 - **Where:** `src/app.rs:441` (`context.with_preferences(self.preferences.clone())`
   в `Zeshicast::search`)
+- [x] **Done.** `PlaceholderContext` параметризован временем жизни:
+  поле `preferences` теперь `Cow<'a, HashMap<String, String>>`, а
+  `with_preferences` принимает `&'a HashMap`. Поисковый путь в
+  `Zeshicast::search` вызывает `with_preferences(&self.preferences)` и больше
+  не клонирует map на каждое нажатие клавиши (нулевые аллокации:
+  `Cow::Borrowed`). Владеющий вариант (`Cow::Owned`) остался там, где map и так
+  доступна по значению: форма (`run_form_action`) и слитые preferences команды
+  в `search_commands`. Семантика чтения `{{pref:…}}` не изменилась
+  (`render_placeholder` читает через `Deref`). Тест
+  `search_expands_preferences_from_borrowed_map` проверяет, что поиск работает
+  с заимствованной map и значения резолвятся как раньше.
 - **Do:** параметризовать `PlaceholderContext` временем жизни / передавать ссылку.
 - **Accept:** профайлинг/код-ревью: аллокаций map на keypress нет.
 

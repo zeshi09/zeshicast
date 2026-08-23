@@ -25,7 +25,7 @@ use scripts::search_scripts;
 
 pub(crate) struct SearchContext<'a> {
     pub(crate) query: &'a str,
-    pub(crate) placeholders: &'a PlaceholderContext,
+    pub(crate) placeholders: &'a PlaceholderContext<'a>,
 }
 
 pub(crate) trait SearchProvider {

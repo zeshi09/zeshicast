@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
@@ -6,34 +7,39 @@ use chrono::{DateTime, Local};
 use crate::{Calculator, format_number};
 
 #[derive(Debug, Clone)]
-pub(crate) struct PlaceholderContext {
+pub(crate) struct PlaceholderContext<'a> {
     pub(crate) query: String,
     pub(crate) clipboard: String,
     pub(crate) args: HashMap<String, String>,
-    pub(crate) preferences: HashMap<String, String>,
+    /// Borrowed from the launcher preferences on the per-keystroke search path
+    /// so building a context never clones the whole map; owned where the map is
+    /// already available by value (form submission, merged command prefs).
+    pub(crate) preferences: Cow<'a, HashMap<String, String>>,
     pub(crate) now: SystemTime,
 }
 
-impl PlaceholderContext {
+impl<'a> PlaceholderContext<'a> {
     pub(crate) fn new(query: &str, clipboard: Option<&String>) -> Self {
         Self {
             query: query.to_string(),
             clipboard: clipboard.cloned().unwrap_or_default(),
             args: HashMap::new(),
-            preferences: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
             now: SystemTime::now(),
         }
     }
 
-    pub(crate) fn with_preferences(mut self, preferences: HashMap<String, String>) -> Self {
-        self.preferences = preferences;
+    /// Attach launcher preferences by reference: the context borrows them for
+    /// the duration of the search instead of cloning the map.
+    pub(crate) fn with_preferences(mut self, preferences: &'a HashMap<String, String>) -> Self {
+        self.preferences = Cow::Borrowed(preferences);
         self
     }
 }
 
 /// Expand placeholders verbatim. Use for non-shell contexts (URLs, snippets,
 /// environment values).
-pub(crate) fn expand_placeholders(template: &str, context: &PlaceholderContext) -> String {
+pub(crate) fn expand_placeholders(template: &str, context: &PlaceholderContext<'_>) -> String {
     expand(template, context, false)
 }
 
@@ -42,11 +48,14 @@ pub(crate) fn expand_placeholders(template: &str, context: &PlaceholderContext) 
 /// input (e.g. clipboard containing `$(rm -rf ~)` or `; reboot`) cannot break
 /// out into command execution. Command authors therefore must NOT add their own
 /// quotes around placeholders — the quoting is supplied here.
-pub(crate) fn expand_placeholders_shell(template: &str, context: &PlaceholderContext) -> String {
+pub(crate) fn expand_placeholders_shell(
+    template: &str,
+    context: &PlaceholderContext<'_>,
+) -> String {
     expand(template, context, true)
 }
 
-fn expand(template: &str, context: &PlaceholderContext, shell_escape: bool) -> String {
+fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) -> String {
     let mut output = String::new();
     let mut rest = template;
 
@@ -180,7 +189,7 @@ fn is_inside_unclosed_double_quotes(text: &str) -> bool {
 }
 
 /// Resolve a placeholder to its value, or `None` if the name is unknown.
-fn render_placeholder(placeholder: &str, context: &PlaceholderContext) -> Option<String> {
+fn render_placeholder(placeholder: &str, context: &PlaceholderContext<'_>) -> Option<String> {
     let (name, argument) = placeholder
         .split_once(':')
         .map(|(name, argument)| (name.trim(), Some(argument.trim())))

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -438,8 +439,8 @@ impl Zeshicast {
         let mut actions = Vec::new();
         let trimmed = query.trim();
         let lower = trimmed.to_lowercase();
-        let context = PlaceholderContext::new(trimmed, self.clipboard_history.first());
-        let context = context.with_preferences(self.preferences.clone());
+        let context = PlaceholderContext::new(trimmed, self.clipboard_history.first())
+            .with_preferences(&self.preferences);
 
         if trimmed.is_empty() {
             actions.extend(self.default_actions(&context));
@@ -945,7 +946,7 @@ impl Zeshicast {
         self.write_pins()
     }
 
-    fn default_actions(&self, context: &PlaceholderContext) -> Vec<Action> {
+    fn default_actions(&self, context: &PlaceholderContext<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
         let search_context = SearchContext {
             query: "",
@@ -1145,7 +1146,7 @@ impl Zeshicast {
             query: form.partial_query.clone(),
             clipboard: self.clipboard_history.first().cloned().unwrap_or_default(),
             args,
-            preferences: form.preferences.clone(),
+            preferences: Cow::Owned(form.preferences.clone()),
             now: SystemTime::now(),
         };
         let env = form
@@ -1468,6 +1469,37 @@ mod tests {
             files: Vec::new(),
             config_dir,
         }
+    }
+
+    /// Search must read launcher preferences by reference:
+    /// `Zeshicast::search` calls
+    /// `PlaceholderContext::new(..).with_preferences(&self.preferences)`, so
+    /// building the per-keystroke context borrows the map instead of cloning
+    /// it. The snippet expansion here only compiles and resolves while the
+    /// context holds a borrowed `Cow::Borrowed(preferences)`.
+    #[test]
+    fn search_expands_preferences_from_borrowed_map() {
+        let mut app = test_app(
+            test_cache_dir("search-borrow-preferences"),
+            HashMap::from([("deploy_token".to_string(), "secret-token".to_string())]),
+        );
+        app.snippets.push(NamedValue {
+            name: "show deploy token".to_string(),
+            value: "token={{pref:deploy_token}}".to_string(),
+            tags: Vec::new(),
+        });
+
+        let actions = app.search("show deploy token");
+        let expanded = actions
+            .iter()
+            .find(|action| action.category == "Snippet")
+            .map(|action| match &action.kind {
+                ActionKind::Copy(value) => value.clone(),
+                _ => panic!("snippet should produce a copy action"),
+            })
+            .expect("snippet matching its own name should be found");
+
+        assert_eq!(expanded, "token=secret-token");
     }
 
     #[test]
