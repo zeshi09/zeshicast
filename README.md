@@ -567,13 +567,16 @@ Edit via `Ctrl+,` in the GTK launcher or directly in the file.
 
 ### AI and translate preferences
 
+The block below shows the built-in defaults from `PREFERENCE_DEFAULTS`
+(`src/ui/preferences.rs`); edit as needed:
+
 ```toml
 # ~/.config/zeshicast/preferences.toml
 ai_provider        = "ollama"                      # set to "openai" for /v1/chat/completions
 ui_font_family    = "Outfit, Inter, Noto Sans, sans-serif"
 ui_font_size      = "15"
 show_status_strip  = "true"
-status_items       = "clock,date,network,battery,audio,media"
+status_items       = "clock,date,network,battery,audio,media,layout"
 dashboard_enabled  = "true"
 network_enabled    = "true"
 media_enabled      = "true"
@@ -587,11 +590,11 @@ export_include_secrets = "false"
 ai_enabled         = "true"
 dashboard_poll_interval_ms = "1000"
 ollama_endpoint    = "http://localhost:11434"
-ollama_model       = "gemma4:e4b"
-ai_endpoint        = "http://localhost:11434/v1"   # used when ai_provider = "openai"
-ai_model           = "gemma4:e4b"
+ollama_model       = "llama3.2:3b"
+ai_endpoint        = "https://api.openai.com/v1"   # used when ai_provider = "openai"
+ai_model           = "gpt-4o-mini"
 ai_api_key         = ""
-translate_endpoint = "https://libretranslate.com"
+translate_endpoint = "http://localhost:5000"
 translate_api_key  = ""
 translate_target   = "en"
 ```
