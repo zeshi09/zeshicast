@@ -26,26 +26,35 @@ typography. Subtle separators. Useful live status. No decorative background.
 | [icon] Dashboard            system overview      [Core]  |
 | [icon] Network              Wi-Fi / VPN / DNS    [Core]  |
 +----------------------------------------------------------+
-| Run Enter      Actions Ctrl+K      Copy Ctrl+Enter       | 40
+| [⊟] [◈] [⎘] [↵]        Actions ⌃K                        | 38
 +----------------------------------------------------------+
-| 14:32:08  Wi-Fi up  Battery 82%  Vol 48%                 | 34
+| 14:32:08  Wi-Fi up  Battery 82%  Vol 48%                 |
 +----------------------------------------------------------+
 ```
+
+Note: the footer shipped as a compact icon action bar (`.action-bar`, 38px
+min-height): icon buttons for Show in Files / Pin / Copy / Run expose their
+shortcuts via tooltips, and only the `Actions ⌃K` button carries a text label.
+The status strip is padding-based (no fixed height). The earlier plan to move
+to fully labelled text+shortcut footer actions was superseded by the Raycast
+v2 handoff.
 
 ## Tokens
 
+Base color roles are delegated to the active GTK theme (`@window_bg_color`,
+`@window_fg_color`, `@accent_color`, ...), so the launcher follows the user's
+system theme instead of shipping its own surface/text palette. Only four
+accent aliases are defined in code (`src/ui/style.rs`):
+
 ```text
-window        #111216
-surface       #17191f
-surface_muted #14161b
-border        #2a2d36
-text          #eceff4
-text_muted    #9aa3b2
-accent        #8ab4f8
-danger        #ff6b5f
-success       #6dd58c
-warning       #f4c76b
+ac_purple     #8B7CF8   (accent)
+ac_amber      #F5A623   (warning)
+ac_green      #4BD98A   (success)
+ac_red        #FF6B5F   (danger)
 ```
+
+The source of truth for colors is the Raycast v2 design handoff CSS
+(`design_handoff_zeshicast/zeshicast-gtk4.css`).
 
 Typography:
 
@@ -57,13 +66,14 @@ Typography:
 
 Geometry:
 
-- Window: 860x600
+- Window: 900x760 (`default_width` / `default_height` in `src/ui/launcher.rs`)
+- Window frame radius: 14px (`.launcher-frame`)
 - Search header: 60px
-- Root row: 52px comfortable, 44-48px compact
+- Root row: 52px comfortable, 44px compact
 - Section header: 28px
-- Footer: 40px
-- Status strip: 34px
-- Cards: radius 8px max
+- Action bar (footer): 38px min-height
+- Status strip: padding-based, no fixed height
+- Cards: radius 10px
 
 ## Components
 
@@ -177,7 +187,7 @@ Settings:
 - Section headers are not selectable.
 - Keyboard navigation skips non-action rows.
 - Selected/hover states never change row height.
-- Dashboard cards fit inside 860x600.
+- Dashboard cards fit inside 900x760.
 - No nested cards.
 - No gradient/orb decoration.
 - Root search remains the first screen.
@@ -185,7 +195,8 @@ Settings:
 ## Implementation Order
 
 1. Finish root grouping: Favourites, Recent, Command Center.
-2. Replace icon-only footer with text+shortcut footer actions.
+2. Footer actions (superseded decision: the compact icon action bar was kept
+   in the final design; see the note under Core Shell).
 3. Introduce `MetricCard` and `ControlCard` GTK helpers.
 4. Rebuild Dashboard on cards.
 5. Rebuild Action Panel with sections.

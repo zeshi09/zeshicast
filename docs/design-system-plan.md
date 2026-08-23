@@ -32,9 +32,9 @@ Zeshicast should feel like a quiet Linux cockpit:
 
 ### Window
 
-- Width: 860px default.
-- Height: 600px default.
-- Border radius: 12px.
+- Width: 900px default.
+- Height: 760px default (`default_width` / `default_height` in `src/ui/launcher.rs`).
+- Border radius: 14px (`.launcher-frame`).
 - Outer border: 1px, subtle foreground alpha.
 - Background: near-system window background with 0.985 opacity.
 - Shadow: soft, deep, single shadow; no colored glow.
@@ -74,19 +74,19 @@ Use semantic roles rather than hard-coded theme names:
 - `success`: healthy status.
 - `warning`: degraded status.
 
-Default dark palette:
+Default color model (as implemented in `src/ui/style.rs`):
+
+Base roles are delegated to the active GTK theme (`@window_bg_color`,
+`@window_fg_color`, `@accent_color`, ...), so the launcher follows the user's
+system theme instead of shipping a fixed surface/text palette. Only four
+accent aliases are defined in code, matching the Raycast v2 design handoff
+CSS:
 
 ```text
-window        #111216
-surface       #17191f
-surface_muted #14161b
-border        #2a2d36
-text          #eceff4
-text_muted    #9aa3b2
-accent        #8ab4f8
-danger        #ff6b5f
-success       #6dd58c
-warning       #f4c76b
+ac_purple     #8B7CF8   (accent)
+ac_amber      #F5A623   (warning)
+ac_green      #4BD98A   (success)
+ac_red        #FF6B5F   (danger)
 ```
 
 ## Shell Layout
@@ -103,9 +103,9 @@ Root shell structure:
 | Result row                                               | 52
 | ... scroll                                               |
 +----------------------------------------------------------+
-| Footer actions: Enter Run   Ctrl+K Actions   Ctrl+Enter  | 40
+| Footer actions: [⊟] [◈] [⎘] [↵], Actions ⌃K              | 38
 +----------------------------------------------------------+
-| Status strip: time net battery volume media              | 34
+| Status strip: time net battery volume media              |
 +----------------------------------------------------------+
 ```
 
@@ -113,9 +113,12 @@ Notes:
 
 - Search header is visually separated by a thin divider.
 - Root list scrolls independently.
-- Footer actions and status strip are separate surfaces.
+- Footer action bar and status strip are separate surfaces.
 - Section headers are non-selectable rows.
 - Selected rows never change height.
+- The shipped footer is an icon action bar (`.action-bar`, 38px min-height):
+  icon buttons with shortcut tooltips plus a labelled `Actions ⌃K` button.
+  The fully text-labelled variant below was considered but not adopted.
 
 ## Root Search Template
 
@@ -145,13 +148,15 @@ Root search should use sections whenever the query is empty or broad:
 Result row anatomy:
 
 ```text
-[28 icon]  Title  muted subtitle................  [Category]
+[28 icon]  Title.....................................  [Category]
+           muted subtitle
 ```
 
 Rules:
 
-- Title and subtitle share one horizontal baseline.
-- Subtitle disappears first when width is constrained.
+- Title sits above subtitle in a vertical stack (`result_row` in
+  `src/ui/widgets.rs`), matching the mockup — not on one shared baseline.
+- Subtitle disappears when empty and elides first when width is constrained.
 - Category/accessory stays right-aligned.
 - Icons are 28px in root search, 20-24px in secondary views.
 - A row is selectable only if it maps to an action.
@@ -184,8 +189,8 @@ Rules:
 
 - Actions are grouped by semantic section: Primary, Manage, Clipboard, Danger.
 - Destructive actions use `danger` text/icon role.
-- Alias/hotkey controls should be first-class, matching Raycast v2's direction
-  of assigning aliases/hotkeys from the Action Panel.
+- Alias assignment is implemented as a first-class `Set Alias` panel entry.
+  Hotkey assignment from the Action Panel is future work.
 
 ## Dashboard Template
 
@@ -206,15 +211,21 @@ Dashboard is a control center, not a home page.
 | Spotify Playing Track     | DND off  12 history           |
 | [Prev] [Play] [Next]      | [DND] [Close All] [Panel]     |
 +----------------------------------------------------------+
-| [Network] [Media] [System] [Notify] [AI]                  |
-+----------------------------------------------------------+
 ```
+
+Note: the bottom quick-button row from earlier drafts (`[Network] [Media]
+[System] [Notify] [AI]`) is not shown — those buttons exist for IPC/keyboard
+bindings only, and navigation happens by clicking the control cards above
+(`GestureClick` in `src/ui/views.rs`). The Notifications card itself is
+currently hidden as well.
 
 Card rules:
 
-- Cards are repeated information blocks, radius 8px max.
+- Cards are repeated information blocks, radius 10px
+  (`.metric-card` / `.control-card` / `.dashboard-card`).
 - No card inside another card.
-- Cards use uniform padding: 12px.
+- Metric cards use uniform 16px padding; control/dashboard cards use
+  `12px 14px` padding.
 - Metric cards expose value, status, and optional tiny progress/sparkline.
 - Quick controls are icon buttons when the action is familiar.
 
@@ -264,9 +275,11 @@ Future graph rules:
 | Active VPN                                               |
 | [vpn] Work VPN   vpn active                              |
 +----------------------------------------------------------+
-| [Connect] [Disconnect] [Copy IP] [Copy MAC]              |
-+----------------------------------------------------------+
 ```
+
+Note: there is no dedicated DNS section, and no footer action row — the
+Copy IP/MAC and Connect/Disconnect buttons are created but hidden; per-row
+Connect/Disconnect buttons live inside each interface row.
 
 Rules:
 
@@ -287,10 +300,10 @@ Rules:
 |                                                          |
 | [Previous] [Play/Pause] [Next]                           |
 +----------------------------------------------------------+
-| Output                                                   |
-| Speakers  48%                                           |
-+----------------------------------------------------------+
 ```
+
+Note: the Media view has no Output section — output devices and volume live
+in the separate Audio view (`Ctrl+O`), not in `media_view`.
 
 ## Notifications View Template
 
@@ -298,7 +311,7 @@ Rules:
 +----------------------------------------------------------+
 | Notifications                                            |
 +----------------------------------------------------------+
-| Backend dunst     History 12     DND off                 |
+| Backend built-in History 12     DND off                 |
 | [DND] [Close All] [Panel]                                |
 +----------------------------------------------------------+
 | History                                                  |
@@ -366,7 +379,7 @@ two-pane view:
 
 ```text
 +----------------------------------------------------------+
-| Settings search                                          |
+| ‹ Preferences                                            |
 +--------------------+-------------------------------------+
 | General            | UI font family                      |
 | Features           | UI font size                        |
@@ -374,9 +387,14 @@ two-pane view:
 | Network            | Dashboard refresh interval          |
 | Extensions         | ...                                 |
 +--------------------+-------------------------------------+
-| [Cancel] [Save]                                          |
-+----------------------------------------------------------+
 ```
+
+Implemented deviations from the earlier draft of this template:
+
+- Settings search is deferred — the view goes straight to sidebar + content;
+  the nav header already shows "‹ Preferences" (`src/ui/views.rs`).
+- There are no `[Cancel] [Save]` buttons: every field auto-saves through its
+  `changed` signal.
 
 ## Card Components
 
@@ -432,19 +450,20 @@ Rules:
    - Keep two-line rows only in detail views where content needs it.
 
 3. Footer
-   - Replace loose icon action bar with a footer row:
-     `Enter Run`, `Ctrl+K Actions`, `Ctrl+Enter Copy`.
-   - Keep icon buttons available but visually label primary actions.
+   - Accepted decision: keep the compact icon action bar
+     (`.action-bar`, 38px min-height) with tooltip shortcuts and one labelled
+     `Actions ⌃K` button. The earlier plan to replace it with a text footer
+     row (`Enter Run`, `Ctrl+K Actions`, `Ctrl+Enter Copy`) was not adopted.
 
 4. Dashboard cards
    - Introduce `MetricCard` and `ControlCard` helpers in `ui/widgets.rs`.
    - Rebuild dashboard with a 2-column grid-like GTK layout.
-   - Keep cards at radius 8px or less.
+   - Card radius standard is 10px (see Card rules).
 
 5. Settings redesign
-   - Add settings search entry.
-   - Group preferences by section.
-   - Keep write behavior unchanged.
+   - Group preferences by section (done).
+   - Settings search entry: deferred.
+   - Write behavior: fields auto-save; no Save/Cancel buttons.
 
 6. AI Chat composer
    - Move input to bottom composer area.
@@ -453,7 +472,7 @@ Rules:
 
 7. Theme tokens
    - Move CSS values into preferences-ready semantic tokens.
-   - Add `ui_density = compact|comfortable`.
+   - Add `ui_density = compact|comfortable` (code default is `compact`).
    - Add `ui_theme = system|dark|light`.
 
 ## Non-Goals
@@ -656,7 +675,7 @@ Dashboard:
 
 - No page-level floating cards.
 - Cards are only repeated metric/control blocks.
-- All controls fit inside 860x600.
+- All controls fit inside 900x760.
 - Status updates do not resize the layout.
 
 System Monitor:
