@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::thread;
 
 use crate::home_dir;
 
@@ -23,6 +24,12 @@ fn font_dir() -> PathBuf {
     home_dir().join(".local/share/fonts/zeshicast")
 }
 
+/// A bundled font is already installed when an existing file has exactly the
+/// embedded byte length; anything else (missing, stale, partial) needs a write.
+fn font_is_current(existing_len: Option<u64>, embedded_len: u64) -> bool {
+    existing_len == Some(embedded_len)
+}
+
 /// Write the embedded fonts to the user font directory if missing or stale,
 /// and refresh the fontconfig cache so the families resolve in this process.
 pub fn ensure_fonts() {
@@ -31,10 +38,8 @@ pub fn ensure_fonts() {
 
     for (name, bytes) in BUNDLED {
         let path = dir.join(name);
-        let up_to_date = fs::metadata(&path)
-            .map(|meta| meta.len() == bytes.len() as u64)
-            .unwrap_or(false);
-        if up_to_date {
+        let existing_len = fs::metadata(&path).map(|meta| meta.len()).ok();
+        if font_is_current(existing_len, bytes.len() as u64) {
             continue;
         }
         if fs::create_dir_all(&dir).is_err() {
@@ -46,8 +51,33 @@ pub fn ensure_fonts() {
     }
 
     if wrote {
-        // Refresh fontconfig for this directory so the new families are
-        // discoverable immediately (and on every subsequent launch).
-        let _ = Command::new("fc-cache").arg("-f").arg(&dir).status();
+        // Refresh fontconfig for this directory so the new families become
+        // discoverable. `fc-cache -f` can take seconds, so it must never run
+        // on the startup thread; fonts land on disk synchronously above and
+        // the cache refresh completes asynchronously.
+        thread::spawn(move || {
+            let _ = Command::new("fc-cache").arg("-f").arg(&dir).status();
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::font_is_current;
+
+    #[test]
+    fn current_when_existing_file_matches_embedded_length() {
+        assert!(font_is_current(Some(1024), 1024));
+    }
+
+    #[test]
+    fn not_current_when_file_missing() {
+        assert!(!font_is_current(None, 1024));
+    }
+
+    #[test]
+    fn not_current_when_file_stale_or_partial() {
+        assert!(!font_is_current(Some(512), 1024));
+        assert!(!font_is_current(Some(2048), 1024));
     }
 }
