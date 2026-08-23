@@ -7,3 +7,4 @@ Icon=system-search-symbolic
 Terminal=false
 Categories=Utility;
 StartupNotify=false
+StartupWMClass=dev.zeshi.Zeshicast

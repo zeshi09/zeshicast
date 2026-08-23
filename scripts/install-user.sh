@@ -23,31 +23,63 @@ Installs:
 USAGE
 }
 
+# Refuse (or require confirmation) when zeshicast.service already exists as a
+# user unit, e.g. installed by the NixOS/home-manager module: two daemons
+# would compete for the launcher socket and clipboard history.
+check_unit_conflict() {
+  local unit_dump=""
+  unit_dump="$(systemctl --user cat zeshicast.service 2>/dev/null || true)"
+  if [[ -z "$unit_dump" ]]; then
+    return 0
+  fi
+  cat >&2 <<EOF
+
+========================================================================
+WARNING: an existing user unit zeshicast.service was found:
+------------------------------------------------------------------------
+$unit_dump
+------------------------------------------------------------------------
+It most likely comes from the NixOS / home-manager module and runs its own
+daemon. Installing this standalone copy can leave two competing daemons.
+========================================================================
+
+Continue anyway? [y/N]
+EOF
+  local reply=""
+  read -r reply || reply=""
+  if [[ ! "$reply" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+    echo "Aborted: existing zeshicast.service left untouched." >&2
+    exit 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --enable-daemon)
-      ENABLE_DAEMON=1
-      ;;
-    --start-daemon)
-      START_DAEMON=1
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "unknown option: $1" >&2
-      usage >&2
-      exit 2
-      ;;
+  --enable-daemon)
+    ENABLE_DAEMON=1
+    ;;
+  --start-daemon)
+    START_DAEMON=1
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown option: $1" >&2
+    usage >&2
+    exit 2
+    ;;
   esac
   shift
 done
 
+check_unit_conflict
+
 render_template() {
   local src="$1"
   local dst="$2"
-  sed "s|@BIN@|$BIN_DIR|g" "$src" > "$dst"
+  sed "s|@BIN@|$BIN_DIR|g" "$src" >"$dst"
 }
 
 cd "$ROOT_DIR"

@@ -151,7 +151,7 @@
   парсер (`CliCommand::Export`) различает «флаг не указан» (None) и явное
   значение. Мёртвая `export_config` удалена, вместо неё pub-API:
   `load_global_preferences` + `resolve_include_secrets`. Тесты: preference=true
-  + нет флага → секреты включены; preference=true + флаг false → исключены;
+  - нет флага → секреты включены; preference=true + флаг false → исключены;
   preference отсутствует/мусорная → исключены.
 - **Do:** при отсутствии явного `--include-secrets` читать preference; либо
   убрать строку из PREFERENCE_SECTIONS.
@@ -159,6 +159,14 @@
 
 ### P1-6. Packaging мелочи
 
+- [x] **Done.** `StartupWMClass=dev.zeshi.Zeshicast` (app id из
+  `src/bin/zeshicast-gtk.rs`) добавлен в оба `packaging/*.desktop`, включая
+  daemon-запись: `--daemon` всё равно строит GTK-окно лаунчера (скрытое до
+  вызова), поэтому ассоциация уместна. `scripts/install-user.sh`: перед любой
+  установкой проверяется `systemctl --user cat zeshicast.service`; при наличии
+  юнита (NixOS/HM модуль) печатается предупреждение с дампом юнита и запрашивается
+  подтверждение `[y/N]` — при отказе/EOF/неинтерактивном stdin скрипт завершается
+  с кодом 1, ничего не установив.
 - `packaging/*.desktop`: добавить `StartupWMClass=dev.zeshi.Zeshicast`.
 - `scripts/install-user.sh`: предупреждение/аборт если уже установлен юнит
   `zeshicast.service` (NixOS-модуль) — защита от двух демонов.

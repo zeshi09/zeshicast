@@ -7,4 +7,7 @@ Icon=system-search-symbolic
 Terminal=false
 Categories=Utility;
 StartupNotify=false
+# Daemon mode still creates the launcher GTK window (hidden until summoned),
+# so map its app-id to this entry too.
+StartupWMClass=dev.zeshi.Zeshicast
 X-GNOME-Autostart-enabled=true
