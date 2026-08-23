@@ -197,9 +197,13 @@
 
 ### P2-1. Кэшировать ProcessesProvider
 
-- **Where:** `src/search/processes.rs:19-24,67+` (чтение /proc на каждый запрос),
-  готовый кэш: `top_processes_by_memory`
-- **Do:** TTL-снапшот по образцу windows.rs (TTL 2s, таймаут 200ms).
+- [x] **Done.** Где: `src/search/processes.rs`. Проблема: `search_processes` читал `/proc`
+  (read_dir + stat/comm/cmdline каждого PID) синхронно на каждый запрос `proc …`.
+  Решение: TTL-снапшот (`ProcessSnapshot`, TTL 2s) в `Mutex<Option<_>>` + `OnceLock`
+  по образцу кэша окон в `windows.rs`; `cached_process_entries()` переиспользует
+  снапшот свежести ≤ TTL и перезагружает по истечении; тест с инъекцией загрузчика
+  (`TEST_LOADER_OVERRIDE`) проверяет «два вызова подряд → одна загрузка» и
+  перезагрузку после искусственного устаревания снапшота (без реальных задержек).
 - **Accept:** ввод `proc …` не читает /proc чаще раза в TTL.
 
 ### P2-2. fc-cache только по необходимости
