@@ -810,6 +810,36 @@ permissions = ["shell"]
     }
 
     #[test]
+    fn command_placeholders_neutralize_shell_injection_inside_double_quotes() {
+        let entries = vec![
+            parse_command_entry(
+                r#"
+name = "Echo Quoted"
+command = "echo \"{{query}}\""
+keyword = "echo"
+argument_hint = "<text>"
+permissions = ["shell"]
+"#,
+            )
+            .unwrap(),
+        ];
+        let context = PlaceholderContext {
+            query: String::new(),
+            clipboard: String::new(),
+            args: HashMap::new(),
+            preferences: HashMap::new(),
+            now: UNIX_EPOCH,
+        };
+
+        let results = search_commands(&entries, "echo $(rm -rf ~); reboot", &context);
+        assert_eq!(results.len(), 1);
+        // Inside the author's own double quotes single-quote wrapping would be
+        // inert, so the payload is backslash-escaped instead and stays literal
+        // under `sh -c`.
+        assert_eq!(results[0].value(), "echo \"\\$(rm -rf ~); reboot\"");
+    }
+
+    #[test]
     fn command_arguments_disable_action_when_required_value_missing() {
         let entries = vec![
             parse_command_entry(
