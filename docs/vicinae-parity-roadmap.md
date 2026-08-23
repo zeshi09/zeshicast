@@ -25,9 +25,13 @@ Zeshicast already has a useful launcher core:
 - AI and translation actions through HTTP-compatible endpoints.
 - User install files for desktop entries and systemd user service.
 
-The current implementation is compact, but most behavior is concentrated in
-`src/lib.rs` and `src/bin/zeshicast-gtk.rs`. That is fine for the prototype, but
-it will fight the project once the UI grows beyond a single command list.
+The prototype-era monolith is gone: `src/lib.rs` is now a thin public facade
+(~200 lines of module declarations, re-exports, and tests). Behavior lives in
+`src/app.rs` (application state and clipboard store), `src/search/*` (14+
+providers behind the `SearchProvider` trait), `src/services/*` (snapshot-style
+services), and the UI layer under `src/ui/`. The largest files are now
+`src/ui/launcher.rs`, `src/ui/views.rs`, and `src/app.rs`; slimming those is
+the remaining architectural work.
 
 ## What Vicinae Adds
 
@@ -107,6 +111,11 @@ Done when the project still passes `cargo test` and
 `nix develop -f shell.nix --command cargo check --features gui`, but core files
 are small enough to work on independently.
 
+Status: done for the split itself — `lib.rs` is a facade and all providers sit
+behind the `SearchProvider` trait with provider-level tests. The "core files
+small enough" criterion is not fully met yet: `app.rs`, `ui/launcher.rs`, and
+`ui/views.rs` are still large.
+
 ### 2. Make the GTK UI Vicinae-like
 
 - Replace the single flat launcher file with reusable GTK components.
@@ -131,33 +140,50 @@ only when the native widgets cannot produce the needed command-palette feel.
 
 - Replace plain text storage where it limits behavior with SQLite:
   clipboard, snippets, recent/frequency, command metadata, local storage.
+  Done for clipboard history and recent/frequency usage (`services/storage.rs`,
+  WAL journal mode); legacy `clipboard.txt`/`recent.txt`/`frequencies.txt` are
+  migrated on startup. Snippets remain plain-text `snippets.txt`; command
+  metadata and local storage are unchanged.
 - Make indexes refreshable without rebuilding all state on every launch.
 - Add file/app refresh actions equivalent to Vicinae's internal refresh commands.
 - Add migrations early, before data formats spread across the codebase.
+  Done: schema versioning via `PRAGMA user_version` with transactional
+  migrations in `services/storage.rs`.
 
 ### 4. Script Command Compatibility
 
 - Support Raycast/Vicinae-style script command metadata.
-- Scan configured script directories.
-- Parse metadata comments.
-- Expose script commands in root search.
+  Done (partial): `@raycast.*`/`@vicinae.*` metadata comments
+  (schemaVersion/title/description/packageName/icon/mode) are parsed in
+  `search/scripts.rs`; `mode` is parsed but not used yet; script arguments and
+  preferences are not supported yet.
+- Scan configured script directories. Done (`script_dirs` preference plus
+  extension manifest `scripts = [...]`).
+- Parse metadata comments. Done.
+- Expose script commands in root search. Done.
 - Support stdout parsing, arguments, preferences, and action panel entries.
+  Partially done: script stdout is captured and shown; arguments, preferences,
+  and per-script action panel entries are missing.
 
 This is the highest-value extension mechanism before a full TypeScript/React
 runtime.
 
 ### 5. Rich Built-in Modules
 
-- Clipboard history view with delete, clear, pin, paste/copy.
-- Snippet manager with create/edit/delete/search.
+- Clipboard history view with delete, clear, pin, paste/copy. Done.
+- Snippet manager with create/edit/delete/search. Done (create/delete/search;
+  no in-place edit).
 - Status strip and dashboard/control-center views are tracked in
-  `docs/linux-command-center-plan.md`. Started with a clock/date status strip.
-- Emoji picker.
-- Font browser.
-- Calculator history.
+  `docs/linux-command-center-plan.md`. Done — well beyond the original plan:
+  the strip renders clock, date, network, battery, audio, media, and keyboard
+  layout items via `status_items`.
+- Emoji picker. Done (`search/emoji.rs`, dedicated view, CLI flag `--emoji`).
+- Font browser. Done.
+- Calculator history. Done (persisted to `calc_history.json`).
 - Browser tab switcher if a companion browser extension or native messaging host
-  is added.
-- Window switcher with compositor-specific backends.
+  is added. Not started.
+- Window switcher with compositor-specific backends. Done
+  (niri/Hyprland/sway backends with cached live queries).
 
 ### 6. Extension Runtime
 
@@ -165,28 +191,33 @@ Only start this after script commands and built-in module views are stable.
 
 Pragmatic path:
 
-- Define a Rust-side extension protocol first.
-- Add a local extension manifest and command registry.
-- Add process isolation for extensions.
+- Define a Rust-side extension protocol first. Partially done:
+  `extension.toml` manifests with capabilities and command/script lists,
+  grouped in the Extension Browser. No JS/TS runtime — intentionally deferred.
+- Add a local extension manifest and command registry. Partially done (see
+  above).
+- Add process isolation for extensions. Not started.
 - Add a JS/TypeScript runtime later if Raycast ecosystem compatibility is still
   worth the complexity.
 
 ## Near-term Implementation Order
 
 1. Refactor core types from `lib.rs` into `action.rs`, `config.rs`, and
-   `search/*` while preserving behavior.
-2. Refactor GTK panels from `zeshicast-gtk.rs` into `ui/*`.
+   `search/*` while preserving behavior. Done.
+2. Refactor GTK panels from `zeshicast-gtk.rs` into `ui/*`. Done.
 3. Introduce a navigation stack and make clipboard/snippet browsers full views.
-4. Add SQLite storage for clipboard and usage history.
-5. Add script command scanning compatible with Raycast/Vicinae metadata.
+   Done.
+4. Add SQLite storage for clipboard and usage history. Done.
+5. Add script command scanning compatible with Raycast/Vicinae metadata. Done
+   for metadata parsing and root-search exposure; arguments/preferences pending.
 
 ## Verification Baseline
 
 Current baseline:
 
-- `cargo test` passes with 100 tests.
-- `cargo check --features gui` requires a Rust toolchain new enough for gtk-rs
-  0.22. In this repo, run it through Nix:
+- `cargo test --features gui` passes with 119 tests (as of 2026-08).
+- `cargo check --features gui` requires a Rust toolchain new enough for the
+  `gtk4` crate (currently 0.11.3). In this repo, run it through Nix:
 
 ```bash
 nix develop -f shell.nix --command cargo check --features gui

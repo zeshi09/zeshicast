@@ -22,6 +22,7 @@
 | **Translator** | Inline с суффиксом `in`, язык по умолчанию | HTTP к DeepL/LibreTranslate API | 🟢 Низкая |
 | **AI Chat** | Agents, Memory, Skills, ветвление чатов | HTTP к LiteLLM-прокси (уже есть у тебя в Kontur/дома) | 🟢 Низкая |
 | **Управление окнами** | Switch Spaces, resize | `niri msg` IPC — Niri-специфично, непереносимо | 🟡 Средняя |
+| **Emoji Picker** | Inline-пикер эмодзи с поиском | Реализован: провайдер `src/search/emoji.rs`, отдельный view, CLI-флаг `--emoji` | 🟢 Низкая |
 
 ## Пропустить / не реализовывать
 
@@ -31,7 +32,7 @@
 | Store расширений | Годы работы команды |
 | Dictation (Auto Styling) | Зависит от macOS Speech framework |
 | Raycast Focus | Специфика macOS |
-| Inline Emoji Picker | Есть `smile` / системный picker |
+| Inline Emoji Picker | ~~Есть `smile` / системный picker~~ — решение пересмотрено: пикер реализован (см. «Второй приоритет») |
 | Hyper Key | Лучше через Niri/Karabiner-аналоги |
 
 ## Подводные камни (Wayland + Niri)

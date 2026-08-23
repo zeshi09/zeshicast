@@ -201,20 +201,23 @@ Required preferences:
 - `show_status_strip = true`
 - `status_items = ["clock", "date"]`
 - `dashboard_enabled = true`
-- `dashboard_poll_interval_ms = 2000`
+- `dashboard_poll_interval_ms = 1000`
 - `media_enabled = true`
-- `notifications_enabled = false`
+- `notifications_enabled = true`
 - `network_enabled = true`
 - `ai_provider = "ollama"`
-- `ai_endpoint = "http://localhost:11434"`
-- `ai_model = ""`
+- `ollama_endpoint = "http://localhost:11434"`
+- `ollama_model = "llama3.2:3b"`
+- `ai_endpoint = "https://api.openai.com/v1"`
+- `ai_model = "gpt-4o-mini"`
 
 Defaults should preserve launcher speed and avoid background work unless a view
 or status item needs it.
 
 Status: base done. Preferences UI exposes feature toggles for dashboard, network,
 media, notifications, and AI. Root search respects these toggles while keeping
-the current defaults enabled.
+the current defaults enabled (defaults match `PREFERENCE_DEFAULTS` in
+`src/ui/preferences.rs`).
 
 ## Implementation Order
 
@@ -238,8 +241,9 @@ load average, memory usage, root disk usage, network status/address,
 battery/power state, media playback status, notification state, and process
 count. It also links directly to Network, Media, and AI views.
 Dashboard/System Monitor refresh uses `dashboard_poll_interval_ms`, defaulting
-to 2000 ms. Dashboard includes quick controls for Wi-Fi, Bluetooth, DND,
-output mute, lock, and suspend. Audio output/input state comes from
+to 1000 ms. Dashboard includes quick controls for Wi-Fi, Bluetooth, DND,
+output mute, lock, and suspend (kept for IPC/keyboard bindings; the visible
+row is hidden in the current UI). Audio output/input state comes from
 `wpctl get-volume` when available.
 
 ### Phase C: System Snapshot
@@ -273,18 +277,23 @@ Wi-Fi networks from `nmcli` when available, and lists active VPN/WireGuard
 connections.
 
 Media status also has a first lightweight view: `Ctrl+M` or the `media` command
-opens an MPRIS snapshot through `playerctl` when available, exposes
+opens a native MPRIS snapshot over the session D-Bus via gio — no external
+`playerctl` dependency (`services/media.rs`) — exposes
 previous/play-pause/next controls, and shows a harmless empty state otherwise.
 Root search also exposes `media`/`player`/`mpris` playback actions.
 
-Notifications have a first optional status view through the `notifications`
-command, `Ctrl+U`, and the Dashboard `Notify` button. It detects `swaync` or
-`dunst` state when their control CLIs are available and otherwise stays in a
-harmless empty state. Root search exposes `notify`/`dnd` actions for DND and
-dismiss controls, and the Notifications view exposes DND, close-all, and panel
-buttons. When `dunstctl history` returns JSON, the view also lists recent
-history entries. Rich per-notification actions remain part of the improvement
-phase.
+Notifications are handled by zeshicast's own built-in freedesktop notification
+daemon: it owns the `org.freedesktop.Notifications` session-bus name
+(`services/notifications.rs` + `ui/notify_server.rs`), records every incoming
+notification into an in-memory history for the current daemon session, and
+persists only the DND flag (`~/.config/zeshicast/dnd`). The view opens through
+the `notifications` command, `Ctrl+U`, and the Dashboard; when another daemon
+owns the bus name, zeshicast stays in a harmless empty state and cannot record
+that notification stream. Root search exposes `notify`/`dnd` actions for DND
+and dismiss controls, and the Notifications view exposes DND, close-all, and
+panel buttons. Rich per-notification actions remain part of the improvement
+phase. External daemons such as `swaync` or `dunst` play no role: disable them
+so zeshicast can acquire the name.
 
 ### Phase E: Local AI
 
