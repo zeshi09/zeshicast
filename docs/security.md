@@ -71,6 +71,23 @@ confirmed policy path.
 Dashboard and view-level command buttons route through typed execution requests;
 the UI should not call raw process-spawn helpers directly.
 
+## Known Gaps (as of 2026-08)
+
+Two documented deviations from the model above are currently accepted and rely
+on the trusted-extension-code assumption. They are tracked for code fixes.
+
+- Extension scripts (Raycast/Vicinae-style script commands from `script_dirs`
+  and extension manifests) execute via `sh -c` without an `ActionRisk::Shell`
+  confirmation prompt and without per-script capability checks — unlike custom
+  commands, whose shell/JSON actions are risk-marked and capability-gated.
+  Running a script therefore requires the same trust as running any file in
+  `~/.config/zeshicast/extensions/*/` by hand.
+
+- Clipboard history clear/delete operations are confirmation-gated in the GTK
+  UI only. The CLI REPL's secondary-action path (`run_secondary_action` in
+  `src/app.rs`) executes them directly, without the execution-policy
+  confirmation step used by the GUI.
+
 ## Import And Export
 
 Import validates archive members before extraction:
