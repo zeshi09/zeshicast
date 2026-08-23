@@ -99,7 +99,8 @@ pub use services::network::{
 };
 pub use services::notifications::{
     NotificationAction, NotificationEntrySnapshot, NotificationSnapshot, clear_notifications,
-    close_notification, mark_server_active, notification_snapshot, push_notification, toggle_dnd,
+    close_notification, mark_server_active, mark_server_inactive, notification_snapshot,
+    push_notification, toggle_dnd,
 };
 #[cfg(feature = "gui")]
 pub use services::poll_cache::{

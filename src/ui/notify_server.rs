@@ -66,6 +66,7 @@ pub fn install_notification_server() {
         |_connection, _name| crate::mark_server_active(),
         |_connection, _name| {
             eprintln!("notifications: name lost — another daemon owns {NAME}");
+            crate::mark_server_inactive();
         },
     );
     OWNER.with(|cell| *cell.borrow_mut() = Some(owner));

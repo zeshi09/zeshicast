@@ -142,6 +142,12 @@ pub fn mark_server_active() {
     STATE.with(|state| state.borrow_mut().running = true);
 }
 
+/// Marks the D-Bus server as inactive (e.g. `org.freedesktop.Notifications`
+/// was lost to another daemon) so the UI stops reporting a working backend.
+pub fn mark_server_inactive() {
+    STATE.with(|state| state.borrow_mut().running = false);
+}
+
 pub fn notification_snapshot() -> NotificationSnapshot {
     STATE.with(|state| {
         let state = state.borrow();
@@ -216,6 +222,19 @@ mod tests {
         mark_server_active();
         assert_eq!(notification_snapshot().count, Some(1));
         assert_eq!(notification_snapshot().history[0].summary, "Second");
+    }
+
+    #[test]
+    fn mark_server_inactive_clears_backend_indicator() {
+        mark_server_active();
+        push_notification("Mail", "New message", "Project update", 0);
+        assert_eq!(notification_snapshot().backend.as_deref(), Some("zeshicast"));
+
+        mark_server_inactive();
+
+        let snapshot = notification_snapshot();
+        assert_eq!(snapshot, NotificationSnapshot::default());
+        assert!(!snapshot.is_available());
     }
 
     #[test]
