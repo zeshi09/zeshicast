@@ -64,7 +64,9 @@ pub fn net_speed_mbps(iface: &str) -> (f64, f64) {
         .unwrap_or(0);
     let now = Instant::now();
 
-    let mut state = NET_SPEED_STATE.lock().unwrap();
+    // Poisoning only means a panic while holding the lock; the state is
+    // self-healing speed counters, so recover it instead of panicking here.
+    let mut state = NET_SPEED_STATE.lock().unwrap_or_else(|p| p.into_inner());
     let speeds = if let Some((prev_map, prev_time)) = state.as_ref() {
         let dt = now.duration_since(*prev_time).as_secs_f64();
         if dt > 0.2 {

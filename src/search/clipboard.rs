@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::{Action, ActionKind, MAX_RESULTS, fuzzy_score};
 
 pub(crate) const MAX_CLIPBOARD_ENTRIES: usize = 100;
-const MAX_CLIPBOARD_TEXT_BYTES: usize = 20_000;
+pub(crate) const MAX_CLIPBOARD_TEXT_BYTES: usize = 20_000;
 
 pub(crate) fn load_clipboard_history(path: &Path) -> Vec<String> {
     let Ok(content) = fs::read_to_string(path) else {

@@ -160,8 +160,12 @@ fn spawn_shell(command: &ShellCommand) {
         .envs(&command.env)
         .spawn()
     {
-        Ok(_) => println!("started: {}", command.command),
-        Err(error) => eprintln!("failed to start '{}': {error}", command.command),
+        // Deliberately no command text: the daemon's stdout may be read by
+        // other processes and shell commands can embed secrets.
+        Ok(_) => println!("started: sh -c <command>"),
+        // No command text here either: placeholder-expanded commands can
+        // carry secrets and stderr ends up in journald.
+        Err(error) => eprintln!("failed to start shell command: {error}"),
     }
 }
 
@@ -171,7 +175,7 @@ fn spawn_command(command: &ProcessCommand) {
         .envs(&command.env)
         .spawn()
     {
-        Ok(_) => println!("started: {}", command.display()),
+        Ok(_) => println!("started: {}", command.program),
         Err(error) => eprintln!("failed to start {}: {error}", command.program),
     }
 }
@@ -183,8 +187,9 @@ fn copy_to_clipboard(text: &str) {
     if copied {
         println!("copied to clipboard");
     } else {
-        println!("{text}");
-        eprintln!("install wl-clipboard or xclip to copy automatically");
+        // Never echo the copied value: it may be a secret and the daemon's
+        // stdout is not guaranteed to stay private.
+        eprintln!("copy failed; install wl-clipboard or xclip to copy automatically");
     }
 }
 

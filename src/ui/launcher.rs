@@ -1313,17 +1313,31 @@ fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshicast>>) {
 }
 
 fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
-    use std::io::BufRead;
-    loop {
-        // Each selection change runs the command with the new content on stdin;
-        // we frame entries with a trailing NUL (clipboard text never contains
-        // one) so multi-line values stay intact.
-        let mut child = match std::process::Command::new("wl-paste")
+    watch_clipboard_text_with(tx, || {
+        std::process::Command::new("wl-paste")
             .args(["--watch", "sh", "-c", "cat; printf '\\0'"])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .spawn()
-        {
+    })
+}
+
+fn watch_clipboard_text_with(
+    tx: std::sync::mpsc::Sender<String>,
+    mut spawn: impl FnMut() -> std::io::Result<std::process::Child>,
+) {
+    use std::io::BufRead;
+    use std::io::Read;
+    /// Hard cap on bytes read per clipboard record: `MAX_CLIPBOARD_TEXT_BYTES`
+    /// plus slack for the NUL terminator, so a multi-gigabyte paste cannot
+    /// balloon the read buffer.
+    const CLIPBOARD_RECORD_READ_LIMIT: u64 =
+        (crate::search::clipboard::MAX_CLIPBOARD_TEXT_BYTES + 4096) as u64;
+    loop {
+        // Each selection change runs the command with the new content on stdin;
+        // we frame entries with a trailing NUL (clipboard text never contains
+        // one) so multi-line values stay intact.
+        let mut child = match spawn() {
             Ok(child) => child,
             // wl-clipboard not installed — leave the gdk monitor as the only path.
             Err(_) => return,
@@ -1332,26 +1346,53 @@ fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
             return;
         };
 
-        let mut reader = std::io::BufReader::new(stdout);
-        let mut buf: Vec<u8> = Vec::new();
-        loop {
-            buf.clear();
-            match reader.read_until(0, &mut buf) {
-                Ok(0) => break, // wl-paste exited
-                Ok(_) => {
-                    if buf.last() == Some(&0) {
-                        buf.pop();
+        let record_truncated;
+        {
+            let mut reader = std::io::BufReader::new(stdout).take(CLIPBOARD_RECORD_READ_LIMIT);
+            let mut buf: Vec<u8> = Vec::new();
+            let mut truncated = false;
+            loop {
+                buf.clear();
+                match reader.read_until(0, &mut buf) {
+                    Ok(0) => break, // producer exited or the read cap was exhausted
+                    Ok(_) => {
+                        let terminated = buf.last() == Some(&0);
+                        if terminated {
+                            buf.pop();
+                        }
+                        // A record clipped by the read cap can end mid-UTF-8
+                        // character; trim to the last valid boundary so it decodes
+                        // like any other entry instead of being dropped.
+                        let valid_len = match std::str::from_utf8(&buf) {
+                            Ok(_) => buf.len(),
+                            Err(error) => error.valid_up_to(),
+                        };
+                        if let Some(text) = decode_clipboard_text(&buf[..valid_len])
+                            && tx.send(text).is_err()
+                        {
+                            return; // receiver gone, stop the thread
+                        }
+                        if !terminated {
+                            truncated = true;
+                            break; // oversized record: nothing else in this batch
+                        }
                     }
-                    if let Some(text) = decode_clipboard_text(&buf)
-                        && tx.send(text).is_err()
-                    {
-                        return; // receiver gone, stop the thread
-                    }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
+            record_truncated = truncated;
+        } // reader dropped here: our pipe end closes before we reap the child
+        if record_truncated {
+            // Log the event only; never echo clipboard content here.
+            eprintln!(
+                "clipboard record exceeded {CLIPBOARD_RECORD_READ_LIMIT} bytes; truncated"
+            );
         }
-
+        // Kill before reaping: an oversized record leaves the producer blocked
+        // writing into a pipe nobody drains any more, so a plain wait() would
+        // hang forever and silently kill this watcher thread. kill() is also
+        // harmless when the child already exited on its own.
+        let _ = child.kill();
         let _ = child.wait();
         // wl-paste died (e.g. compositor restart); reconnect shortly, unless the
         // receiver is gone (empty probe doubles as a liveness check).
@@ -1424,10 +1465,26 @@ fn capture_clipboard_image(
         bytes.hash(&mut hasher);
         let dir = crate::clipboard_cache_dir();
         let path = dir.join(format!("{:016x}.png", hasher.finish()));
-        if !path.exists()
-            && (std::fs::create_dir_all(&dir).is_err() || std::fs::write(&path, bytes).is_err())
-        {
-            return;
+        if !path.exists() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if std::fs::create_dir_all(&dir).is_err()
+                    || std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+                        .is_err()
+                {
+                    return;
+                }
+            }
+            #[cfg(not(unix))]
+            if std::fs::create_dir_all(&dir).is_err() {
+                return;
+            }
+            // Same 0o600 contract as other persisted files (config.rs
+            // write_file_atomic): cached clipboard images may hold secrets.
+            if crate::write_file_atomic(&path, bytes, 0o600).is_err() {
+                return;
+            }
         }
 
         let path_str = path.to_string_lossy().into_owned();
@@ -2455,7 +2512,14 @@ fn run_selected_network_command(list: &ListBox, value: NetworkCommandValue) {
             else {
                 return;
             };
-            run_command_request("nmcli", ["dev", "wifi", "connect", network.ssid.as_str()]);
+            // "--" so an SSID like "-w" is not parsed as an nmcli option.
+            run_command_request("nmcli", [
+                "dev",
+                "wifi",
+                "connect",
+                "--",
+                network.ssid.as_str(),
+            ]);
         }
     }
 }
@@ -3192,12 +3256,65 @@ mod tests {
     use super::{
         ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, ScriptCaptureOutcome,
         action_panel_display_items, action_panel_display_rows, decode_clipboard_text,
-        run_script_capture, secondary_action_risk,
+        run_script_capture, secondary_action_risk, watch_clipboard_text_with,
     };
     use crate::{
         Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
         SecondaryActionKind, ShellCommand, Zeshicast, ui::ActionPanelDisplayItem,
     };
+
+    #[test]
+    fn oversized_clipboard_record_is_truncated_without_killing_the_watcher() {
+        // Regression guard for the read cap: an oversized record used to leave
+        // the producer blocked writing into a pipe nobody drained while this
+        // thread sat in child.wait() forever — a silently dead watcher. The
+        // deadlock lives in std's pipe/wait interaction, so this needs a real
+        // child process; pure-logic coverage of the truncation itself is
+        // already provided by decode_clipboard_text tests.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut first_spawn = true;
+        watch_clipboard_text_with(tx, move || {
+            // First spawn produces an oversized record with no NUL terminator;
+            // the second spawn fails so the watcher thread ends and closes the
+            // channel — proving the reconnect loop ran instead of hanging.
+            if !std::mem::take(&mut first_spawn) {
+                return Err(std::io::Error::other("test: stop reconnecting"));
+            }
+            std::process::Command::new("sh")
+                .args(["-c", "yes | head -c 2000000"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+        });
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut saw_truncated_record = false;
+        let mut reached_reconnect_probe = false;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match rx.recv_timeout(remaining) {
+                Ok(message) if message.is_empty() => {
+                    reached_reconnect_probe = true;
+                    break;
+                }
+                Ok(_) => saw_truncated_record = true,
+                // Channel closed: watcher thread finished.
+                Err(_) => break,
+            }
+        }
+
+        assert!(
+            saw_truncated_record,
+            "truncated record must be processed as a normal entry"
+        );
+        assert!(
+            reached_reconnect_probe,
+            "watcher must reach its reconnect probe instead of hanging on wait()"
+        );
+    }
 
     #[test]
     fn script_activation_gates_execution_behind_confirmation() {
