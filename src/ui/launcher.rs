@@ -394,17 +394,47 @@ fn build_ui(
                         &window, &entry, &list_ref, &results, action,
                     );
                 } else if action.category == "Script" {
-                    if let Some(stdout) = run_script_capture(&action) {
-                        show_script_output_view(
-                            &navigation,
-                            &entry,
-                            &action_bar,
-                            &script_output_view,
-                            &action.title,
-                            &stdout,
-                        );
-                    } else {
+                    // Scripts carry ActionRisk::Shell, so they must go through
+                    // the confirmation panel before any execution. The capture
+                    // path (run_script_stdout) spawns the script, therefore it
+                    // only runs after the user confirms.
+                    if !action.risk.requires_confirmation() {
                         run_action_or_confirm(&window, &launcher, &hold, action);
+                    } else {
+                        let title = action.risk.label().to_string();
+                        let detail = action_confirmation_detail(&action);
+                        let confirm_window = window.clone();
+                        let confirm_launcher = Rc::clone(&launcher);
+                        let confirm_hold = Rc::clone(&hold);
+                        let navigation = navigation.clone();
+                        let entry = entry.clone();
+                        let action_bar = action_bar.clone();
+                        let script_output_view = script_output_view.clone();
+                        crate::ui::show_confirmation_panel(
+                            &window,
+                            &title,
+                            &detail,
+                            "Confirm",
+                            move || {
+                                // Confirmed: capture first so a script with
+                                // output still shows its stdout afterwards.
+                                if let Some(stdout) = run_script_capture(&action) {
+                                    show_script_output_view(
+                                        &navigation,
+                                        &entry,
+                                        &action_bar,
+                                        &script_output_view,
+                                        &action.title,
+                                        &stdout,
+                                    );
+                                } else {
+                                    confirm_launcher
+                                        .borrow_mut()
+                                        .run_action_confirmed(&action);
+                                    finish_interaction(&confirm_window, &confirm_hold);
+                                }
+                            },
+                        );
                     }
                 } else {
                     run_action_or_confirm(&window, &launcher, &hold, action);
@@ -3067,9 +3097,34 @@ mod tests {
         action_panel_display_rows, decode_clipboard_text, secondary_action_risk,
     };
     use crate::{
-        Action, ActionKind, ActionPanelSection, ActionRisk, SecondaryActionKind,
-        ui::ActionPanelDisplayItem,
+        Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
+        SecondaryActionKind, ShellCommand, ui::ActionPanelDisplayItem,
     };
+
+    #[test]
+    fn script_activation_gates_execution_behind_confirmation() {
+        // Row activation for Script actions must show the confirmation panel
+        // before run_script_capture may spawn the script; the interactive
+        // policy refuses to run an unconfirmed Shell-risk action.
+        let action = Action::new(
+            "Script",
+            "Echo Test",
+            ActionKind::Shell(ShellCommand::new("/bin/echo hello")),
+            0,
+        )
+        .with_risk(ActionRisk::Shell);
+
+        assert!(action.risk.requires_confirmation());
+        assert!(action.execution_request().is_some());
+        assert_eq!(
+            ExecutionPolicy::interactive().decide(&action),
+            ExecutionDecision::NeedsConfirmation(ActionRisk::Shell)
+        );
+        assert_eq!(
+            ExecutionPolicy::confirmed().decide(&action),
+            ExecutionDecision::RunNow
+        );
+    }
 
     #[test]
     fn clipboard_text_accepts_plain_and_multiline() {

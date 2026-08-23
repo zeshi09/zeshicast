@@ -1,7 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{Action, ActionKind, ExtensionManifest, ExtensionOrigin, ShellCommand, fuzzy_score};
+use super::commands::parse_capabilities;
+use crate::{
+    Action, ActionKind, ActionRisk, Capability, ExtensionManifest, ExtensionOrigin, ShellCommand,
+    fuzzy_score,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ScriptEntry {
@@ -11,6 +15,7 @@ pub(crate) struct ScriptEntry {
     pub(crate) icon: String,
     pub(crate) path: PathBuf,
     pub(crate) origin: Option<ExtensionOrigin>,
+    pub(crate) capabilities: Vec<Capability>,
 }
 
 #[allow(dead_code)]
@@ -24,6 +29,16 @@ pub(crate) enum ScriptMode {
 impl ScriptEntry {
     fn search_text(&self) -> String {
         format!("{} {} {}", self.title, self.description, self.package)
+    }
+
+    fn with_extension_origin(mut self, origin: ExtensionOrigin) -> Self {
+        self.capabilities = parse_capabilities(&origin.capabilities);
+        self.origin = Some(origin);
+        self
+    }
+
+    fn has_shell_capability(&self) -> bool {
+        self.capabilities.contains(&Capability::Shell)
     }
 }
 
@@ -54,9 +69,8 @@ pub(crate) fn load_extension_script_entries(manifests: &[ExtensionManifest]) -> 
             if !is_script_file(path) {
                 continue;
             }
-            if let Some(mut script) = parse_script_entry(path) {
-                script.origin = Some(manifest.origin.clone());
-                entries.push(script);
+            if let Some(script) = parse_script_entry(path) {
+                entries.push(script.with_extension_origin(manifest.origin.clone()));
             }
         }
     }
@@ -130,6 +144,7 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
         icon,
         path: path.to_path_buf(),
         origin: None,
+        capabilities: Vec::new(),
     })
 }
 
@@ -187,28 +202,153 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
                 fuzzy_score(&text, search_query)?
             };
             let category = "Script";
-            let subtitle = if !entry.description.is_empty() {
+            let mut subtitle = if !entry.description.is_empty() {
                 entry.description.clone()
             } else if !entry.package.is_empty() {
                 entry.package.clone()
             } else {
                 entry.path.display().to_string()
             };
-            let cmd = entry.path.to_string_lossy().to_string();
-            Some(
-                Action::new(
-                    category,
-                    &entry.title,
-                    ActionKind::Shell(ShellCommand::new(&cmd)),
-                    score + if explicit { 120 } else { 0 },
-                )
-                .with_subtitle(subtitle)
-                .with_icon(&entry.icon),
+            // Extension scripts run only when the manifest grants the shell
+            // capability; user scripts from plain script_dirs have no manifest
+            // and stay available.
+            let blocked = entry.origin.is_some() && !entry.has_shell_capability();
+            let (kind, icon_name) = if blocked {
+                subtitle =
+                    "Blocked: script extension manifest lacks capabilities = [\"shell\"]"
+                        .to_string();
+                (ActionKind::None, "dialog-warning-symbolic")
+            } else {
+                let cmd = entry.path.to_string_lossy().to_string();
+                (ActionKind::Shell(ShellCommand::new(&cmd)), entry.icon.as_str())
+            };
+            let mut action = Action::new(
+                category,
+                &entry.title,
+                kind,
+                score + if explicit { 120 } else { 0 },
             )
+            .with_subtitle(subtitle)
+            .with_icon(icon_name);
+            if !blocked {
+                action = action.with_risk(ActionRisk::Shell);
+            }
+            Some(action)
         })
         .collect();
 
     matches.sort_by(|a, b| b.score.cmp(&a.score).then(a.title.cmp(&b.title)));
     matches.truncate(20);
     matches
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ExtensionManifest, ActionRisk, ExecutionRequest};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    const SCRIPT_BODY: &str = "#!/bin/sh\n\
+        # @raycast.schemaVersion 1\n\
+        # @raycast.title Echo Test\n\
+        # @raycast.description echoes hello\n\
+        # @raycast.packageName test.scripts\n";
+
+    fn test_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "zeshicast-scripts-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    fn write_script(dir: &Path, name: &str) -> PathBuf {
+        fs::create_dir_all(dir).unwrap();
+        let path = dir.join(name);
+        fs::write(&path, SCRIPT_BODY).unwrap();
+        path
+    }
+
+    fn manifest_with_capabilities(root: &Path, capabilities: &[&str]) -> ExtensionManifest {
+        ExtensionManifest {
+            origin: ExtensionOrigin {
+                id: "test.extension".to_string(),
+                name: "Test Extension".to_string(),
+                version: "0.1.0".to_string(),
+                capabilities: capabilities.iter().map(|c| c.to_string()).collect(),
+            },
+            commands: Vec::new(),
+            scripts: vec![root.join("echo.sh")],
+        }
+    }
+
+    #[test]
+    fn extension_script_with_shell_capability_runs_with_confirmation() {
+        let root = test_dir("with-shell");
+        write_script(&root, "echo.sh");
+        let manifests = vec![manifest_with_capabilities(&root, &["shell"])];
+
+        let entries = load_extension_script_entries(&manifests);
+        assert_eq!(entries.len(), 1);
+
+        let actions = search_scripts(&entries, "script echo");
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert_eq!(action.risk, ActionRisk::Shell);
+        assert!(action.risk.requires_confirmation());
+        match action.execution_request() {
+            Some(ExecutionRequest::Shell { .. }) => {}
+            other => panic!("expected shell execution request, got {other:?}"),
+        }
+        assert!(!action.subtitle.starts_with("Blocked"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn extension_script_without_shell_capability_is_blocked() {
+        let root = test_dir("no-shell");
+        write_script(&root, "echo.sh");
+        let manifests = vec![manifest_with_capabilities(&root, &[])];
+
+        let entries = load_extension_script_entries(&manifests);
+        assert_eq!(entries.len(), 1);
+
+        let actions = search_scripts(&entries, "script echo");
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert!(
+            action.subtitle.contains("Blocked"),
+            "expected blocked subtitle, got {:?}",
+            action.subtitle
+        );
+        assert!(action.execution_request().is_none());
+        assert!(!action.risk.requires_confirmation());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn user_script_stays_available_and_requires_confirmation() {
+        let dir = test_dir("user");
+        write_script(&dir, "echo.sh");
+
+        let entries = load_script_entries(std::slice::from_ref(&dir));
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].origin.is_none());
+
+        let actions = search_scripts(&entries, "script echo");
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert_eq!(action.risk, ActionRisk::Shell);
+        assert!(action.risk.requires_confirmation());
+        assert!(action.execution_request().is_some());
+        assert!(!action.subtitle.starts_with("Blocked"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
 }

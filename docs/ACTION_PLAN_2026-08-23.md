@@ -38,17 +38,15 @@
 
 ### P0-3. Риск и capabilities для скриптов расширений
 
-- **Where:** `src/search/scripts.rs:198-206`
-- **Problem:** скрипты создают `ActionKind::Shell(...)` без
-  `.with_risk(ActionRisk::Shell)` и без сверки с capabilities манифеста →
-  исполняются без confirmation даже при `capabilities = []`. Задокументировано
-  как Known Gap в security.md.
-- **Do:** добавить risk; для extension scripts сверять capabilities манифеста
-  (по образцу `CommandEntry::with_extension_origin`). Если решено оставить
-  как trusted code — вместо кодового фикса явно задокументировать в
-  security.md (но тогда убрать пункт после решения).
-- **Accept:** запуск скрипта расширения в GTK идёт через панель подтверждения;
-  после фикса убрать соответствующий bullet из Known Gaps.
+- [x] **Done.** Где: `src/search/scripts.rs` + `src/ui/launcher.rs`. Проблема:
+  скрипты создавали `ActionKind::Shell(...)` без `.with_risk(ActionRisk::Shell)`
+  и без сверки с capabilities манифеста, а ветка активации Script в лаунчере
+  исполняла скрипт через `run_script_capture` до всякого подтверждения.
+  Решение: все исполняемые скрипты помечены `ActionRisk::Shell`; extension-скрипты
+  сверяются с `capabilities` манифеста (без `shell` — блокировка `ActionKind::None`
+  с поясняющим subtitle, по образцу `CommandEntry::with_extension_origin`);
+  capture-путь в лаунчере выполняется только после подтверждения в панели.
+  Bullet снят с Known Gaps в security.md.
 
 ### P0-4. Деструктивные операции с буфером через ExecutionPolicy на всех путях
 
@@ -83,6 +81,9 @@
   `launcher.rs:2776-2823`; отложенный файловый индекс `launcher.rs:105-126`).
 - **Accept:** клик по аудиоустройству и активация скрипта не блокируют отрисовку;
   окно появляется до завершения fc-list.
+- **Also (P2 из валидации P0-3):** устранить двойное исполнение скриптов с
+  пустым stdout — `run_script_capture` уже исполнил скрипт, а fallback
+  `run_action_confirmed` спавнит его повторно (`launcher.rs` on_confirm);\  различать «выполнен без вывода» и «не выполнялся».
 
 ### P1-3. Мелкие security/hygiene фиксы (один коммит)
 

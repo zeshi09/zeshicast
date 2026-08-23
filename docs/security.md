@@ -49,6 +49,13 @@ Unknown or undeclared capabilities cause actions to be blocked rather than run.
 Risky actions are also routed through execution policy and confirmation where
 appropriate.
 
+Extension scripts (Raycast/Vicinae-style script commands) require the `shell`
+capability from the extension manifest; without it they are shown as blocked,
+and with it they still go through the shell confirmation prompt. Note that
+listing an extension's directories in `script_dirs` loads its scripts as plain
+user scripts (`origin: None`): they skip the manifest capability check and are
+treated as trusted user scripts, gated only by the shell confirmation prompt.
+
 ## Placeholder Handling
 
 Placeholder values such as `{{query}}`, `{{clipboard}}`, `{{arg:*}}`, and
@@ -73,15 +80,8 @@ the UI should not call raw process-spawn helpers directly.
 
 ## Known Gaps (as of 2026-08)
 
-Two documented deviations from the model above are currently accepted and rely
-on the trusted-extension-code assumption. They are tracked for code fixes.
-
-- Extension scripts (Raycast/Vicinae-style script commands from `script_dirs`
-  and extension manifests) execute via `sh -c` without an `ActionRisk::Shell`
-  confirmation prompt and without per-script capability checks — unlike custom
-  commands, whose shell/JSON actions are risk-marked and capability-gated.
-  Running a script therefore requires the same trust as running any file in
-  `~/.config/zeshicast/extensions/*/` by hand.
+One documented deviation from the model above is currently accepted and relies
+on the trusted-extension-code assumption. It is tracked for a code fix.
 
 - Clipboard history clear/delete operations are confirmation-gated in the GTK
   UI only. The CLI REPL's secondary-action path (`run_secondary_action` in
