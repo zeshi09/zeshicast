@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod battery;
+pub mod clipboard_store;
 pub mod compositor;
 pub mod local_ai;
 pub mod media;
@@ -9,4 +10,5 @@ pub mod notifications;
 pub mod poll_cache;
 pub mod storage;
 pub mod system_stats;
+pub mod text_input;
 pub mod thermal;
