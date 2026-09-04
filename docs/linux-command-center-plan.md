@@ -266,14 +266,15 @@ thermal zone when the kernel exposes temperature sensors.
 - Add MPRIS-backed media snapshot/actions.
 - Add optional notification history service.
 
-Status: base done. A lightweight network status view opens with `Ctrl+N` or the
+Status: done. A lightweight network status view opens with `Ctrl+N` or the
 `network` command and lists interfaces from `/sys/class/net` with MAC/IP
 details from `/sys`, `ip -o addr`, and DNS servers from `/etc/resolv.conf`.
-NetworkManager DBus integration is intentionally left for the improvement phase.
+NetworkManager native D-Bus integration (`org.freedesktop.NetworkManager` via
+GIO) queries Wi-Fi access points and active VPN/WireGuard connections directly
+in-process, falling back cleanly to `nmcli`.
 The view can copy the selected interface IP or MAC, disconnect selected
 interfaces, connect open/known Wi-Fi networks through `nmcli`, shows available
-Wi-Fi networks from `nmcli` when available, and lists active VPN/WireGuard
-connections.
+Wi-Fi networks, and lists active VPN/WireGuard connections.
 
 Media status also has a first lightweight view: `Ctrl+M` or the `media` command
 opens a native MPRIS snapshot over the session D-Bus via gio — no external
@@ -298,31 +299,28 @@ so zeshicast can acquire the name.
 
 - Add Ollama-compatible client.
 - Add `ai <prompt>` quick result.
-- Add in-launcher AI chat view.
+- Add in-launcher AI chat view with streaming, markdown, and multi-turn context.
 - Add actions to copy/save answer as snippet.
 
-Status: base done. `ai <prompt>` now uses the Ollama-compatible local
-`/api/generate` path by default and copies the answer to clipboard. `Ctrl+I` or
-the `AI Chat` command opens an in-launcher local AI prompt using the same
-`ollama_endpoint` and `ollama_model` preferences, falling back to
-`http://localhost:11434` for the endpoint. Answers can be copied or saved as
+Status: done. `ai <prompt>` uses the Ollama-compatible local `/api/generate`
+path and copies the answer to clipboard. `Ctrl+I` or the `AI Chat` command opens
+an in-launcher local AI chat supporting streaming token rendering, cancelation,
+message history conversation context (`/api/chat`), markdown formatting, model
+selection, and clipboard context insertion. Answers can be copied or saved as
 AI-tagged snippets. The chat request runs off the GTK main loop so the launcher
-does not freeze while waiting for the local model. AI Chat can seed the prompt
-from the latest clipboard item. OpenAI-compatible quick AI remains available
-with `ai_provider = "openai"`.
+does not freeze while waiting for the local model. OpenAI-compatible quick AI
+remains available with `ai_provider = "openai"`.
 
 ## Base Plan Completion
 
-The baseline command-center plan is implemented enough to move into iterative
-product improvements. Remaining work is intentionally classified as polish or
-backend depth rather than missing MVP surface:
+The baseline command-center plan is implemented with native Linux integrations:
 
-- Replace CLI-backed integrations with DBus/native backends where that improves
-  reliability: NetworkManager, MPRIS, notification history/actions.
-- Add richer AI chat behavior: streaming output, cancellation, conversation
-  memory, and follow-up threading.
-- Add compositor/workspace summaries to Dashboard and Status Strip.
-- Improve per-view keyboard actions, accessibility labels, and visual density.
+- Native DBus backends: NetworkManager (Wi-Fi & active VPNs), MPRIS (playback &
+  metadata), and notification daemon (`org.freedesktop.Notifications`).
+- AI chat behavior: streaming token output, cancellation, multi-turn conversation
+  memory via `/api/chat`, and snippet persistence.
+- Compositor/workspace summaries in Dashboard and Status Strip.
+- Keyboard-first navigation across 13 domain views.
 
 ## Product Guardrails
 

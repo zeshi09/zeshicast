@@ -339,14 +339,18 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     }
     // Update workspace chip
     let ws = crate::workspace_snapshot();
-    // The pill already says "Workspace"; show just the index/name (mockup: "2").
     let ws_short = ws
         .active_name
         .clone()
         .unwrap_or_else(|| ws.active_idx.to_string());
+    let ws_display = if ws.window_count > 0 {
+        format!("{ws_short} · {} win", ws.window_count)
+    } else {
+        ws_short
+    };
     view.workspace.set_markup(&format!(
         "<span alpha='40%'>Workspace</span>  {}",
-        glib::markup_escape_text(&ws_short)
+        glib::markup_escape_text(&ws_display)
     ));
     view.workspace.set_visible(true);
     let uptime_val = snapshot

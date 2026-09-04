@@ -27,11 +27,11 @@ Zeshicast already has a useful launcher core:
 
 The prototype-era monolith is gone: `src/lib.rs` is now a thin public facade
 (~200 lines of module declarations, re-exports, and tests). Behavior lives in
-`src/app.rs` (application state and clipboard store), `src/search/*` (14+
-providers behind the `SearchProvider` trait), `src/services/*` (snapshot-style
-services), and the UI layer under `src/ui/`. The largest files are now
-`src/ui/launcher.rs`, `src/ui/views.rs`, and `src/app.rs`; slimming those is
-the remaining architectural work.
+`src/app.rs` (application state), `src/search/*` (14+ providers behind the
+`SearchProvider` trait), `src/services/*` (isolated domain services including
+SQLite storage, audio, network, thermal, battery, system stats, media, and
+local AI), and the UI layer under `src/ui/` (`src/ui/views/` decomposed into 13
+domain view modules, `src/ui/launcher_helpers.rs`, and `resources/style.css`).
 
 ## What Vicinae Adds
 
@@ -111,25 +111,22 @@ Done when the project still passes `cargo test` and
 `nix develop -f shell.nix --command cargo check --features gui`, but core files
 are small enough to work on independently.
 
-Status: done for the split itself — `lib.rs` is a facade and all providers sit
-behind the `SearchProvider` trait with provider-level tests. The "core files
-small enough" criterion is not fully met yet: `app.rs`, `ui/launcher.rs`, and
-`ui/views.rs` are still large.
+Status: done — `lib.rs` is a clean facade, providers sit behind the
+`SearchProvider` trait, `services/` encapsulates storage/system queries, and
+`ui/views/` is modularized into 13 domain files with extracted CSS.
 
 ### 2. Make the GTK UI Vicinae-like
 
 - Replace the single flat launcher file with reusable GTK components.
-  Started: CSS, result rows, panel shell helpers, result lists, action buttons,
-  alias panel, form panel, preferences editor, and extension browser now live
-  under `src/ui`.
+  Done: CSS extracted to `resources/style.css`, result rows, panel shell helpers,
+  result lists, action buttons, alias panel, form panel, preferences editor,
+  and extension browser now live under `src/ui` and `src/ui/views/`.
 - Add a real navigation stack: root search, detail view, form view, settings,
-  clipboard history, snippet manager, extension browser.
-  Started: root search, clipboard history, extension browser, and preferences
-  now run inside an in-window GTK stack. Snippet manager is also a stack view
-  with copy/delete support.
+  clipboard history, snippet manager, extension browser, AI chat, system monitor.
+  Done: root search, clipboard history, extension browser, AI chat, and
+  preferences run inside an in-window GTK stack.
 - Make the action panel a first-class component with searchable actions.
-  Started: `Ctrl+K` opens an in-window searchable action panel instead of a
-  separate popup window.
+  Done: `Ctrl+K` opens an in-window searchable action panel with fuzzy search.
 - Add footer status/hints and consistent keyboard navigation.
 - Keep layer-shell and daemon behavior.
 
@@ -140,10 +137,10 @@ only when the native widgets cannot produce the needed command-palette feel.
 
 - Replace plain text storage where it limits behavior with SQLite:
   clipboard, snippets, recent/frequency, command metadata, local storage.
-  Done for clipboard history and recent/frequency usage (`services/storage.rs`,
-  WAL journal mode); legacy `clipboard.txt`/`recent.txt`/`frequencies.txt` are
-  migrated on startup. Snippets remain plain-text `snippets.txt`; command
-  metadata and local storage are unchanged.
+  Done for clipboard history, recent/frequency usage, and snippets
+  (`services/storage.rs`, WAL journal mode); legacy `clipboard.txt`/`recent.txt`/`frequencies.txt`
+  and `snippets.txt` are migrated on startup with transactional schema versioning.
+  Snippet CRUD now includes in-place editing and duplicate prevention.
 - Make indexes refreshable without rebuilding all state on every launch.
 - Add file/app refresh actions equivalent to Vicinae's internal refresh commands.
 - Add migrations early, before data formats spread across the codebase.
@@ -153,17 +150,18 @@ only when the native widgets cannot produce the needed command-palette feel.
 ### 4. Script Command Compatibility
 
 - Support Raycast/Vicinae-style script command metadata.
-  Done (partial): `@raycast.*`/`@vicinae.*` metadata comments
-  (schemaVersion/title/description/packageName/icon/mode) are parsed in
-  `search/scripts.rs`; `mode` is parsed but not used yet; script arguments and
-  preferences are not supported yet.
+  Done: `@raycast.*`/`@vicinae.*` metadata comments
+  (schemaVersion, title, description, packageName, icon, mode, arguments,
+  needsConfirmation) are parsed in `search/scripts.rs`.
 - Scan configured script directories. Done (`script_dirs` preference plus
   extension manifest `scripts = [...]`).
 - Parse metadata comments. Done.
 - Expose script commands in root search. Done.
 - Support stdout parsing, arguments, preferences, and action panel entries.
-  Partially done: script stdout is captured and shown; arguments, preferences,
-  and per-script action panel entries are missing.
+  Done: scripts with `@raycast.argumentN` / `@vicinae.argumentN` open interactive
+  form dialogs with percent-encoding support; script modes (`fullOutput`,
+  `compact`, `silent`, `inline`) execute with appropriate UI feedback and
+  notifications; execution policy gates scripts behind confirmation.
 
 This is the highest-value extension mechanism before a full TypeScript/React
 runtime.
@@ -171,12 +169,10 @@ runtime.
 ### 5. Rich Built-in Modules
 
 - Clipboard history view with delete, clear, pin, paste/copy. Done.
-- Snippet manager with create/edit/delete/search. Done (create/delete/search;
-  no in-place edit).
+- Snippet manager with create/edit/delete/search and in-place editing. Done.
 - Status strip and dashboard/control-center views are tracked in
-  `docs/linux-command-center-plan.md`. Done — well beyond the original plan:
-  the strip renders clock, date, network, battery, audio, media, and keyboard
-  layout items via `status_items`.
+  `docs/linux-command-center-plan.md`. Done — renders clock, date, network,
+  battery, audio, media, and keyboard layout items via `status_items`.
 - Emoji picker. Done (`search/emoji.rs`, dedicated view, CLI flag `--emoji`).
 - Font browser. Done.
 - Calculator history. Done (persisted to `calc_history.json`).
@@ -204,20 +200,21 @@ Pragmatic path:
 
 1. Refactor core types from `lib.rs` into `action.rs`, `config.rs`, and
    `search/*` while preserving behavior. Done.
-2. Refactor GTK panels from `zeshicast-gtk.rs` into `ui/*`. Done.
+2. Refactor GTK panels from `zeshicast-gtk.rs` into `ui/*` and `ui/views/*`. Done.
 3. Introduce a navigation stack and make clipboard/snippet browsers full views.
    Done.
-4. Add SQLite storage for clipboard and usage history. Done.
-5. Add script command scanning compatible with Raycast/Vicinae metadata. Done
-   for metadata parsing and root-search exposure; arguments/preferences pending.
+4. Add SQLite storage for clipboard, usage history, and snippets. Done.
+5. Add script command scanning compatible with Raycast/Vicinae metadata with
+   modes and argument forms. Done.
 
 ## Verification Baseline
 
 Current baseline:
 
-- `cargo test --features gui` passes with 119 tests (as of 2026-08).
-- `cargo check --features gui` requires a Rust toolchain new enough for the
-  `gtk4` crate (currently 0.11.3). In this repo, run it through Nix:
+- `cargo test --features gui` passes with 164 tests (100% passing).
+- `cargo clippy --all-targets --features gui -- -D warnings` clean (0 warnings).
+- `cargo check --no-default-features` clean headless compilation.
+- In this repo, run Nix development shell via:
 
 ```bash
 nix develop -f shell.nix --command cargo check --features gui
