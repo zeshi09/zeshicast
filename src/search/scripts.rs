@@ -248,6 +248,8 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
     })
 }
 
+
+
 fn raycast_meta<'a>(comment: &'a str, key: &str) -> Option<&'a str> {
     let prefix = format!("@raycast.{key}");
     if comment.starts_with(&prefix) {
@@ -619,5 +621,32 @@ mod tests {
         assert_eq!(output.trim(), "Hello Zeshi, welcome to Zeshicast!");
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parse_raycast_metadata_with_arguments() {
+        let dir = tempfile::tempdir().unwrap();
+        let script_path = dir.path().join("weather.sh");
+        let content = r#"#!/usr/bin/env bash
+# @raycast.schemaVersion 1
+# @raycast.title Weather Forecast
+# @raycast.mode fullOutput
+# @raycast.packageName Weather
+# @raycast.icon 🌤️
+# @raycast.argument1 { "type": "text", "placeholder": "City", "optional": false }
+# @raycast.argument2 { "type": "text", "placeholder": "Format", "optional": true }
+
+curl "wttr.in/$1?format=$2"
+"#;
+        fs::write(&script_path, content).unwrap();
+
+        let entry = parse_script_entry(&script_path).expect("Failed to parse script");
+        assert_eq!(entry.title, "Weather Forecast");
+        assert_eq!(entry.package, "Weather");
+        assert_eq!(entry.arguments.len(), 2);
+        assert_eq!(entry.arguments[0].placeholder, "City");
+        assert!(!entry.arguments[0].optional);
+        assert_eq!(entry.arguments[1].placeholder, "Format");
+        assert!(entry.arguments[1].optional);
     }
 }

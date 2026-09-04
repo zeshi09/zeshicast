@@ -54,6 +54,7 @@ pub(crate) fn handle_key(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    window_grid_view: &crate::ui::WindowGridView,
     current_action: &Rc<RefCell<Option<Action>>>,
     action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
     filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
@@ -84,6 +85,7 @@ pub(crate) fn handle_key(
             media_view,
             network_list,
             notifications_view,
+            window_grid_view,
             current_action,
             displayed_action_panel_rows,
             clipboard_view,
@@ -124,6 +126,7 @@ pub(crate) fn handle_key(
                     network_list,
                     notifications_view,
                     script_output_view,
+                    window_grid_view,
                 );
             }
             glib::Propagation::Stop
@@ -238,6 +241,7 @@ fn handle_view_key(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    window_grid_view: &crate::ui::WindowGridView,
     current_action: &Rc<RefCell<Option<Action>>>,
     displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
     clipboard_view: &crate::ui::ClipboardHistoryView,
@@ -327,6 +331,10 @@ fn handle_view_key(
                 show_root_view(navigation, entry, action_bar);
                 glib::Propagation::Stop
             }
+            crate::ui::LauncherView::WindowGrid => {
+                show_root_view(navigation, entry, action_bar);
+                glib::Propagation::Stop
+            }
             _ => glib::Propagation::Proceed,
         },
         gdk::Key::Down => match navigation.current() {
@@ -373,6 +381,15 @@ fn handle_view_key(
                 crate::ui::move_selection(snippet_list, 1);
                 glib::Propagation::Stop
             }
+            crate::ui::LauncherView::WindowGrid => {
+                use crate::services::compositor::{WindowSnapPosition, snap_window};
+                let target_pos = WindowSnapPosition::BottomHalf;
+                *window_grid_view.current_position.borrow_mut() = target_pos;
+                window_grid_view.drawing_area.queue_draw();
+                snap_window(target_pos);
+                window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
+                glib::Propagation::Stop
+            }
             _ => glib::Propagation::Proceed,
         },
         gdk::Key::Up => match navigation.current() {
@@ -417,6 +434,15 @@ fn handle_view_key(
             }
             crate::ui::LauncherView::Snippets => {
                 crate::ui::move_selection(snippet_list, -1);
+                glib::Propagation::Stop
+            }
+            crate::ui::LauncherView::WindowGrid => {
+                use crate::services::compositor::{WindowSnapPosition, snap_window};
+                let target_pos = WindowSnapPosition::TopHalf;
+                *window_grid_view.current_position.borrow_mut() = target_pos;
+                window_grid_view.drawing_area.queue_draw();
+                snap_window(target_pos);
+                window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
                 glib::Propagation::Stop
             }
             _ => glib::Propagation::Proceed,
@@ -512,6 +538,36 @@ fn handle_view_key(
             );
             glib::Propagation::Stop
         }
-        _ => glib::Propagation::Proceed,
+        _ => {
+            if navigation.current() == crate::ui::LauncherView::WindowGrid {
+                use crate::services::compositor::{WindowSnapPosition, snap_window};
+                let pos = match key {
+                    gdk::Key::h | gdk::Key::H | gdk::Key::Left => Some(WindowSnapPosition::LeftHalf),
+                    gdk::Key::l | gdk::Key::L | gdk::Key::Right => Some(WindowSnapPosition::RightHalf),
+                    gdk::Key::k | gdk::Key::K | gdk::Key::Up => Some(WindowSnapPosition::TopHalf),
+                    gdk::Key::j | gdk::Key::J | gdk::Key::Down => Some(WindowSnapPosition::BottomHalf),
+                    gdk::Key::f | gdk::Key::F => Some(WindowSnapPosition::Fullscreen),
+                    gdk::Key::c | gdk::Key::C => Some(WindowSnapPosition::Center),
+                    gdk::Key::_1 => Some(WindowSnapPosition::FirstThird),
+                    gdk::Key::_2 => Some(WindowSnapPosition::CenterThird),
+                    gdk::Key::_3 => Some(WindowSnapPosition::RightThird),
+                    gdk::Key::_4 => Some(WindowSnapPosition::LeftTwoThirds),
+                    gdk::Key::_5 => Some(WindowSnapPosition::RightTwoThirds),
+                    gdk::Key::u | gdk::Key::U => Some(WindowSnapPosition::TopLeftQuarter),
+                    gdk::Key::i | gdk::Key::I => Some(WindowSnapPosition::TopRightQuarter),
+                    gdk::Key::n | gdk::Key::N => Some(WindowSnapPosition::BottomLeftQuarter),
+                    gdk::Key::m | gdk::Key::M => Some(WindowSnapPosition::BottomRightQuarter),
+                    _ => None,
+                };
+                if let Some(target_pos) = pos {
+                    *window_grid_view.current_position.borrow_mut() = target_pos;
+                    window_grid_view.drawing_area.queue_draw();
+                    snap_window(target_pos);
+                    window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
+                    return glib::Propagation::Stop;
+                }
+            }
+            glib::Propagation::Proceed
+        }
     }
 }

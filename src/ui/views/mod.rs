@@ -12,6 +12,7 @@ pub mod notifications;
 pub mod script_output;
 pub mod snippets;
 pub mod system_monitor;
+pub mod window_grid;
 
 pub use action_panel::*;
 pub use ai_chat::*;
@@ -26,6 +27,7 @@ pub use notifications::*;
 pub use script_output::*;
 pub use snippets::*;
 pub use system_monitor::*;
+pub use window_grid::*;
 
 pub use super::fonts::{FontBrowserView, font_browser_view};
 pub use super::preferences::{PreferencesView, preferences_view};

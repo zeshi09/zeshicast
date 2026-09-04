@@ -220,6 +220,7 @@ impl ActionRisk {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecondaryActionKind {
     Run,
+    RunInTerminal,
     CopyValue,
     TypeText,
     OpenParent,
@@ -263,6 +264,7 @@ pub enum LauncherCommand {
     Network,
     Notifications,
     SystemMonitor,
+    WindowGrid,
 }
 
 #[derive(Debug, Clone)]

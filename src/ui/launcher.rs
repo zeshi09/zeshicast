@@ -12,7 +12,7 @@ use crate::ui::launcher_helpers::{
 use crate::ui::launcher_views::{
     run_launcher_command, show_ai_chat_view, show_audio_view, show_dashboard_view, show_emoji_view,
     show_font_browser_view, show_media_view, show_network_view, show_notifications_view,
-    show_script_output_view, show_system_monitor_view,
+    show_script_output_view, show_system_monitor_view, show_window_grid_view,
 };
 use crate::{
     Action, ActionFormCommand, ActionKind, ActionRisk, ClipboardKind, ClipboardSummary,
@@ -185,6 +185,7 @@ fn build_ui(
     let font_view = crate::ui::font_browser_view();
     let preferences_view = crate::ui::preferences_view(launcher.borrow().get_preferences());
     let script_output_view = crate::ui::script_output_view();
+    let window_grid_view = crate::ui::window_grid_view();
 
     navigation.add_page(crate::ui::LauncherView::Root, &search_page);
     navigation.add_page(crate::ui::LauncherView::Actions, &action_panel_view.root);
@@ -211,6 +212,10 @@ fn build_ui(
         crate::ui::LauncherView::SystemMonitor,
         &system_monitor_view.root,
     );
+    navigation.add_page(
+        crate::ui::LauncherView::WindowGrid,
+        &window_grid_view.root,
+    );
 
     let (action_bar, result_counter) = action_bar(
         &window,
@@ -235,6 +240,7 @@ fn build_ui(
         &network_view.list,
         &notifications_view,
         &script_output_view,
+        &window_grid_view,
     );
 
     let status_strip = crate::ui::StatusStrip::new();
@@ -349,6 +355,7 @@ fn build_ui(
         let network_list = network_view.list.clone();
         let notifications_view = notifications_view.clone();
         let script_output_view = script_output_view.clone();
+        let window_grid_view = window_grid_view.clone();
         list.connect_row_activated(move |_, row| {
             if let Some(action) = action_for_row(&list_ref, &results, row) {
                 if let Some(command) = action.launcher_command() {
@@ -366,6 +373,7 @@ fn build_ui(
                         &media_view,
                         &network_list,
                         &notifications_view,
+                        &window_grid_view,
                     );
                 } else if action.form_data().is_some() {
                     show_form_for_action(
@@ -422,6 +430,7 @@ fn build_ui(
         let media_view = media_view.clone();
         let network_list = network_view.list.clone();
         let notifications_view = notifications_view.clone();
+        let window_grid_view = window_grid_view.clone();
         let current_action = Rc::clone(&current_action);
         let action_panel_items = Rc::clone(&action_panel_items);
         let filtered_action_panel_items = Rc::clone(&filtered_action_panel_items);
@@ -457,6 +466,7 @@ fn build_ui(
                 &media_view,
                 &network_list,
                 &notifications_view,
+                &window_grid_view,
                 &current_action,
                 &action_panel_items,
                 &filtered_action_panel_items,
@@ -1046,6 +1056,7 @@ fn build_ui(
         let notifications_view = notifications_view.clone();
         let emoji_view = emoji_view.clone();
         let font_view = font_view.clone();
+        let window_grid_view = window_grid_view.clone();
         Rc::new(move |view: &str| {
             match view {
                 "dashboard" => {
@@ -1073,6 +1084,7 @@ fn build_ui(
                 }
                 "emoji" => show_emoji_view(&navigation, &entry, &action_bar, &emoji_view),
                 "fonts" => show_font_browser_view(&navigation, &entry, &action_bar, &font_view),
+                "grid" | "window-grid" => show_window_grid_view(&navigation, &entry, &action_bar, &window_grid_view),
                 _ => return false,
             }
             true
@@ -1736,6 +1748,7 @@ fn action_bar(
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
     script_output_view: &crate::ui::ScriptOutputView,
+    window_grid_view: &crate::ui::WindowGridView,
 ) -> (GtkBox, Label) {
     let bar = GtkBox::new(Orientation::Horizontal, 6);
     bar.add_css_class("action-bar");
@@ -1776,6 +1789,7 @@ fn action_bar(
         let network_list = network_list.clone();
         let notifications_view = notifications_view.clone();
         let script_output_view = script_output_view.clone();
+        let window_grid_view = window_grid_view.clone();
         run.connect_clicked(move |_| {
             run_selected_with_views(
                 &window,
@@ -1796,6 +1810,7 @@ fn action_bar(
                 &network_list,
                 &notifications_view,
                 &script_output_view,
+                &window_grid_view,
             )
         });
     }
@@ -1971,6 +1986,7 @@ pub(crate) fn run_selected_with_views(
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
     script_output_view: &crate::ui::ScriptOutputView,
+    window_grid_view: &crate::ui::WindowGridView,
 ) {
     if let Some(action) = selected_action(list, results) {
         if let Some(command) = action.launcher_command() {
@@ -1988,6 +2004,7 @@ pub(crate) fn run_selected_with_views(
                 media_view,
                 network_list,
                 notifications_view,
+                window_grid_view,
             );
         } else if action.form_data().is_some() {
             show_form_for_action(
@@ -2196,7 +2213,7 @@ fn run_secondary_action_confirmed(
 
 fn secondary_action_risk(action: &Action, kind: SecondaryActionKind) -> ActionRisk {
     match kind {
-        SecondaryActionKind::Run => action.risk,
+        SecondaryActionKind::Run | SecondaryActionKind::RunInTerminal => action.risk,
         SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
         SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
         _ => ActionRisk::Normal,
@@ -2821,6 +2838,7 @@ mod tests {
             pins: std::collections::HashSet::new(),
             recent: Vec::new(),
             frequencies: std::collections::HashMap::new(),
+            extensions: Vec::new(),
             files: Vec::new(),
             config_dir: std::env::temp_dir().join("zeshicast-launcher-delete-gate-test"),
         };

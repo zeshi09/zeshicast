@@ -8,9 +8,9 @@ pub use crate::services::clipboard_store::*;
 use crate::services::storage;
 use crate::services::text_input::{is_wtype_available, type_text_via_wtype};
 use crate::{
-    Action, ActionFormCommand, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider,
-    ActionRisk, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
-    ExecutionPolicy, ExecutionRequest, ExtensionManifest, FileEntry, FilesProvider,
+    Action, ActionFormCommand, ActionKind, ActionRisk, ActionTarget, AppEntry, AppsProvider, AudioProvider,
+    BrowserTabsProvider, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
+    ExecutionPolicy, ExecutionRequest, ExtensionManifest, ExtensionsProvider, FileEntry, FilesProvider,
     HyprlandProvider, LauncherCommand, MAX_RESULTS, MediaProvider,
     NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider,
     PlaceholderContext, ProcessCommand, ProcessesProvider, ScriptEntry, ScriptsProvider,
@@ -45,6 +45,7 @@ pub struct Zeshicast {
     pub(crate) pins: HashSet<String>,
     pub(crate) recent: Vec<String>,
     pub(crate) frequencies: HashMap<String, u32>,
+    pub(crate) extensions: Vec<ExtensionManifest>,
     pub(crate) files: Vec<FileEntry>,
     pub(crate) config_dir: PathBuf,
 }
@@ -207,6 +208,7 @@ impl Zeshicast {
                 .collect(),
             recent: storage_data.recent,
             frequencies: storage_data.frequencies,
+            extensions,
             files: if index_files {
                 load_file_index(&home)
             } else {
@@ -323,6 +325,10 @@ impl Zeshicast {
         }));
         providers.push(Box::new(FilesProvider { files: &self.files }));
         providers.push(Box::new(ProcessesProvider));
+        providers.push(Box::new(BrowserTabsProvider));
+        providers.push(Box::new(ExtensionsProvider {
+            manifests: &self.extensions,
+        }));
 
         for provider in providers {
             actions.extend(provider.search(&search_context));
@@ -411,6 +417,19 @@ impl Zeshicast {
                 SecondaryActionKind::TypeText,
                 "Expand (type text)",
                 "input-keyboard-symbolic",
+                S::Primary,
+            ));
+        }
+
+        let is_app_or_script = matches!(
+            action.category.as_str(),
+            "Application" | "Script" | "Command" | "System"
+        );
+        if is_app_or_script {
+            actions.push(SecondaryAction::new(
+                SecondaryActionKind::RunInTerminal,
+                "Run in Terminal",
+                "utilities-terminal-symbolic",
                 S::Primary,
             ));
         }
@@ -566,6 +585,15 @@ impl Zeshicast {
             }
             SecondaryActionKind::ClearClipboardHistory => {
                 self.clear_clipboard_history()?;
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::RunInTerminal => {
+                let pref = self
+                    .get_preferences()
+                    .get("default_terminal")
+                    .map(|s| s.as_str());
+                let cmd = action.value();
+                let _ = crate::services::terminal::launch_in_terminal(&cmd, pref, true);
                 Ok(ExecutionDecision::RunNow)
             }
         }
@@ -927,6 +955,14 @@ impl Zeshicast {
                 "applications-fonts-symbolic",
                 "fonts typography typeface preview system",
                 LauncherCommand::Fonts,
+                "dashboard_enabled",
+            ),
+            (
+                "Window Grid",
+                "Tile and snap active window across monitor",
+                "view-grid-symbolic",
+                "window grid tile snap split resize left right fullscreen thirds",
+                LauncherCommand::WindowGrid,
                 "dashboard_enabled",
             ),
         ];
@@ -1299,6 +1335,7 @@ mod tests {
             pins: HashSet::new(),
             recent: Vec::new(),
             frequencies: HashMap::new(),
+            extensions: Vec::new(),
             files: Vec::new(),
             config_dir,
         }
