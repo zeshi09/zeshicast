@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, Result, params};
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 fn open(config_dir: &Path) -> Result<Connection> {
     std::fs::create_dir_all(config_dir).ok();
@@ -48,6 +48,10 @@ fn migrate(conn: &mut Connection) -> Result<()> {
                 migrate_0_to_1(&transaction)?;
                 version = 1;
             }
+            1 => {
+                migrate_1_to_2(&transaction)?;
+                version = 2;
+            }
             _ => {
                 return Err(rusqlite::Error::InvalidParameterName(format!(
                     "no migration path from schema version {version}"
@@ -77,6 +81,22 @@ fn migrate_0_to_1(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_clipboard_added_at ON clipboard(added_at);
         CREATE INDEX IF NOT EXISTS idx_usage_last_used ON usage(last_used);",
+    )
+}
+
+fn migrate_1_to_2(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS snippets (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            title      TEXT    NOT NULL,
+            prefix     TEXT    NOT NULL DEFAULT '',
+            content    TEXT    NOT NULL,
+            tags       TEXT    NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_snippets_title ON snippets(title);
+        CREATE INDEX IF NOT EXISTS idx_snippets_prefix ON snippets(prefix);",
     )
 }
 
@@ -215,7 +235,125 @@ pub fn usage_has_data(config_dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
+// ── Snippets ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnippetRecord {
+    pub id: i64,
+    pub title: String,
+    pub prefix: String,
+    pub content: String,
+    pub tags: Vec<String>,
+}
+
+pub fn snippets_load(config_dir: &Path) -> Vec<SnippetRecord> {
+    let Ok(conn) = open(config_dir) else {
+        return Vec::new();
+    };
+    let mut stmt = match conn.prepare(
+        "SELECT id, title, prefix, content, tags FROM snippets ORDER BY id ASC",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stmt.query_map([], |row| {
+        let tags_str: String = row.get(4)?;
+        let tags = tags_str
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        Ok(SnippetRecord {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            prefix: row.get(2)?,
+            content: row.get(3)?,
+            tags,
+        })
+    })
+    .map(|rows| rows.flatten().collect())
+    .unwrap_or_default()
+}
+
+pub fn snippet_insert(
+    config_dir: &Path,
+    title: &str,
+    prefix: &str,
+    content: &str,
+    tags: &[String],
+) -> Result<i64> {
+    let conn = open(config_dir)?;
+    let ts = now();
+    conn.execute(
+        "INSERT INTO snippets (title, prefix, content, tags, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![title, prefix, content, tags.join(", "), ts, ts],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn snippet_update(
+    config_dir: &Path,
+    id: i64,
+    title: &str,
+    prefix: &str,
+    content: &str,
+    tags: &[String],
+) -> Result<()> {
+    let conn = open(config_dir)?;
+    conn.execute(
+        "UPDATE snippets SET title = ?1, prefix = ?2, content = ?3, tags = ?4, updated_at = ?5 WHERE id = ?6",
+        params![title, prefix, content, tags.join(", "), now(), id],
+    )?;
+    Ok(())
+}
+
+pub fn snippet_delete(config_dir: &Path, id: i64) -> Result<()> {
+    let conn = open(config_dir)?;
+    conn.execute("DELETE FROM snippets WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+pub fn snippet_delete_by_title_and_content(
+    config_dir: &Path,
+    title: &str,
+    content: &str,
+) -> Result<()> {
+    let conn = open(config_dir)?;
+    conn.execute(
+        "DELETE FROM snippets WHERE title = ?1 AND content = ?2",
+        params![title, content],
+    )?;
+    Ok(())
+}
+
+pub fn snippet_has_data(config_dir: &Path) -> bool {
+    let Ok(conn) = open(config_dir) else {
+        return false;
+    };
+    conn.query_row("SELECT COUNT(*) FROM snippets", [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
 // ── One-time migrations from text files ──────────────────────────────────────
+
+pub fn migrate_snippets(
+    config_dir: &Path,
+    entries: &[(String, String, Vec<String>)],
+) -> Result<()> {
+    let conn = open(config_dir)?;
+    let ts = now();
+    for (title, content, tags) in entries {
+        conn.execute(
+            "INSERT INTO snippets (title, prefix, content, tags, created_at, updated_at) VALUES (?1, '', ?2, ?3, ?4, ?5)",
+            params![title, content, tags.join(", "), ts, ts],
+        )?;
+    }
+    Ok(())
+}
 
 pub fn migrate_clipboard(config_dir: &Path, entries: &[String]) -> Result<()> {
     let conn = open(config_dir)?;
@@ -430,6 +568,73 @@ mod tests {
         assert_eq!(count, 1);
         assert_eq!(x_count, 3);
         assert_eq!(usage_recent(&dir, 10).len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn snippets_crud_operations() {
+        let dir = test_dir("snippets-crud");
+        assert!(!snippet_has_data(&dir));
+
+        let id = snippet_insert(
+            &dir,
+            "Greeting",
+            ":hi",
+            "Hello, world!",
+            &["welcome".to_string(), "intro".to_string()],
+        )
+        .unwrap();
+        assert!(snippet_has_data(&dir));
+
+        let loaded = snippets_load(&dir);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, id);
+        assert_eq!(loaded[0].title, "Greeting");
+        assert_eq!(loaded[0].prefix, ":hi");
+        assert_eq!(loaded[0].content, "Hello, world!");
+        assert_eq!(loaded[0].tags, vec!["welcome", "intro"]);
+
+        snippet_update(
+            &dir,
+            id,
+            "Greeting Updated",
+            ":hello",
+            "Hello, updated world!",
+            &["greeting".to_string()],
+        )
+        .unwrap();
+
+        let updated = snippets_load(&dir);
+        assert_eq!(updated[0].title, "Greeting Updated");
+        assert_eq!(updated[0].prefix, ":hello");
+        assert_eq!(updated[0].content, "Hello, updated world!");
+        assert_eq!(updated[0].tags, vec!["greeting"]);
+
+        snippet_delete(&dir, id).unwrap();
+        assert!(!snippet_has_data(&dir));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn migrate_snippets_creates_valid_rows() {
+        let dir = test_dir("snippets-migrate");
+        let entries = vec![
+            ("Snippet 1".to_string(), "echo 1".to_string(), vec!["tag1".to_string()]),
+            ("Snippet 2".to_string(), "echo 2".to_string(), vec![]),
+        ];
+
+        migrate_snippets(&dir, &entries).unwrap();
+        assert!(snippet_has_data(&dir));
+
+        let loaded = snippets_load(&dir);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].title, "Snippet 1");
+        assert_eq!(loaded[0].content, "echo 1");
+        assert_eq!(loaded[0].tags, vec!["tag1"]);
+        assert_eq!(loaded[1].title, "Snippet 2");
+        assert_eq!(loaded[1].content, "echo 2");
+        assert!(loaded[1].tags.is_empty());
+
         let _ = std::fs::remove_dir_all(dir);
     }
 }

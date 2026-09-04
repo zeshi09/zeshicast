@@ -23,6 +23,7 @@ pub(crate) struct ActionPanelItem {
 pub(crate) enum ActionPanelItemKind {
     Secondary(SecondaryActionKind),
     SetAlias,
+    EditSnippet,
 }
 
 #[derive(Clone)]
@@ -73,6 +74,18 @@ pub(crate) fn show_action_panel_view(
         section: ActionPanelSection::Manage,
         kind: ActionPanelItemKind::SetAlias,
     });
+    if action.category == "Snippet" {
+        items.push(ActionPanelItem {
+            display: ActionPanelDisplayItem {
+                title: "Edit Snippet".to_string(),
+                icon_name: "document-edit-symbolic".to_string(),
+                is_section_header: false,
+                is_destructive: false,
+            },
+            section: ActionPanelSection::Manage,
+            kind: ActionPanelItemKind::EditSnippet,
+        });
+    }
 
     *current_action.borrow_mut() = Some(action.clone());
     *action_panel_items.borrow_mut() = items.clone();
@@ -192,6 +205,34 @@ pub(crate) fn run_action_panel_row(
         ActionPanelItemKind::SetAlias => {
             crate::ui::show_alias_panel(window, launcher, &action);
             show_root_view(navigation, entry, action_bar);
+        }
+        ActionPanelItemKind::EditSnippet => {
+            let launcher_for_save = Rc::clone(launcher);
+            let entry = entry.clone();
+            let list = list.clone();
+            let results = Rc::clone(results);
+            let navigation = navigation.clone();
+            let action_bar = action_bar.clone();
+            let title = action.title.clone();
+            let value = action.value();
+            crate::ui::show_snippet_editor_panel(
+                window,
+                launcher,
+                None,
+                &title,
+                "",
+                &value,
+                move || {
+                    update_results(
+                        &launcher_for_save.borrow(),
+                        &results,
+                        &list,
+                        entry.text().as_str(),
+                        None,
+                    );
+                    show_root_view(&navigation, &entry, &action_bar);
+                },
+            );
         }
     }
 }

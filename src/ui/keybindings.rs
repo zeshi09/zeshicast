@@ -467,6 +467,34 @@ fn handle_view_key(
             refresh_snippet_view(launcher, snippet_list, snippet_items);
             glib::Propagation::Stop
         }
+        gdk::Key::e | gdk::Key::E
+            if navigation.current() == crate::ui::LauncherView::Snippets
+                && state.contains(gdk::ModifierType::CONTROL_MASK) =>
+        {
+            if let Some(row) = snippet_list.selected_row()
+                && let Some(item) = snippet_items.borrow().get(row.index() as usize)
+            {
+                let launcher_for_done = Rc::clone(launcher);
+                let snippet_list = snippet_list.clone();
+                let snippet_items = Rc::clone(snippet_items);
+                crate::ui::show_snippet_editor_panel(
+                    window,
+                    launcher,
+                    Some(item.id),
+                    &item.name,
+                    &item.prefix,
+                    &item.value,
+                    move || {
+                        refresh_snippet_view(
+                            &launcher_for_done,
+                            &snippet_list,
+                            &snippet_items,
+                        );
+                    },
+                );
+            }
+            glib::Propagation::Stop
+        }
         gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::SystemMonitor => {
             let system_monitor_view = system_monitor_view.clone();
             terminate_selected_system_process_or_confirm(

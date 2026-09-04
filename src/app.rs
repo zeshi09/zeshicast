@@ -62,7 +62,9 @@ fn preference_enabled_value(
 
 #[derive(Debug, Clone)]
 pub struct SnippetSummary {
+    pub id: i64,
     pub name: String,
+    pub prefix: String,
     pub preview: String,
     pub value: String,
     pub tags: Vec<String>,
@@ -83,6 +85,16 @@ fn migrate_legacy_storage_if_needed(config_dir: &Path) {
         let freq_legacy = load_frequencies(&config_dir.join("frequencies.txt"));
         if !recent_legacy.is_empty() {
             storage::migrate_usage(config_dir, &recent_legacy, &freq_legacy).ok();
+        }
+    }
+    if !storage::snippet_has_data(config_dir) {
+        let legacy = load_named_values(&config_dir.join("snippets.txt"));
+        if !legacy.is_empty() {
+            let entries: Vec<(String, String, Vec<String>)> = legacy
+                .into_iter()
+                .map(|item| (item.name, item.value, item.tags))
+                .collect();
+            storage::migrate_snippets(config_dir, &entries).ok();
         }
     }
 }
@@ -165,10 +177,23 @@ impl Zeshicast {
         let (commands, scripts) = load_commands_and_scripts(&config_dir, &script_dirs, &extensions);
         let calc_history = load_calc_history(&config_dir.join("calc_history.json"));
 
+        let snippets = if storage::snippet_has_data(&config_dir) {
+            storage::snippets_load(&config_dir)
+                .into_iter()
+                .map(|record| NamedValue {
+                    name: record.title,
+                    value: record.content,
+                    tags: record.tags,
+                })
+                .collect()
+        } else {
+            load_named_values(&config_dir.join("snippets.txt"))
+        };
+
         Self {
             apps: load_apps(&home),
             quicklinks: load_named_values(&config_dir.join("quicklinks.txt")),
-            snippets: load_named_values(&config_dir.join("snippets.txt")),
+            snippets,
             commands,
             scripts,
             clipboard_history: storage_data.history,
@@ -618,20 +643,44 @@ impl Zeshicast {
     }
 
     pub fn list_snippets(&self) -> Vec<SnippetSummary> {
-        self.snippets
-            .iter()
-            .map(|snippet| SnippetSummary {
-                name: snippet.name.clone(),
-                preview: crate::clipboard_preview(&snippet.value),
-                value: snippet.value.clone(),
-                tags: snippet.tags.clone(),
-            })
-            .collect()
+        if storage::snippet_has_data(&self.config_dir) {
+            storage::snippets_load(&self.config_dir)
+                .into_iter()
+                .map(|r| SnippetSummary {
+                    id: r.id,
+                    name: r.title,
+                    prefix: r.prefix,
+                    preview: crate::clipboard_preview(&r.content),
+                    value: r.content,
+                    tags: r.tags,
+                })
+                .collect()
+        } else {
+            self.snippets
+                .iter()
+                .enumerate()
+                .map(|(i, snippet)| SnippetSummary {
+                    id: (i + 1) as i64,
+                    name: snippet.name.clone(),
+                    prefix: String::new(),
+                    preview: crate::clipboard_preview(&snippet.value),
+                    value: snippet.value.clone(),
+                    tags: snippet.tags.clone(),
+                })
+                .collect()
+        }
     }
 
     pub fn delete_snippet(&mut self, name: &str, value: &str) -> io::Result<()> {
+        storage::snippet_delete_by_title_and_content(&self.config_dir, name, value).ok();
         self.snippets
             .retain(|snippet| snippet.name != name || snippet.value != value);
+        self.write_snippets()
+    }
+
+    pub fn delete_snippet_by_id(&mut self, id: i64) -> io::Result<()> {
+        storage::snippet_delete(&self.config_dir, id).ok();
+        self.reload_snippets();
         self.write_snippets()
     }
 
@@ -644,12 +693,53 @@ impl Zeshicast {
                 "snippet name and value are required",
             ));
         }
+        storage::snippet_insert(&self.config_dir, name, "", value, &["ai".to_string()]).ok();
         self.snippets.push(NamedValue {
             name: name.to_string(),
             value: value.to_string(),
             tags: vec!["ai".to_string()],
         });
         self.write_snippets()
+    }
+
+    pub fn save_snippet(
+        &mut self,
+        id: Option<i64>,
+        title: &str,
+        prefix: &str,
+        content: &str,
+        tags: &[String],
+    ) -> io::Result<()> {
+        let title = title.trim();
+        let content = content.trim();
+        if title.is_empty() || content.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "snippet title and content are required",
+            ));
+        }
+
+        if let Some(id) = id {
+            storage::snippet_update(&self.config_dir, id, title, prefix, content, tags).ok();
+        } else {
+            storage::snippet_insert(&self.config_dir, title, prefix, content, tags).ok();
+        }
+
+        self.reload_snippets();
+        self.write_snippets()
+    }
+
+    fn reload_snippets(&mut self) {
+        if storage::snippet_has_data(&self.config_dir) {
+            self.snippets = storage::snippets_load(&self.config_dir)
+                .into_iter()
+                .map(|r| NamedValue {
+                    name: r.title,
+                    value: r.content,
+                    tags: r.tags,
+                })
+                .collect();
+        }
     }
 
     fn write_snippets(&self) -> io::Result<()> {
