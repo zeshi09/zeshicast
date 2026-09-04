@@ -1,6 +1,3 @@
-use std::io::Write;
-use std::process::{Command, Stdio};
-
 mod action;
 mod app;
 pub mod cli;
@@ -15,7 +12,7 @@ pub mod ui;
 pub use action::{
     Action, ActionForm, ActionFormField, ActionPanelSection, ActionRisk, Capability,
     CommandArgumentKind, ExecutionDecision, ExecutionPolicy, LauncherCommand, SecondaryAction,
-    SecondaryActionKind,
+    SecondaryActionKind, copy_text,
 };
 pub(crate) use action::{
     ActionFormCommand, ActionKind, HttpRequest, JsonCommandAction, ProcessCommand, ShellCommand,
@@ -79,7 +76,7 @@ pub(crate) use search::{
     AppsProvider, AudioProvider, ClipboardProvider, CommandsProvider, EmojiProvider, FilesProvider,
     HyprlandProvider, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
     NotificationsProvider, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
-    SearchProvider, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
+    SearchProvider, SwayProvider, SystemProvider, WebProvider, WindowsProvider, fuzzy_score,
     load_extension_script_entries, load_script_entries,
 };
 pub use services::audio::{
@@ -114,112 +111,6 @@ pub use services::system_stats::{
 pub use services::thermal::{ThermalSnapshot, ThermalZoneSnapshot, thermal_snapshot};
 
 const MAX_RESULTS: usize = 40;
-
-fn fuzzy_score(text: &str, query: &str) -> Option<i32> {
-    let query = query.trim().to_lowercase();
-    if query.is_empty() {
-        return None;
-    }
-
-    let text_lower = text.to_lowercase();
-    if text_lower == query {
-        return Some(500);
-    }
-    if text_lower.starts_with(&query) {
-        return Some(400 - text.len() as i32);
-    }
-    if text_lower.contains(&query) {
-        return Some(300 - text_lower.find(&query).unwrap_or(0) as i32);
-    }
-
-    let mut score = 0;
-    let mut last_index = None;
-    let mut chars = text_lower.char_indices();
-
-    for wanted in query.chars() {
-        let mut found = None;
-        for (index, actual) in chars.by_ref() {
-            if actual == wanted {
-                found = Some(index);
-                break;
-            }
-        }
-        let index = found?;
-        score += match last_index {
-            Some(last) if index == last + 1 => 20,
-            Some(last) => 10 - (index.saturating_sub(last) as i32).min(10),
-            None => 20 - index as i32,
-        };
-        last_index = Some(index);
-    }
-
-    Some(score)
-}
-
-fn spawn_shell(command: &ShellCommand) {
-    match Command::new("sh")
-        .arg("-c")
-        .arg(&command.command)
-        .envs(&command.env)
-        .spawn()
-    {
-        // Deliberately no command text: the daemon's stdout may be read by
-        // other processes and shell commands can embed secrets.
-        Ok(_) => println!("started: sh -c <command>"),
-        // No command text here either: placeholder-expanded commands can
-        // carry secrets and stderr ends up in journald.
-        Err(error) => eprintln!("failed to start shell command: {error}"),
-    }
-}
-
-fn spawn_command(command: &ProcessCommand) {
-    match Command::new(&command.program)
-        .args(&command.args)
-        .envs(&command.env)
-        .spawn()
-    {
-        Ok(_) => println!("started: {}", command.program),
-        Err(error) => eprintln!("failed to start {}: {error}", command.program),
-    }
-}
-
-fn copy_to_clipboard(text: &str) {
-    let copied =
-        copy_with("wl-copy", &[], text) || copy_with("xclip", &["-selection", "clipboard"], text);
-
-    if copied {
-        println!("copied to clipboard");
-    } else {
-        // Never echo the copied value: it may be a secret and the daemon's
-        // stdout is not guaranteed to stay private.
-        eprintln!("copy failed; install wl-clipboard or xclip to copy automatically");
-    }
-}
-
-pub fn copy_text(text: &str) {
-    copy_to_clipboard(text);
-}
-
-fn copy_with(program: &str, args: &[&str], text: &str) -> bool {
-    let Ok(mut child) = Command::new(program)
-        .args(args)
-        .stdin(Stdio::piped())
-        .spawn()
-    else {
-        return false;
-    };
-
-    if let Some(mut stdin) = child.stdin.take() {
-        if stdin.write_all(text.as_bytes()).is_err() {
-            return false;
-        }
-        drop(stdin);
-    } else {
-        return false;
-    }
-
-    child.wait().map(|status| status.success()).unwrap_or(false)
-}
 
 #[cfg(test)]
 mod tests {

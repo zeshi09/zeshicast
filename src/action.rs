@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
-use crate::{copy_to_clipboard, execute_http_request, spawn_command, spawn_shell};
+use crate::execute_http_request;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandArgumentKind {
@@ -534,3 +536,69 @@ impl ShellCommand {
         }
     }
 }
+
+fn spawn_shell(command: &ShellCommand) {
+    match Command::new("sh")
+        .arg("-c")
+        .arg(&command.command)
+        .envs(&command.env)
+        .spawn()
+    {
+        // Deliberately no command text: the daemon's stdout may be read by
+        // other processes and shell commands can embed secrets.
+        Ok(_) => println!("started: sh -c <command>"),
+        // No command text here either: placeholder-expanded commands can
+        // carry secrets and stderr ends up in journald.
+        Err(error) => eprintln!("failed to start shell command: {error}"),
+    }
+}
+
+fn spawn_command(command: &ProcessCommand) {
+    match Command::new(&command.program)
+        .args(&command.args)
+        .envs(&command.env)
+        .spawn()
+    {
+        Ok(_) => println!("started: {}", command.program),
+        Err(error) => eprintln!("failed to start {}: {error}", command.program),
+    }
+}
+
+fn copy_to_clipboard(text: &str) {
+    let copied =
+        copy_with("wl-copy", &[], text) || copy_with("xclip", &["-selection", "clipboard"], text);
+
+    if copied {
+        println!("copied to clipboard");
+    } else {
+        // Never echo the copied value: it may be a secret and the daemon's
+        // stdout is not guaranteed to stay private.
+        eprintln!("copy failed; install wl-clipboard or xclip to copy automatically");
+    }
+}
+
+pub fn copy_text(text: &str) {
+    copy_to_clipboard(text);
+}
+
+fn copy_with(program: &str, args: &[&str], text: &str) -> bool {
+    let Ok(mut child) = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .spawn()
+    else {
+        return false;
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        if stdin.write_all(text.as_bytes()).is_err() {
+            return false;
+        }
+        drop(stdin);
+    } else {
+        return false;
+    }
+
+    child.wait().map(|status| status.success()).unwrap_or(false)
+}
+

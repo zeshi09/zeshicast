@@ -236,3 +236,45 @@ impl SearchProvider for EmojiProvider {
         search_emoji(context.query)
     }
 }
+
+pub(crate) fn fuzzy_score(text: &str, query: &str) -> Option<i32> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return None;
+    }
+
+    let text_lower = text.to_lowercase();
+    if text_lower == query {
+        return Some(500);
+    }
+    if text_lower.starts_with(&query) {
+        return Some(400 - text.len() as i32);
+    }
+    if text_lower.contains(&query) {
+        return Some(300 - text_lower.find(&query).unwrap_or(0) as i32);
+    }
+
+    let mut score = 0;
+    let mut last_index = None;
+    let mut chars = text_lower.char_indices();
+
+    for wanted in query.chars() {
+        let mut found = None;
+        for (index, actual) in chars.by_ref() {
+            if actual == wanted {
+                found = Some(index);
+                break;
+            }
+        }
+        let index = found?;
+        score += match last_index {
+            Some(last) if index == last + 1 => 20,
+            Some(last) => 10 - (index.saturating_sub(last) as i32).min(10),
+            None => 20 - index as i32,
+        };
+        last_index = Some(index);
+    }
+
+    Some(score)
+}
+
