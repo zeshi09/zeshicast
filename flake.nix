@@ -177,9 +177,9 @@
                   "AF_INET6"
                   "AF_NETLINK"
                 ];
-                #MemoryDenyWriteExecute = true;
-                #SystemCallFilter = [ "@system-service" ];
-                #SystemCallArchitectures = "native";
+                MemoryDenyWriteExecute = true;
+                SystemCallFilter = [ "@system-service" ];
+                SystemCallArchitectures = "native";
               };
             };
           };
@@ -235,9 +235,9 @@
                   "AF_INET6"
                   "AF_NETLINK"
                 ];
-                #MemoryDenyWriteExecute = true;
-                #SystemCallFilter = [ "@system-service" ];
-                #SystemCallArchitectures = "native";
+                MemoryDenyWriteExecute = true;
+                SystemCallFilter = [ "@system-service" ];
+                SystemCallArchitectures = "native";
               };
               Install.WantedBy = [ "graphical-session.target" ];
             };

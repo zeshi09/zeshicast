@@ -27,11 +27,9 @@ ProtectClock=true
 ProtectHostname=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-# Включать только после ручной проверки на живой сессии (clipboard/MPRIS/AI):
-# GTK4/malloc/rustls могут ломаться под W^X и строгим фильтром syscall'ов.
-#MemoryDenyWriteExecute=true
-#SystemCallFilter=@system-service
-#SystemCallArchitectures=native
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=graphical-session.target
