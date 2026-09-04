@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::Zeshicast;
-use crate::services::local_ai::{StreamChunk, ask_local_ai_streaming};
+use crate::services::local_ai::{ChatMessage, StreamChunk, chat_local_ai_streaming};
 use gtk::glib;
 use gtk::prelude::*;
 
@@ -17,8 +17,29 @@ pub(super) fn ask_ai_from_view(
         return;
     }
 
-    // UI: enter "thinking" state
+    // Clear input entry so the user is ready to type their next query
+    ai_chat_view.input.set_text("");
+
+    // Create and append user message bubble
+    let user_lbl = gtk::Label::new(Some(&prompt));
+    user_lbl.add_css_class("ai-message-user");
+    user_lbl.set_wrap(true);
+    user_lbl.set_xalign(1.0);
+    user_lbl.set_selectable(true);
+    ai_chat_view.messages_box.append(&user_lbl);
+
+    // Create and append assistant response bubble
+    let assistant_lbl = gtk::Label::new(Some("Thinking…"));
+    assistant_lbl.add_css_class("ai-message-assistant");
+    assistant_lbl.set_wrap(true);
+    assistant_lbl.set_xalign(0.0);
+    assistant_lbl.set_selectable(true);
+    ai_chat_view.messages_box.append(&assistant_lbl);
+
+    // Keep output pointing to latest assistant label content
     ai_chat_view.output.set_text("");
+
+    // UI: enter "thinking" state
     ai_chat_view.status.set_text("Thinking…");
     ai_chat_view.status.set_visible(true);
     ai_chat_view.ask.set_visible(false);
@@ -26,9 +47,16 @@ pub(super) fn ask_ai_from_view(
     ai_chat_view.copy.set_sensitive(false);
     ai_chat_view.save.set_sensitive(false);
 
+    // Record user message in history
+    ai_chat_view
+        .history
+        .borrow_mut()
+        .push(ChatMessage::user(&prompt));
+
+    let messages = ai_chat_view.history.borrow().clone();
     let config = local_ai_config(launcher);
     let (tx, rx) = mpsc::sync_channel::<StreamChunk>(64);
-    let cancel_flag = ask_local_ai_streaming(config, prompt, tx);
+    let cancel_flag = chat_local_ai_streaming(config, messages, tx);
 
     // Connect stop button to cancel flag
     {
@@ -39,6 +67,7 @@ pub(super) fn ask_ai_from_view(
     }
 
     let ai_chat_view = ai_chat_view.clone();
+    let assistant_lbl = assistant_lbl.clone();
     let accumulated = Rc::new(RefCell::new(String::new()));
     glib::timeout_add_local(Duration::from_millis(30), move || {
         loop {
@@ -46,30 +75,52 @@ pub(super) fn ask_ai_from_view(
                 Ok(StreamChunk::Token(token)) => {
                     accumulated.borrow_mut().push_str(&token);
                     // Show streaming cursor at end of text
-                    ai_chat_view
-                        .output
-                        .set_text(&format!("{}▋", *accumulated.borrow()));
+                    assistant_lbl.set_text(&format!("{}▋", *accumulated.borrow()));
+                    ai_chat_view.output.set_text(&accumulated.borrow());
                 }
                 Ok(StreamChunk::Done) => {
-                    // Streaming done — re-render the full reply as Markdown.
-                    render_ai_markdown(&ai_chat_view, &accumulated.borrow());
+                    let text = accumulated.borrow().clone();
+                    assistant_lbl.set_markup(&super::markdown::to_pango_markup(&text));
+                    ai_chat_view.output.set_text(&text);
+                    ai_chat_view
+                        .history
+                        .borrow_mut()
+                        .push(ChatMessage::assistant(text));
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }
                 Ok(StreamChunk::Cancelled) => {
-                    render_ai_markdown(&ai_chat_view, &accumulated.borrow());
+                    let text = accumulated.borrow().clone();
+                    assistant_lbl.set_markup(&super::markdown::to_pango_markup(&text));
+                    ai_chat_view.output.set_text(&text);
+                    if !text.is_empty() {
+                        ai_chat_view
+                            .history
+                            .borrow_mut()
+                            .push(ChatMessage::assistant(text));
+                    }
                     ai_chat_view.status.set_text("Cancelled");
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }
                 Ok(StreamChunk::Error(e)) => {
+                    assistant_lbl.set_text(&e);
                     ai_chat_view.output.set_text(&e);
+                    ai_chat_view.history.borrow_mut().pop();
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }
                 Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    render_ai_markdown(&ai_chat_view, &accumulated.borrow());
+                    let text = accumulated.borrow().clone();
+                    assistant_lbl.set_markup(&super::markdown::to_pango_markup(&text));
+                    ai_chat_view.output.set_text(&text);
+                    if !text.is_empty() {
+                        ai_chat_view
+                            .history
+                            .borrow_mut()
+                            .push(ChatMessage::assistant(text));
+                    }
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }
@@ -78,12 +129,6 @@ pub(super) fn ask_ai_from_view(
     });
 }
 
-/// Render the completed reply as Markdown. We stream plain text (partial
-/// Markdown would produce invalid Pango markup mid-response), then format once.
-fn render_ai_markdown(view: &crate::ui::AiChatView, text: &str) {
-    view.output
-        .set_markup(&super::markdown::to_pango_markup(text));
-}
 
 fn finish_ai_view(view: &crate::ui::AiChatView) {
     view.status.set_visible(false);

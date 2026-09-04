@@ -555,6 +555,23 @@ fn build_ui(
         });
     }
 
+    {
+        let ai_chat_view = ai_chat_view.clone();
+        ai_chat_view.clear.clone().connect_clicked(move |_| {
+            ai_chat_view.history.borrow_mut().clear();
+            while let Some(child) = ai_chat_view.messages_box.first_child() {
+                ai_chat_view.messages_box.remove(&child);
+            }
+            ai_chat_view
+                .output
+                .set_text("Hi! Running on Ollama. Ask me anything.");
+            ai_chat_view.messages_box.append(&ai_chat_view.output);
+            ai_chat_view.input.set_text("");
+            ai_chat_view.status.set_visible(false);
+            ai_chat_view.input.grab_focus();
+        });
+    }
+
     // Media buttons (previous / play-pause / next) are wired to MPRIS over
     // D-Bus inside `media_view`; no duplicate playerctl handlers here.
 

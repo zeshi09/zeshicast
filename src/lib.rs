@@ -87,7 +87,8 @@ pub use services::compositor::{
     WorkspaceSnapshot, keyboard_layout, layout_change_receiver, workspace_snapshot,
 };
 pub use services::local_ai::{
-    LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming, list_models,
+    ChatMessage, LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming,
+    chat_local_ai_streaming, list_models,
 };
 pub use services::media::{MediaControl, MediaSnapshot, media_control, media_snapshot};
 pub use services::network::{

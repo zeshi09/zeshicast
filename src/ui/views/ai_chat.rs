@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Entry, Label, Orientation};
 
@@ -6,16 +9,19 @@ pub struct AiChatView {
     pub root: GtkBox,
     pub input: Entry,
     pub output: Label,
+    pub messages_box: GtkBox,
     pub ask: Button,
     pub stop: Button,
     pub status: Label,
     pub copy: Button,
     pub use_clipboard: Button,
     pub save: Button,
+    pub clear: Button,
     /// Container the dynamic model buttons are filled into.
     pub model_list: GtkBox,
     /// Re-fetch the model list from Ollama.
     pub refresh_models: Button,
+    pub history: Rc<RefCell<Vec<crate::ChatMessage>>>,
 }
 
 
@@ -53,17 +59,20 @@ pub fn ai_chat_view() -> AiChatView {
         .build();
     answer_scroll.add_css_class("results-scroll");
 
+    let messages_box = GtkBox::new(Orientation::Vertical, 8);
+    messages_box.set_margin_start(14);
+    messages_box.set_margin_end(14);
+    messages_box.set_margin_top(10);
+    messages_box.set_margin_bottom(10);
+
     let output = Label::new(Some("Hi! Running on Ollama. Ask me anything."));
     output.add_css_class("ai-message-assistant");
     output.set_wrap(true);
     output.set_xalign(0.0);
     output.set_yalign(0.0);
-    output.set_margin_start(14);
-    output.set_margin_end(14);
-    output.set_margin_top(10);
-    output.set_margin_bottom(6);
     output.set_selectable(true);
-    answer_scroll.set_child(Some(&output));
+    messages_box.append(&output);
+    answer_scroll.set_child(Some(&messages_box));
     root.append(&answer_scroll);
 
     let status = Label::new(None);
@@ -105,7 +114,10 @@ pub fn ai_chat_view() -> AiChatView {
     let save = Button::with_label("Save");
     save.add_css_class("action-bar-more");
 
-    // Secondary actions row (copy / clipboard / save)
+    let clear = Button::with_label("Clear");
+    clear.add_css_class("action-bar-more");
+
+    // Secondary actions row (copy / clipboard / save / clear)
     let sec_row = GtkBox::new(Orientation::Horizontal, 4);
     sec_row.add_css_class("action-bar");
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
@@ -114,22 +126,28 @@ pub fn ai_chat_view() -> AiChatView {
     sec_row.append(&use_clipboard);
     sec_row.append(&copy);
     sec_row.append(&save);
+    sec_row.append(&clear);
 
     root.append(&input_row);
     root.append(&sec_row);
+
+    let history = Rc::new(RefCell::new(Vec::new()));
 
     AiChatView {
         root,
         input,
         output,
+        messages_box,
         ask,
         stop,
         status,
         copy,
         use_clipboard,
         save,
+        clear,
         model_list,
         refresh_models,
+        history,
     }
 }
 

@@ -4,10 +4,41 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone)]
 pub struct LocalAiConfig {
     pub endpoint: String,
     pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+impl ChatMessage {
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: content.into(),
+        }
+    }
+
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: content.into(),
+        }
+    }
+
+    pub fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: "system".to_string(),
+            content: content.into(),
+        }
+    }
 }
 
 /// List the models installed on an Ollama server (`GET {endpoint}/api/tags`).
@@ -154,6 +185,82 @@ fn ask_local_ai_streaming_with_timeout(
     cancel
 }
 
+/// Multi-turn streaming chat version targeting Ollama `POST {endpoint}/api/chat`.
+pub fn chat_local_ai_streaming(
+    config: LocalAiConfig,
+    messages: Vec<ChatMessage>,
+    sender: std::sync::mpsc::SyncSender<StreamChunk>,
+) -> Arc<AtomicBool> {
+    chat_local_ai_streaming_with_timeout(config, messages, sender, STREAM_READ_TIMEOUT)
+}
+
+pub(crate) fn chat_local_ai_streaming_with_timeout(
+    config: LocalAiConfig,
+    messages: Vec<ChatMessage>,
+    sender: std::sync::mpsc::SyncSender<StreamChunk>,
+    read_timeout: std::time::Duration,
+) -> Arc<AtomicBool> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = Arc::clone(&cancel);
+
+    std::thread::spawn(move || {
+        let endpoint = config.endpoint.trim_end_matches('/').to_string();
+        let url = format!("{endpoint}/api/chat");
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(30))
+            .timeout_read(read_timeout)
+            .build();
+        let response = match agent.post(&url).send_json(serde_json::json!({
+            "model": config.model,
+            "messages": messages,
+            "stream": true,
+        })) {
+            Ok(r) => r,
+            Err(e) => {
+                sender.send(StreamChunk::Error(e.to_string())).ok();
+                return;
+            }
+        };
+
+        let reader = BufReader::new(response.into_reader());
+        for line in reader.lines() {
+            if cancel_clone.load(Ordering::Relaxed) {
+                sender.send(StreamChunk::Cancelled).ok();
+                return;
+            }
+            let Ok(line) = line else {
+                sender
+                    .send(StreamChunk::Error(
+                        "AI stream interrupted: the server stopped responding or the connection dropped"
+                            .to_string(),
+                    ))
+                    .ok();
+                return;
+            };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            let token = value
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .or_else(|| value.get("response").and_then(|v| v.as_str()));
+            if let Some(token) = token
+                && !token.is_empty()
+            {
+                sender.send(StreamChunk::Token(token.to_string())).ok();
+            }
+            if value.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                break;
+            }
+        }
+        sender.send(StreamChunk::Done).ok();
+    });
+
+    cancel
+}
+
 #[derive(Debug)]
 pub enum StreamChunk {
     Token(String),
@@ -217,6 +324,68 @@ mod tests {
                 assert!(message.contains("interrupted"), "unexpected message: {message}");
             }
             other => panic!("expected Error chunk after read timeout, got {other:?}"),
+        }
+
+        drop(cancel);
+        server.join().expect("server thread");
+    }
+
+    #[test]
+    fn chat_stream_delivers_tokens_from_chat_api() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        let server = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf); // drain the request head
+            sock.write_all(
+                b"HTTP/1.1 200 OK\r\n\
+                  Content-Type: application/x-ndjson\r\n\
+                  Transfer-Encoding: chunked\r\n\
+                  \r\n",
+            )
+            .expect("write headers");
+
+            let frame1 = b"{\"message\":{\"role\":\"assistant\",\"content\":\"hello \"},\"done\":false}\n";
+            write!(sock, "{:x}\r\n", frame1.len()).expect("write chunk header");
+            sock.write_all(frame1).expect("write frame1");
+            sock.write_all(b"\r\n").expect("terminate frame1");
+
+            let frame2 = b"{\"message\":{\"role\":\"assistant\",\"content\":\"world\"},\"done\":true}\n";
+            write!(sock, "{:x}\r\n", frame2.len()).expect("write chunk header");
+            sock.write_all(frame2).expect("write frame2");
+            sock.write_all(b"\r\n").expect("terminate frame2");
+
+            sock.write_all(b"0\r\n\r\n").expect("terminate chunked");
+            sock.flush().expect("flush");
+        });
+
+        let config = LocalAiConfig {
+            endpoint: format!("http://{addr}"),
+            model: "chat-model".to_string(),
+        };
+        let messages = vec![
+            ChatMessage::user("hi"),
+        ];
+        let (tx, rx) = std::sync::mpsc::sync_channel(64);
+        let cancel = chat_local_ai_streaming_with_timeout(
+            config,
+            messages,
+            tx,
+            Duration::from_secs(5),
+        );
+
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(StreamChunk::Token(token)) => assert_eq!(token, "hello "),
+            other => panic!("expected token 1, got {other:?}"),
+        }
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(StreamChunk::Token(token)) => assert_eq!(token, "world"),
+            other => panic!("expected token 2, got {other:?}"),
+        }
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(StreamChunk::Done) => {}
+            other => panic!("expected Done, got {other:?}"),
         }
 
         drop(cancel);
