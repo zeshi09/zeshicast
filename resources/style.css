@@ -859,9 +859,7 @@ button.media-btn-seek:hover {
 }
 
 .metric-graph {
-  min-height: 52px;
-  border-radius: 6px;
-  margin-top: 6px;
+  border-radius: 4px;
 }
 
 /* ════════════════════════════════════════════════════════════

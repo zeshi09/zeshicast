@@ -53,7 +53,7 @@ pub fn system_monitor_view(
     let load = Label::new(Some("—"));
     load.add_css_class("metric-value");
     load.add_css_class("mono");
-    load.set_width_chars(6);
+    load.set_width_chars(10);
     load.set_xalign(0.0);
     // 8 mini core bars drawn via Cairo
     let core_values: Rc<RefCell<Vec<f64>>> = Rc::new(RefCell::new(vec![0.0; 8]));
@@ -89,14 +89,19 @@ pub fn system_monitor_view(
         });
     }
 
+    let cpu_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    cpu_spacer.set_hexpand(true);
+
     let load_graph = metric_graph();
     load_graph.area.set_hexpand(false);
     load_graph.area.set_content_width(120);
-    load_graph.area.set_content_height(40);
-    load_graph.area.set_size_request(120, 40);
+    load_graph.area.set_content_height(34);
+    load_graph.area.set_size_request(120, 34);
+    load_graph.area.set_valign(gtk::Align::Center);
     cpu_row.append(&cpu_label);
     cpu_row.append(&load);
     cpu_row.append(&core_area);
+    cpu_row.append(&cpu_spacer);
     cpu_row.append(&load_graph.area);
     overview.append(&cpu_row);
 
@@ -149,9 +154,15 @@ pub fn system_monitor_view(
         });
     }
     let memory_graph = metric_graph();
+    memory_graph.area.set_hexpand(false);
+    memory_graph.area.set_content_width(120);
+    memory_graph.area.set_content_height(34);
+    memory_graph.area.set_size_request(120, 34);
+    memory_graph.area.set_valign(gtk::Align::Center);
     ram_row.append(&ram_label);
     ram_row.append(&memory);
     ram_row.append(&memory_bar);
+    ram_row.append(&memory_graph.area);
     overview.append(&ram_row);
 
     // Disk row
@@ -168,10 +179,17 @@ pub fn system_monitor_view(
     let disk_bar = ProgressBar::new();
     disk_bar.add_css_class("dashboard-metric-bar");
     disk_bar.set_hexpand(true);
+    disk_bar.set_valign(gtk::Align::Center);
     let disk_graph = metric_graph();
+    disk_graph.area.set_hexpand(false);
+    disk_graph.area.set_content_width(120);
+    disk_graph.area.set_content_height(34);
+    disk_graph.area.set_size_request(120, 34);
+    disk_graph.area.set_valign(gtk::Align::Center);
     disk_row.append(&disk_label);
     disk_row.append(&disk);
     disk_row.append(&disk_bar);
+    disk_row.append(&disk_graph.area);
     overview.append(&disk_row);
 
     // NET row
