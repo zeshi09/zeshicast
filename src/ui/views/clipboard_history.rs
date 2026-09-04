@@ -25,7 +25,7 @@ pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryVie
     left_panel.set_width_request(216);
 
     // filter bar at top
-    let filters = StringList::new(&["All", "Text", "URL", "Command", "Code"]);
+    let filters = StringList::new(&["All", "Text", "URL", "Command", "Code", "Image"]);
     let filter = DropDown::new(Some(filters), gtk::Expression::NONE);
     filter.set_selected(0);
     filter.set_margin_top(8);

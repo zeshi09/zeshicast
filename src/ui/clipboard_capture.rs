@@ -26,26 +26,37 @@ pub(crate) fn install_clipboard_monitor(launcher: &Rc<RefCell<Zeshicast>>) {
     });
 }
 
-/// Background clipboard capture via `wl-paste --watch`. The gdk
-/// `connect_changed` monitor only fires while the launcher window is focused —
-/// on Wayland a client receives clipboard events only when focused — so
-/// everything copied while the launcher is hidden collapses to just the latest
-/// value on next focus, and rapid copies race (the async read sees the newest
-/// content). `wl-paste --watch` fires for *every* change in the background.
-/// Text only; image copies stay on the gdk path.
+/// Background clipboard capture via `wl-paste --watch`.
+/// Text copies use `--type text` so images never pollute text history with
+/// raw binary fragments. Image copies use `--type image/png` and are streamed
+/// directly into the content-addressed cache.
 pub(crate) fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshicast>>) {
     if !launcher.borrow().clipboard_history_enabled() {
         return;
     }
 
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
-    std::thread::spawn(move || watch_clipboard_text(tx));
+    let (tx_text, rx_text) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || watch_clipboard_text(tx_text));
+
+    let (tx_img, rx_img) = std::sync::mpsc::channel::<String>();
+    if launcher.borrow().clipboard_capture_images() {
+        std::thread::spawn(move || watch_clipboard_image(tx_img));
+    }
 
     let launcher = Rc::clone(launcher);
     glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
-        while let Ok(text) = rx.try_recv() {
-            if let Err(error) = launcher.borrow_mut().add_clipboard_text(&text) {
+        while let Ok(text) = rx_text.try_recv() {
+            if !text.is_empty()
+                && let Err(error) = launcher.borrow_mut().add_clipboard_text(&text)
+            {
                 eprintln!("failed to save clipboard history: {error}");
+            }
+        }
+        while let Ok(path) = rx_img.try_recv() {
+            if !path.is_empty()
+                && let Err(error) = launcher.borrow_mut().add_clipboard_image(&path)
+            {
+                eprintln!("failed to save clipboard image: {error}");
             }
         }
         glib::ControlFlow::Continue
@@ -55,11 +66,105 @@ pub(crate) fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshica
 fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
     watch_clipboard_text_with(tx, || {
         std::process::Command::new("wl-paste")
-            .args(["--watch", "sh", "-c", "cat; printf '\\0'"])
+            .args(["--type", "text", "--watch", "sh", "-c", "cat; printf '\\0'"])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .spawn()
     })
+}
+
+fn watch_clipboard_image(tx: std::sync::mpsc::Sender<String>) {
+    watch_clipboard_image_with(tx, || {
+        std::process::Command::new("wl-paste")
+            .args(["--type", "image/png", "--watch", "cat"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+    })
+}
+
+pub(crate) fn watch_clipboard_image_with(
+    tx: std::sync::mpsc::Sender<String>,
+    mut spawn: impl FnMut() -> std::io::Result<std::process::Child>,
+) {
+    loop {
+        let mut child = match spawn() {
+            Ok(child) => child,
+            Err(_) => return,
+        };
+        let Some(stdout) = child.stdout.take() else {
+            return;
+        };
+
+        let mut reader = std::io::BufReader::new(stdout);
+        while let Ok(Some(png_bytes)) = read_png_from_stream(&mut reader) {
+            if let Ok(path) = crate::save_clipboard_image(&png_bytes)
+                && tx.send(path).is_err()
+            {
+                return;
+            }
+        }
+
+        let _ = child.kill();
+        let _ = child.wait();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if tx.send(String::new()).is_err() {
+            return;
+        }
+    }
+}
+
+pub(crate) fn read_png_from_stream<R: std::io::Read>(
+    reader: &mut R,
+) -> std::io::Result<Option<Vec<u8>>> {
+    let mut sig = [0u8; 8];
+    match reader.read_exact(&mut sig) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
+    }
+
+    const PNG_SIG: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+    if sig != PNG_SIG {
+        return Ok(None);
+    }
+
+    let mut data = Vec::with_capacity(65536);
+    data.extend_from_slice(&sig);
+
+    const MAX_IMAGE_BYTES: usize = 50 * 1024 * 1024; // 50 MB safety cap
+
+    loop {
+        let mut chunk_header = [0u8; 8];
+        match reader.read_exact(&mut chunk_header) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(e) => return Err(e),
+        }
+        let chunk_len = u32::from_be_bytes([
+            chunk_header[0],
+            chunk_header[1],
+            chunk_header[2],
+            chunk_header[3],
+        ]) as usize;
+        let is_iend = &chunk_header[4..8] == b"IEND";
+
+        data.extend_from_slice(&chunk_header);
+
+        if data.len() + chunk_len + 4 > MAX_IMAGE_BYTES {
+            return Err(std::io::Error::other("image exceeded maximum size"));
+        }
+
+        let old_len = data.len();
+        data.resize(old_len + chunk_len + 4, 0);
+        reader.read_exact(&mut data[old_len..])?;
+
+        if is_iend {
+            break;
+        }
+    }
+
+    Ok(Some(data))
 }
 
 pub(crate) fn watch_clipboard_text_with(
@@ -151,6 +256,16 @@ pub(crate) fn decode_clipboard_text(bytes: &[u8]) -> Option<String> {
     if text.trim().is_empty() {
         return None;
     }
+    // Reject image/binary magic headers and PNG chunk identifiers as defense in depth
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"\xff\xd8\xff")
+        || bytes.starts_with(b"GIF8")
+        || bytes.starts_with(b"RIFF")
+        || bytes == b"IHDR"
+        || bytes == b"IEND"
+    {
+        return None;
+    }
     if text
         .chars()
         .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
@@ -186,7 +301,6 @@ fn capture_clipboard_image(
     launcher: &Rc<RefCell<Zeshicast>>,
     last: &Rc<RefCell<Option<String>>>,
 ) {
-    use std::hash::{Hash, Hasher};
     if !launcher.borrow().clipboard_capture_images() {
         return;
     }
@@ -198,36 +312,10 @@ fn capture_clipboard_image(
             return;
         };
         let png = texture.save_to_png_bytes();
-        let bytes: &[u8] = &png;
+        let Ok(path_str) = crate::save_clipboard_image(png.as_ref()) else {
+            return;
+        };
 
-        // Content-addressed cache file so identical images dedupe naturally.
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        bytes.hash(&mut hasher);
-        let dir = crate::clipboard_cache_dir();
-        let path = dir.join(format!("{:016x}.png", hasher.finish()));
-        if !path.exists() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if std::fs::create_dir_all(&dir).is_err()
-                    || std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
-                        .is_err()
-                {
-                    return;
-                }
-            }
-            #[cfg(not(unix))]
-            if std::fs::create_dir_all(&dir).is_err() {
-                return;
-            }
-            // Same 0o600 contract as other persisted files (config.rs
-            // write_file_atomic): cached clipboard images may hold secrets.
-            if crate::write_file_atomic(&path, bytes, 0o600).is_err() {
-                return;
-            }
-        }
-
-        let path_str = path.to_string_lossy().into_owned();
         let value = format!("{}{}", crate::CLIPBOARD_IMAGE_PREFIX, path_str);
         if last.borrow().as_deref() == Some(value.as_str()) {
             return;

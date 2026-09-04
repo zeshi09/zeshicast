@@ -111,14 +111,29 @@ pub(crate) fn search_clipboard(entries: &[String], query: &str, explicit: bool) 
             .take(6)
             .enumerate()
             .map(|(index, entry)| {
+                let is_image = crate::clipboard_image_path(entry).is_some();
+                let title = if is_image {
+                    "Image".to_string()
+                } else {
+                    clipboard_preview(entry)
+                };
+                let icon = if is_image {
+                    "image-x-generic-symbolic"
+                } else {
+                    "edit-paste-symbolic"
+                };
                 Action::new(
                     "Clipboard",
-                    clipboard_preview(entry),
+                    title,
                     ActionKind::Copy(entry.clone()),
                     220 - index as i32,
                 )
-                .with_subtitle("Copy clipboard history item")
-                .with_icon("edit-paste-symbolic")
+                .with_subtitle(if is_image {
+                    "Copy image from clipboard history"
+                } else {
+                    "Copy clipboard history item"
+                })
+                .with_icon(icon)
             })
             .collect();
     }
@@ -127,16 +142,35 @@ pub(crate) fn search_clipboard(entries: &[String], query: &str, explicit: bool) 
         .iter()
         .enumerate()
         .filter_map(|(index, entry)| {
-            let score = fuzzy_score(entry, query)?;
+            let is_image = crate::clipboard_image_path(entry).is_some();
+            let score = if is_image {
+                fuzzy_score("image png screenshot", query)?
+            } else {
+                fuzzy_score(entry, query)?
+            };
+            let title = if is_image {
+                "Image".to_string()
+            } else {
+                clipboard_preview(entry)
+            };
+            let icon = if is_image {
+                "image-x-generic-symbolic"
+            } else {
+                "edit-paste-symbolic"
+            };
             Some(
                 Action::new(
                     "Clipboard",
-                    clipboard_preview(entry),
+                    title,
                     ActionKind::Copy(entry.clone()),
                     score + if explicit { 120 } else { 35 } - index as i32,
                 )
-                .with_subtitle("Copy clipboard history item")
-                .with_icon("edit-paste-symbolic"),
+                .with_subtitle(if is_image {
+                    "Copy image from clipboard history"
+                } else {
+                    "Copy clipboard history item"
+                })
+                .with_icon(icon),
             )
         })
         .collect::<Vec<_>>();

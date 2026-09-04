@@ -604,6 +604,15 @@ fn spawn_command(command: &ProcessCommand) {
 }
 
 fn copy_to_clipboard(text: &str) {
+    if let Some(path) = crate::clipboard_image_path(text) {
+        if crate::copy_clipboard_image(path) {
+            println!("copied image to clipboard");
+        } else {
+            eprintln!("copy failed; install wl-clipboard or xclip to copy images");
+        }
+        return;
+    }
+
     let copied =
         copy_with("wl-copy", &[], text) || copy_with("xclip", &["-selection", "clipboard"], text);
 

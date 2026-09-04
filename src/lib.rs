@@ -20,7 +20,8 @@ pub(crate) use action::{
 pub(crate) use action::{ExecutionRequest, run_execution_request};
 pub use app::{
     CLIPBOARD_IMAGE_PREFIX, CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary,
-    SnippetSummary, Zeshicast, clipboard_cache_dir, clipboard_image_path,
+    SnippetSummary, Zeshicast, clipboard_cache_dir, clipboard_image_path, copy_clipboard_image,
+    save_clipboard_image,
 };
 pub(crate) use config::{
     append_alias, home_dir, load_aliases, load_frequencies, load_lines, load_preferences,
@@ -183,6 +184,20 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].category, "Clipboard");
         assert_eq!(results[0].value(), "alpha beta");
+    }
+
+    #[test]
+    fn clipboard_search_formats_image_actions_cleanly() {
+        let image_entry = format!("{}~/.cache/zeshicast/clipboard/test.png", CLIPBOARD_IMAGE_PREFIX);
+        let results = search_clipboard(std::slice::from_ref(&image_entry), "", true);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Image");
+        assert_eq!(results[0].icon_name, "image-x-generic-symbolic");
+        assert_eq!(results[0].value(), image_entry);
+
+        let query_results = search_clipboard(&[image_entry], "png", true);
+        assert_eq!(query_results.len(), 1);
+        assert_eq!(query_results[0].title, "Image");
     }
 
     #[test]

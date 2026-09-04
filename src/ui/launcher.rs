@@ -1504,6 +1504,7 @@ fn selected_clipboard_filter(view: &crate::ui::ClipboardHistoryView) -> Clipboar
         2 => ClipboardFilter::Kind(ClipboardKind::Url),
         3 => ClipboardFilter::Kind(ClipboardKind::Command),
         4 => ClipboardFilter::Kind(ClipboardKind::Code),
+        5 => ClipboardFilter::Kind(ClipboardKind::Image),
         _ => ClipboardFilter::All,
     }
 }
@@ -1618,27 +1619,10 @@ pub(crate) fn copy_clipboard_row(
     let index = row.index() as usize;
     if let Some(item) = clipboard_items.borrow().get(index) {
         if let Some(path) = crate::clipboard_image_path(&item.value) {
-            copy_clipboard_image(path);
+            crate::copy_clipboard_image(path);
         } else {
             crate::copy_text(&item.value);
         }
-    }
-}
-
-/// Put a cached image back on the clipboard as `image/png` (wl-clipboard, with
-/// an xclip fallback) — copying the sentinel string would be useless.
-fn copy_clipboard_image(path: &str) {
-    let spawned = std::fs::File::open(path).ok().and_then(|file| {
-        std::process::Command::new("wl-copy")
-            .args(["--type", "image/png"])
-            .stdin(std::process::Stdio::from(file))
-            .spawn()
-            .ok()
-    });
-    if spawned.is_none() {
-        let _ = std::process::Command::new("xclip")
-            .args(["-selection", "clipboard", "-t", "image/png", "-i", path])
-            .spawn();
     }
 }
 
@@ -2550,7 +2534,8 @@ mod tests {
     use super::{
         ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, ScriptCaptureOutcome,
         action_panel_display_items, action_panel_display_rows, decode_clipboard_text,
-        run_script_capture, secondary_action_risk, watch_clipboard_text_with,
+        read_png_from_stream, run_script_capture, secondary_action_risk,
+        watch_clipboard_text_with,
     };
     use crate::{
         Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
@@ -2712,6 +2697,46 @@ mod tests {
         assert!(decode_clipboard_text(&[0xff, 0xfe, 0x00]).is_none());
         // Valid UTF-8 but carrying binary control bytes.
         assert!(decode_clipboard_text(b"PNG\x01\x02data").is_none());
+        // Valid UTF-8 carrying PNG chunk identifiers or magic headers
+        assert!(decode_clipboard_text(b"IHDR").is_none());
+        assert!(decode_clipboard_text(b"IEND").is_none());
+        assert!(decode_clipboard_text(b"\x89PNG\r\n\x1a\n").is_none());
+        assert!(decode_clipboard_text(b"\xff\xd8\xff\xe0").is_none());
+        assert!(decode_clipboard_text(b"GIF89a").is_none());
+    }
+
+    #[test]
+    fn png_stream_parser_reads_complete_png() {
+        // Minimal valid 1x1 RGBA PNG (67 bytes)
+        let png_1x1: &[u8] = &[
+            137, 80, 78, 71, 13, 10, 26, 10, // signature
+            0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 99, 52, // IHDR
+            0, 0, 0, 10, 73, 68, 65, 84, 120, 156, 99, 0, 1, 0, 0, 5, 0, 1, 13, 10, 45, 180, // IDAT
+            0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130, // IEND
+        ];
+
+        // 1. Valid stream reads exact bytes
+        let mut cursor = std::io::Cursor::new(png_1x1);
+        let parsed = read_png_from_stream(&mut cursor).unwrap();
+        assert_eq!(parsed.as_deref(), Some(png_1x1));
+
+        // 2. Trailing data after IEND remains unconsumed in stream
+        let mut with_trailing = png_1x1.to_vec();
+        with_trailing.extend_from_slice(b"extra non-png data");
+        let mut cursor = std::io::Cursor::new(with_trailing);
+        let parsed = read_png_from_stream(&mut cursor).unwrap();
+        assert_eq!(parsed.as_deref(), Some(png_1x1));
+        let mut rest = Vec::new();
+        std::io::Read::read_to_end(&mut cursor, &mut rest).unwrap();
+        assert_eq!(rest, b"extra non-png data");
+
+        // 3. Non-PNG stream returns Ok(None) without panicking
+        let mut invalid = std::io::Cursor::new(b"not a png signature at all");
+        assert!(read_png_from_stream(&mut invalid).unwrap().is_none());
+
+        // 4. Empty stream returns Ok(None)
+        let mut empty = std::io::Cursor::new(b"");
+        assert!(read_png_from_stream(&mut empty).unwrap().is_none());
     }
 
     #[test]

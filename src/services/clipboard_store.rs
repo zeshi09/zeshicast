@@ -245,3 +245,46 @@ pub fn classify_clipboard_text(text: &str) -> ClipboardKind {
 
     ClipboardKind::Text
 }
+
+/// Save a PNG byte slice to the cache directory as content-addressed `<hash>.png`.
+/// Returns the absolute path string to the cached image.
+pub fn save_clipboard_image(bytes: &[u8]) -> io::Result<String> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let dir = clipboard_cache_dir();
+    let path = dir.join(format!("{:016x}.png", hasher.finish()));
+    if !path.exists() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(()) = fs::create_dir_all(&dir) {
+                let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = fs::create_dir_all(&dir);
+
+        crate::write_file_atomic(&path, bytes, 0o600)?;
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Put a cached image back on the clipboard as `image/png` (wl-clipboard, with
+/// an xclip fallback).
+pub fn copy_clipboard_image(path: &str) -> bool {
+    let spawned = fs::File::open(path).ok().and_then(|file| {
+        std::process::Command::new("wl-copy")
+            .args(["--type", "image/png"])
+            .stdin(std::process::Stdio::from(file))
+            .spawn()
+            .ok()
+    });
+    if let Some(mut child) = spawned {
+        return child.wait().is_ok();
+    }
+    std::process::Command::new("xclip")
+        .args(["-selection", "clipboard", "-t", "image/png", "-i", path])
+        .spawn()
+        .is_ok()
+}
