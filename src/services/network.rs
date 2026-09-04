@@ -194,6 +194,12 @@ fn parse_ip_addr_line(line: &str) -> Option<(String, String)> {
 }
 
 fn read_wifi_networks() -> io::Result<Vec<WifiNetworkSnapshot>> {
+    #[cfg(feature = "gui")]
+    {
+        if let Some(networks) = nm_dbus::read_wifi_networks() {
+            return Ok(networks);
+        }
+    }
     let output = command_stdout(
         "nmcli",
         &[
@@ -278,6 +284,12 @@ fn parse_nmcli_wifi_list(output: &str) -> Vec<WifiNetworkSnapshot> {
 }
 
 fn read_vpn_connections() -> io::Result<Vec<VpnConnectionSnapshot>> {
+    #[cfg(feature = "gui")]
+    {
+        if let Some(connections) = nm_dbus::read_vpn_connections() {
+            return Ok(connections);
+        }
+    }
     let output = command_stdout(
         "nmcli",
         &["-t", "-f", "NAME,TYPE", "connection", "show", "--active"],
@@ -318,6 +330,247 @@ fn parse_resolv_conf_nameservers(contents: &str) -> Vec<String> {
             parts.next().map(str::to_string)
         })
         .collect()
+}
+
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn parse_security_flags(flags: u32, wpa_flags: u32, rsn_flags: u32) -> Option<String> {
+    if (rsn_flags & 0x400) != 0 {
+        Some("WPA3".to_string())
+    } else if rsn_flags != 0 {
+        Some("WPA2".to_string())
+    } else if wpa_flags != 0 {
+        Some("WPA1".to_string())
+    } else if (flags & 1) != 0 {
+        Some("WEP".to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "gui")]
+mod nm_dbus {
+    use std::collections::HashMap;
+
+    use gtk::gio;
+    use gtk::glib::{self, variant::ToVariant};
+
+    use super::{VpnConnectionSnapshot, WifiNetworkSnapshot, parse_security_flags};
+
+    const NM_DEST: &str = "org.freedesktop.NetworkManager";
+    const NM_PATH: &str = "/org/freedesktop/NetworkManager";
+    const NM_IFACE: &str = "org.freedesktop.NetworkManager";
+    const PROPS_IFACE: &str = "org.freedesktop.DBus.Properties";
+    const DEVICE_IFACE: &str = "org.freedesktop.NetworkManager.Device";
+    const WIRELESS_IFACE: &str = "org.freedesktop.NetworkManager.Device.Wireless";
+    const AP_IFACE: &str = "org.freedesktop.NetworkManager.AccessPoint";
+    const ACTIVE_CONN_IFACE: &str = "org.freedesktop.NetworkManager.Connection.Active";
+
+    fn system_bus() -> Option<gio::DBusConnection> {
+        gio::bus_get_sync(gio::BusType::System, gio::Cancellable::NONE).ok()
+    }
+
+    fn get_prop(
+        conn: &gio::DBusConnection,
+        dest: &str,
+        path: &str,
+        iface: &str,
+        prop: &str,
+    ) -> Option<glib::Variant> {
+        let params = (iface, prop).to_variant();
+        let reply = conn
+            .call_sync(
+                Some(dest),
+                path,
+                PROPS_IFACE,
+                "Get",
+                Some(&params),
+                None,
+                gio::DBusCallFlags::NONE,
+                1000,
+                gio::Cancellable::NONE,
+            )
+            .ok()?;
+        reply.child_value(0).as_variant()
+    }
+
+    fn get_all_props(
+        conn: &gio::DBusConnection,
+        dest: &str,
+        path: &str,
+        iface: &str,
+    ) -> Option<HashMap<String, glib::Variant>> {
+        let params = (iface,).to_variant();
+        let reply = conn
+            .call_sync(
+                Some(dest),
+                path,
+                PROPS_IFACE,
+                "GetAll",
+                Some(&params),
+                None,
+                gio::DBusCallFlags::NONE,
+                1000,
+                gio::Cancellable::NONE,
+            )
+            .ok()?;
+        let dict = reply.child_value(0);
+        let mut map = HashMap::new();
+        for i in 0..dict.n_children() {
+            let entry = dict.child_value(i);
+            if let Some(key) = entry.child_value(0).str()
+                && let Some(val) = entry.child_value(1).as_variant()
+            {
+                map.insert(key.to_string(), val);
+            }
+        }
+        Some(map)
+    }
+
+    pub fn read_vpn_connections() -> Option<Vec<VpnConnectionSnapshot>> {
+        let conn = system_bus()?;
+        let active_conns_variant =
+            get_prop(&conn, NM_DEST, NM_PATH, NM_IFACE, "ActiveConnections")?;
+        let mut vpns = Vec::new();
+
+        for i in 0..active_conns_variant.n_children() {
+            let path_var = active_conns_variant.child_value(i);
+            let Some(path) = path_var.str() else {
+                continue;
+            };
+            let props = match get_all_props(&conn, NM_DEST, path, ACTIVE_CONN_IFACE) {
+                Some(p) => p,
+                None => continue,
+            };
+            let name = props
+                .get("Id")
+                .and_then(|v| v.str())
+                .unwrap_or_default()
+                .to_string();
+            let mut kind = props
+                .get("Type")
+                .and_then(|v| v.str())
+                .unwrap_or_default()
+                .to_string();
+            let is_vpn = props
+                .get("Vpn")
+                .and_then(|v| v.get::<bool>())
+                .unwrap_or(false);
+
+            if is_vpn || kind == "vpn" || kind == "wireguard" {
+                if is_vpn && kind != "wireguard" && kind != "vpn" {
+                    kind = "vpn".to_string();
+                }
+                vpns.push(VpnConnectionSnapshot { name, kind });
+            }
+        }
+
+        Some(vpns)
+    }
+
+    pub fn read_wifi_networks() -> Option<Vec<WifiNetworkSnapshot>> {
+        let conn = system_bus()?;
+        let devices_variant = get_prop(&conn, NM_DEST, NM_PATH, NM_IFACE, "Devices")?;
+        let mut networks = Vec::new();
+
+        for i in 0..devices_variant.n_children() {
+            let dev_var = devices_variant.child_value(i);
+            let Some(dev_path) = dev_var.str() else {
+                continue;
+            };
+            let dev_type = get_prop(&conn, NM_DEST, dev_path, DEVICE_IFACE, "DeviceType")
+                .and_then(|v| v.get::<u32>());
+            if dev_type != Some(2) {
+                continue;
+            }
+
+            let active_ap_path =
+                get_prop(&conn, NM_DEST, dev_path, WIRELESS_IFACE, "ActiveAccessPoint")
+                    .and_then(|v| v.str().map(str::to_string));
+
+            let ap_list_var = conn
+                .call_sync(
+                    Some(NM_DEST),
+                    dev_path,
+                    WIRELESS_IFACE,
+                    "GetAllAccessPoints",
+                    None,
+                    None,
+                    gio::DBusCallFlags::NONE,
+                    1000,
+                    gio::Cancellable::NONE,
+                )
+                .ok()
+                .map(|reply| reply.child_value(0))
+                .or_else(|| get_prop(&conn, NM_DEST, dev_path, WIRELESS_IFACE, "AccessPoints"))?;
+
+            for j in 0..ap_list_var.n_children() {
+                let ap_var = ap_list_var.child_value(j);
+                let Some(ap_path) = ap_var.str() else {
+                    continue;
+                };
+                let props = match get_all_props(&conn, NM_DEST, ap_path, AP_IFACE) {
+                    Some(p) => p,
+                    None => continue,
+                };
+
+                let ssid = props
+                    .get("Ssid")
+                    .map(|val| {
+                        let bytes: Vec<u8> = (0..val.n_children())
+                            .filter_map(|k| val.child_value(k).get::<u8>())
+                            .collect();
+                        String::from_utf8_lossy(&bytes).trim().to_string()
+                    })
+                    .unwrap_or_default();
+                if ssid.is_empty() {
+                    continue;
+                }
+
+                let signal_percent = props
+                    .get("Strength")
+                    .and_then(|v| v.get::<u8>())
+                    .filter(|&v| v <= 100);
+                let flags = props.get("Flags").and_then(|v| v.get::<u32>()).unwrap_or(0);
+                let wpa_flags = props
+                    .get("WpaFlags")
+                    .and_then(|v| v.get::<u32>())
+                    .unwrap_or(0);
+                let rsn_flags = props
+                    .get("RsnFlags")
+                    .and_then(|v| v.get::<u32>())
+                    .unwrap_or(0);
+                let security = parse_security_flags(flags, wpa_flags, rsn_flags);
+                let active = active_ap_path.as_deref() == Some(ap_path);
+
+                if let Some(existing) = networks.iter_mut().find(|n: &&mut WifiNetworkSnapshot| n.ssid == ssid) {
+                    existing.active |= active;
+                    if signal_percent.unwrap_or(0) > existing.signal_percent.unwrap_or(0) {
+                        existing.signal_percent = signal_percent;
+                    }
+                    if existing.security.is_none() {
+                        existing.security = security;
+                    }
+                    continue;
+                }
+
+                networks.push(WifiNetworkSnapshot {
+                    ssid,
+                    signal_percent,
+                    security,
+                    active,
+                });
+            }
+        }
+
+        networks.sort_by(|a, b| {
+            b.active.cmp(&a.active).then(
+                b.signal_percent
+                    .unwrap_or(0)
+                    .cmp(&a.signal_percent.unwrap_or(0)),
+            )
+        });
+        Some(networks)
+    }
 }
 
 #[cfg(test)]
@@ -411,5 +664,29 @@ nameserver 2001:4860:4860::8888
             servers,
             vec!["1.1.1.1".to_string(), "2001:4860:4860::8888".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_security_flags_identifies_wpa_versions() {
+        assert_eq!(parse_security_flags(0, 0, 0x400), Some("WPA3".to_string()));
+        assert_eq!(parse_security_flags(3, 0, 392), Some("WPA2".to_string()));
+        assert_eq!(parse_security_flags(0, 1, 0), Some("WPA1".to_string()));
+        assert_eq!(parse_security_flags(1, 0, 0), Some("WEP".to_string()));
+        assert_eq!(parse_security_flags(0, 0, 0), None);
+    }
+
+    #[test]
+    fn network_snapshot_produces_consistent_results() {
+        let snapshot = network_snapshot();
+        for iface in &snapshot.interfaces {
+            assert!(!iface.name.is_empty());
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "gui")]
+    fn nm_dbus_queries_without_panic() {
+        let _ = nm_dbus::read_vpn_connections();
+        let _ = nm_dbus::read_wifi_networks();
     }
 }
