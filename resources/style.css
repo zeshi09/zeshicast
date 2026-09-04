@@ -8,6 +8,18 @@
 .process-name,
 .ip-addr { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
 
+.dashboard-clock,
+.metric-value,
+.status-time,
+.hotkey-badge,
+.process-mem,
+.ip-addr,
+.mono,
+.result-counter,
+.stat-chip label {
+  font-feature-settings: "tnum" 1;
+}
+
 /* GTK theme paints window {} opaque by default — override so our
    border-radius corners are truly transparent on the compositor */
 window { background-color: transparent; }
@@ -104,6 +116,10 @@ entry.search-entry:focus {
   outline: none;
   padding: 0 4px;
   min-height: 36px;
+}
+
+entry placeholder {
+  color: alpha(@window_fg_color, 0.350);
 }
 
 entry, entry:focus, entry:focus-visible {
@@ -398,6 +414,16 @@ entry, entry:focus, entry:focus-visible {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   color: alpha(@window_fg_color, 0.380);
   letter-spacing: 0.010em;
+  transition: color 80ms ease, background 80ms ease, border-color 80ms ease;
+}
+
+.result-row:selected .hotkey-badge,
+.result-row.selected .hotkey-badge,
+.action-row:selected .hotkey-badge,
+.action-row.selected .hotkey-badge {
+  background: alpha(@window_fg_color, 0.090);
+  border-color: alpha(@window_fg_color, 0.160);
+  color: alpha(@window_fg_color, 0.650);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -419,13 +445,17 @@ entry, entry:focus, entry:focus-visible {
   border: 1px solid transparent;
   color: alpha(@window_fg_color, 0.280);
   font-size: 13px;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 60ms ease;
 }
 
 .action-bar-btn:hover {
   background: alpha(@window_fg_color, 0.055);
   border-color: alpha(@window_fg_color, 0.080);
   color: alpha(@window_fg_color, 0.550);
+}
+
+.action-bar-btn:active {
+  transform: scale(0.96);
 }
 
 .action-bar-more {
@@ -437,13 +467,17 @@ entry, entry:focus, entry:focus-visible {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.010em;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 60ms ease;
 }
 
 .action-bar-more:hover {
   background: alpha(@window_fg_color, 0.055);
   border-color: alpha(@window_fg_color, 0.080);
   color: alpha(@window_fg_color, 0.550);
+}
+
+.action-bar-more:active {
+  transform: scale(0.96);
 }
 
 .result-counter {
