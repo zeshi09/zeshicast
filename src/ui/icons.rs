@@ -8,6 +8,7 @@ pub fn fa_glyph(icon_name: &str) -> &'static str {
         "system-run-symbolic" | "application-x-executable-symbolic" => "\u{f144}", // circle-play
         "utilities-terminal-symbolic" => "\u{f120}",                               // terminal
         "applications-engineering-symbolic" => "\u{f121}",                         // code
+        "window-symbolic" | "preferences-system-windows-symbolic" => "\u{f2d0}",   // window-maximize
 
         // Files / folders
         "folder-symbolic" => "\u{f07b}",

@@ -255,6 +255,7 @@ pub(crate) fn layout_short_code(name: &str) -> String {
         .to_lowercase()
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowSnapPosition {
     LeftHalf,
@@ -274,6 +275,7 @@ pub enum WindowSnapPosition {
     RightTwoThirds,
 }
 
+#[allow(dead_code)]
 pub fn snap_window(pos: WindowSnapPosition) -> bool {
     snap_niri(pos)
         .or_else(|| snap_hyprland(pos))

@@ -2233,8 +2233,16 @@ fn run_action_or_confirm(
     action: Action,
 ) {
     if !action.risk.requires_confirmation() {
-        launcher.borrow_mut().run_action(&action);
         finish_interaction(window, hold);
+        if action.category == "Window" {
+            let action_clone = action.clone();
+            let launcher_clone = Rc::clone(launcher);
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
+                launcher_clone.borrow_mut().run_action(&action_clone);
+            });
+        } else {
+            launcher.borrow_mut().run_action(&action);
+        }
         return;
     }
 
@@ -2244,8 +2252,16 @@ fn run_action_or_confirm(
     let hold = Rc::clone(hold);
     let finish_window = window.clone();
     crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
-        launcher.borrow_mut().run_action_confirmed(&action);
         finish_interaction(&finish_window, &hold);
+        if action.category == "Window" {
+            let action_clone = action.clone();
+            let launcher_clone = Rc::clone(&launcher);
+            gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
+                launcher_clone.borrow_mut().run_action_confirmed(&action_clone);
+            });
+        } else {
+            launcher.borrow_mut().run_action_confirmed(&action);
+        }
     });
 }
 

@@ -357,40 +357,49 @@ fn sway_action_entries() -> Vec<SystemActionEntry> {
     ]
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WindowSearchQuery {
+    Explicit(String),
+    Global(String),
+}
+
+pub(crate) fn parse_window_query(query: &str) -> Option<WindowSearchQuery> {
+    let trimmed = query.trim();
+    let lower = trimmed.to_lowercase();
+    if let Some(rest) = lower
+        .strip_prefix("windows ")
+        .or_else(|| lower.strip_prefix("window "))
+        .or_else(|| lower.strip_prefix("win "))
+    {
+        Some(WindowSearchQuery::Explicit(rest.trim().to_string()))
+    } else if lower == "win" || lower == "window" || lower == "windows" {
+        Some(WindowSearchQuery::Explicit(String::new()))
+    } else if trimmed.len() >= 2 {
+        Some(WindowSearchQuery::Global(trimmed.to_string()))
+    } else {
+        None
+    }
+}
+
 pub(crate) fn search_windows(query: &str) -> Vec<Action> {
-    let Some(needle) = window_query_needle(query) else {
+    let Some(search_mode) = parse_window_query(query) else {
         return Vec::new();
     };
 
     if let Some(snapshot) = fresh_window_snapshot() {
-        return window_snapshot_actions(&snapshot, &needle);
+        return window_snapshot_actions(&snapshot, &search_mode);
     }
 
     let Some(snapshot) = load_window_snapshot() else {
         return stale_window_snapshot()
-            .map(|snapshot| window_snapshot_actions(&snapshot, &needle))
+            .map(|snapshot| window_snapshot_actions(&snapshot, &search_mode))
             .unwrap_or_default();
     };
 
     if let Ok(mut cached) = window_snapshot_cache().lock() {
         *cached = Some(snapshot.clone());
     }
-    window_snapshot_actions(&snapshot, &needle)
-}
-
-fn window_query_needle(query: &str) -> Option<String> {
-    let lower = query.trim().to_lowercase();
-    if let Some(rest) = lower
-        .strip_prefix("windows ")
-        .or_else(|| lower.strip_prefix("window "))
-        .or_else(|| lower.strip_prefix("win "))
-    {
-        Some(rest.trim().to_string())
-    } else if lower == "win" || lower == "window" || lower == "windows" {
-        Some(String::new())
-    } else {
-        None
-    }
+    window_snapshot_actions(&snapshot, &search_mode)
 }
 
 fn fresh_window_snapshot() -> Option<WindowSnapshot> {
@@ -452,7 +461,7 @@ fn window_backend_candidates_from_env(env: &HashMap<String, String>) -> Vec<Wind
 
 fn load_backend_snapshot(backend: WindowBackend) -> Option<WindowSnapshot> {
     let windows = match backend {
-        WindowBackend::Niri => command_json_value("niri", &["msg", "windows"])
+        WindowBackend::Niri => command_json_value("niri", &["msg", "--json", "windows"])
             .and_then(|value| value.as_array().cloned())?,
         WindowBackend::Hyprland => command_json_value("hyprctl", &["clients", "-j"])
             .and_then(|value| value.as_array().cloned())?,
@@ -507,29 +516,43 @@ fn command_output_with_timeout(
     }
 }
 
-fn window_snapshot_actions(snapshot: &WindowSnapshot, needle: &str) -> Vec<Action> {
+fn window_snapshot_actions(snapshot: &WindowSnapshot, mode: &WindowSearchQuery) -> Vec<Action> {
+    let (needle, is_explicit) = match mode {
+        WindowSearchQuery::Explicit(n) => (n.as_str(), true),
+        WindowSearchQuery::Global(n) => (n.as_str(), false),
+    };
     match snapshot.backend {
-        WindowBackend::Niri => niri_window_actions(&snapshot.windows, needle),
-        WindowBackend::Hyprland => hyprland_window_actions(&snapshot.windows, needle),
+        WindowBackend::Niri => niri_window_actions(&snapshot.windows, needle, is_explicit),
+        WindowBackend::Hyprland => hyprland_window_actions(&snapshot.windows, needle, is_explicit),
         WindowBackend::Sway => {
             let windows = snapshot.windows.iter().collect::<Vec<_>>();
-            sway_window_actions(&windows, needle)
+            sway_window_actions(&windows, needle, is_explicit)
         }
     }
 }
-fn niri_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Action> {
+
+fn niri_window_actions(
+    windows: &[serde_json::Value],
+    needle: &str,
+    is_explicit: bool,
+) -> Vec<Action> {
     windows
         .iter()
         .filter_map(|w| {
-            let id = w.get("id")?.as_u64()?;
-            let title = w.get("title")?.as_str().unwrap_or("(no title)");
-            let app_id = w.get("app_id")?.as_str().unwrap_or("");
+            let id = w.get("id").and_then(|v| v.as_u64())?;
+            let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("(no title)");
+            let app_id = w.get("app_id").and_then(|v| v.as_str()).unwrap_or("");
             let haystack = format!("{title} {app_id}");
             let score = if needle.is_empty() {
                 Some(0)
             } else {
                 fuzzy_score(&haystack, needle)
             }?;
+            let final_score = if is_explicit {
+                score + 280
+            } else {
+                score + 140
+            };
             Some(
                 Action::new(
                     "Window",
@@ -544,7 +567,7 @@ fn niri_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Actio
                             id.to_string(),
                         ],
                     )),
-                    score + 280,
+                    final_score,
                 )
                 .with_subtitle(app_id)
                 .with_icon("window-symbolic"),
@@ -553,19 +576,28 @@ fn niri_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Actio
         .collect()
 }
 
-fn hyprland_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<Action> {
+fn hyprland_window_actions(
+    windows: &[serde_json::Value],
+    needle: &str,
+    is_explicit: bool,
+) -> Vec<Action> {
     windows
         .iter()
         .filter_map(|w| {
-            let addr = w.get("address")?.as_str()?;
-            let title = w.get("title")?.as_str().unwrap_or("(no title)");
-            let class = w.get("class")?.as_str().unwrap_or("");
+            let addr = w.get("address").and_then(|v| v.as_str())?;
+            let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("(no title)");
+            let class = w.get("class").and_then(|v| v.as_str()).unwrap_or("");
             let haystack = format!("{title} {class}");
             let score = if needle.is_empty() {
                 Some(0)
             } else {
                 fuzzy_score(&haystack, needle)
             }?;
+            let final_score = if is_explicit {
+                score + 280
+            } else {
+                score + 140
+            };
             Some(
                 Action::new(
                     "Window",
@@ -578,7 +610,7 @@ fn hyprland_window_actions(windows: &[serde_json::Value], needle: &str) -> Vec<A
                             format!("address:{addr}"),
                         ],
                     )),
-                    score + 280,
+                    final_score,
                 )
                 .with_subtitle(class)
                 .with_icon("window-symbolic"),
@@ -617,12 +649,16 @@ fn collect_sway_windows<'a>(
     }
 }
 
-fn sway_window_actions(windows: &[&serde_json::Value], needle: &str) -> Vec<Action> {
+fn sway_window_actions(
+    windows: &[&serde_json::Value],
+    needle: &str,
+    is_explicit: bool,
+) -> Vec<Action> {
     windows
         .iter()
         .filter_map(|w| {
-            let id = w.get("id")?.as_u64()?;
-            let title = w.get("name")?.as_str().unwrap_or("(no title)");
+            let id = w.get("id").and_then(|v| v.as_u64())?;
+            let title = w.get("name").and_then(|v| v.as_str()).unwrap_or("(no title)");
             let app_id = w.get("app_id").and_then(|v| v.as_str()).unwrap_or("");
             let haystack = format!("{title} {app_id}");
             let score = if needle.is_empty() {
@@ -630,6 +666,11 @@ fn sway_window_actions(windows: &[&serde_json::Value], needle: &str) -> Vec<Acti
             } else {
                 fuzzy_score(&haystack, needle)
             }?;
+            let final_score = if is_explicit {
+                score + 280
+            } else {
+                score + 140
+            };
             Some(
                 Action::new(
                     "Window",
@@ -638,7 +679,7 @@ fn sway_window_actions(windows: &[&serde_json::Value], needle: &str) -> Vec<Acti
                         "swaymsg",
                         vec![format!("[con_id={id}] focus")],
                     )),
-                    score + 280,
+                    final_score,
                 )
                 .with_subtitle(app_id)
                 .with_icon("window-symbolic"),
@@ -652,14 +693,61 @@ mod tests {
     use super::*;
 
     #[test]
-    fn window_query_needle_accepts_window_prefixes() {
+    fn parse_window_query_modes() {
         assert_eq!(
-            window_query_needle("win firefox").as_deref(),
-            Some("firefox")
+            parse_window_query("win firefox"),
+            Some(WindowSearchQuery::Explicit("firefox".to_string()))
         );
-        assert_eq!(window_query_needle("window Code").as_deref(), Some("code"));
-        assert_eq!(window_query_needle("windows").as_deref(), Some(""));
-        assert_eq!(window_query_needle("firefox"), None);
+        assert_eq!(
+            parse_window_query("window Code"),
+            Some(WindowSearchQuery::Explicit("code".to_string()))
+        );
+        assert_eq!(
+            parse_window_query("windows"),
+            Some(WindowSearchQuery::Explicit(String::new()))
+        );
+        assert_eq!(
+            parse_window_query("win"),
+            Some(WindowSearchQuery::Explicit(String::new()))
+        );
+        assert_eq!(
+            parse_window_query("firefox"),
+            Some(WindowSearchQuery::Global("firefox".to_string()))
+        );
+        assert_eq!(parse_window_query("f"), None);
+        assert_eq!(parse_window_query(""), None);
+    }
+
+    #[test]
+    fn test_niri_json_windows_parsing() {
+        let sample_json = r#"[
+            {
+                "id": 42,
+                "title": "Terminal — fish",
+                "app_id": "com.mitchellh.ghostty",
+                "workspace_id": 1,
+                "is_focused": true
+            },
+            {
+                "id": 99,
+                "title": "GitHub — Mozilla Firefox",
+                "app_id": "firefox",
+                "workspace_id": 2,
+                "is_focused": false
+            }
+        ]"#;
+        let windows: Vec<serde_json::Value> = serde_json::from_str(sample_json).unwrap();
+        let actions = niri_window_actions(&windows, "fish", true);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].title, "Terminal — fish");
+        assert_eq!(actions[0].subtitle, "com.mitchellh.ghostty");
+        assert_eq!(actions[0].category, "Window");
+        assert!(actions[0].score >= 280);
+
+        let global_actions = niri_window_actions(&windows, "fire", false);
+        assert_eq!(global_actions.len(), 1);
+        assert_eq!(global_actions[0].title, "GitHub — Mozilla Firefox");
+        assert_eq!(global_actions[0].category, "Window");
     }
 
     #[test]
@@ -694,12 +782,8 @@ mod tests {
 
     #[test]
     fn command_output_with_timeout_stops_slow_process() {
-        // No elapsed-time upper bound here on purpose: asserting a wall-clock
-        // ceiling (e.g. < 500ms) made this test flaky under load. The
-        // contract is only that the slow process is stopped and yields no
-        // output, which `is_none()` already covers.
         let output = command_output_with_timeout("sleep", &["1"], Duration::from_millis(50));
-
         assert!(output.is_none());
     }
 }
+
