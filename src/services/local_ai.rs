@@ -389,6 +389,9 @@ mod tests {
 
             sock.write_all(b"0\r\n\r\n").expect("terminate chunked");
             sock.flush().expect("flush");
+            let _ = sock.shutdown(std::net::Shutdown::Write);
+            let mut drain = Vec::new();
+            let _ = sock.read_to_end(&mut drain);
         });
 
         let config = LocalAiConfig {

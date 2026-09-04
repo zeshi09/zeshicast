@@ -2,6 +2,7 @@ pub mod audio;
 pub mod battery;
 pub mod clipboard_store;
 pub mod compositor;
+pub mod extension_protocol;
 pub mod local_ai;
 pub mod media;
 pub mod network;

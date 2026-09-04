@@ -1,121 +1,29 @@
-use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
-
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::{Action, ActionKind, ActionRisk};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JsonRpcRequest {
-    pub jsonrpc: String,
-    pub id: u64,
-    pub method: String,
-    pub params: Value,
-}
-
-impl JsonRpcRequest {
-    pub fn new(id: u64, method: impl Into<String>, params: Value) -> Self {
-        Self {
-            jsonrpc: "2.0".to_string(),
-            id,
-            method: method.into(),
-            params,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JsonRpcResponse {
-    pub jsonrpc: String,
-    pub id: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JsonRpcError {
-    pub code: i64,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct ExtensionCommandInfo {
-    pub id: String,
-    pub title: String,
-    pub subtitle: Option<String>,
-    pub icon: Option<String>,
-    pub keywords: Option<Vec<String>>,
-}
-
-/// Executes a JSON-RPC 2.0 request against an external executable with stdin/stdout isolation.
-pub fn call_json_rpc(
-    binary_path: &Path,
-    method: &str,
-    params: Value,
-    _timeout_ms: u64,
-) -> Result<Value, String> {
-    let mut child = Command::new(binary_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn {}: {}", binary_path.display(), e))?;
-
-    let request = JsonRpcRequest::new(1, method, params);
-    let request_json = serde_json::to_string(&request)
-        .map_err(|e| format!("Failed to serialize request: {e}"))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        writeln!(stdin, "{}", request_json)
-            .map_err(|e| format!("Failed to write to stdin: {e}"))?;
-    }
-
-    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-
-    // Read the single-line JSON response
-    reader
-        .read_line(&mut line)
-        .map_err(|e| format!("Failed to read response: {e}"))?;
-
-    let response: JsonRpcResponse = serde_json::from_str(line.trim())
-        .map_err(|e| format!("Invalid JSON-RPC response: {e} (got: {line})"))?;
-
-    if let Some(err) = response.error {
-        return Err(format!("RPC error {}: {}", err.code, err.message));
-    }
-
-    response.result.ok_or_else(|| "Empty RPC result".to_string())
-}
+pub use crate::services::extension_protocol::*;
 
 /// Searches an extension via its `search` method over JSON-RPC 2.0.
 pub fn search_extension(binary_path: &Path, extension_name: &str, query: &str) -> Vec<Action> {
-    let params = serde_json::json!({
-        "query": query,
-    });
-
-    let Ok(result) = call_json_rpc(binary_path, "search", params, 400) else {
-        return Vec::new();
-    };
-
-    let Some(items) = result.as_array() else {
+    let Ok(items) = search(binary_path, query, 400) else {
         return Vec::new();
     };
 
     let mut actions = Vec::new();
-    for (i, item) in items.iter().enumerate() {
-        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let subtitle = item.get("subtitle").and_then(|v| v.as_str()).unwrap_or(extension_name).to_string();
-        let icon = item.get("icon").and_then(|v| v.as_str()).unwrap_or("system-run-symbolic").to_string();
-        let cmd_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    for (i, item) in items.into_iter().enumerate() {
+        let title = item.title;
+        let subtitle = item.subtitle.unwrap_or_else(|| extension_name.to_string());
+        let icon = item.icon.unwrap_or_else(|| "system-run-symbolic".to_string());
+        let cmd_id = item.id;
+
+        let kind = if let Some(url) = item.open_url {
+            ActionKind::OpenUrl(url)
+        } else if let Some(text) = item.copy_text {
+            ActionKind::Copy(text)
+        } else {
+            ActionKind::Launch(cmd_id)
+        };
 
         if !title.is_empty() {
             actions.push(Action {
@@ -124,9 +32,9 @@ pub fn search_extension(binary_path: &Path, extension_name: &str, query: &str) -
                 subtitle,
                 icon_name: icon,
                 risk: ActionRisk::Normal,
-                kind: ActionKind::Launch(cmd_id),
+                kind,
                 script_mode: None,
-                score: 80 - (i as i32 * 2),
+                score: item.score.unwrap_or(80 - (i as i32 * 2)),
             });
         }
     }
@@ -176,11 +84,13 @@ mod tests {
             subtitle: Some("Subtitle".to_string()),
             icon: Some("icon".to_string()),
             keywords: Some(vec!["run".to_string(), "task".to_string()]),
+            mode: Some("view".to_string()),
         };
         let serialized = serde_json::to_string(&info).unwrap();
         let deserialized: ExtensionCommandInfo = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.id, "cmd_run");
         assert_eq!(deserialized.title, "Run Task");
+        assert_eq!(deserialized.mode.as_deref(), Some("view"));
     }
 }
 

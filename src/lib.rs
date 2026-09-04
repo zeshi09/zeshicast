@@ -31,6 +31,7 @@ pub(crate) use config::{
 pub use config::{
     export_config_with_options, import_config, load_global_preferences, resolve_include_secrets,
 };
+pub use services::extension_protocol;
 pub(crate) use extensions::{ExtensionManifest, ExtensionOrigin, load_extension_manifests};
 #[cfg(test)]
 pub(crate) use placeholders::format_local_time;
