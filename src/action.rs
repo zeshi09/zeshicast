@@ -479,12 +479,24 @@ pub(crate) fn run_execution_request(request: ExecutionRequest) {
                     copy_to_clipboard(&result);
                 } else {
                     #[cfg(feature = "gui")]
-                    crate::push_notification(
-                        "Zeshicast",
-                        "HTTP Request Failed",
-                        "Check AI or translation endpoint configuration",
-                        0,
-                    );
+                    gtk::glib::idle_add_once(move || {
+                        crate::push_notification(
+                            "Zeshicast",
+                            "HTTP Request Failed",
+                            "Check AI or translation endpoint configuration",
+                            0,
+                        );
+                        if !crate::is_dnd_enabled() {
+                            crate::ui::show_notification_osd(
+                                None,
+                                "Zeshicast",
+                                "HTTP Request Failed",
+                                "Check AI or translation endpoint configuration",
+                                "",
+                                4500,
+                            );
+                        }
+                    });
                     eprintln!("http request failed");
                 }
             });

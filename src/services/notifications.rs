@@ -137,6 +137,11 @@ pub fn toggle_dnd() -> bool {
     })
 }
 
+/// Check whether Do-Not-Disturb is currently enabled.
+pub fn is_dnd_enabled() -> bool {
+    STATE.with(|state| state.borrow().dnd)
+}
+
 /// Marks the D-Bus server as active so the UI reports a working backend.
 pub fn mark_server_active() {
     STATE.with(|state| state.borrow_mut().running = true);
@@ -239,7 +244,12 @@ mod tests {
 
     #[test]
     fn dnd_toggles() {
-        assert!(toggle_dnd());
-        assert!(!toggle_dnd());
+        let initial = is_dnd_enabled();
+        let toggled = toggle_dnd();
+        assert_eq!(toggled, !initial);
+        assert_eq!(is_dnd_enabled(), toggled);
+        let restored = toggle_dnd();
+        assert_eq!(restored, initial);
+        assert_eq!(is_dnd_enabled(), initial);
     }
 }

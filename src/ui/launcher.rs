@@ -2470,7 +2470,21 @@ fn dispatch_script_run(
                 if let ScriptCaptureOutcome::Output(stdout) = outcome {
                     let trimmed = stdout.trim();
                     if !trimmed.is_empty() {
-                        crate::push_notification(&script_title, trimmed, "", 0);
+                        let script_title = script_title.clone();
+                        let text = trimmed.to_string();
+                        glib::idle_add_once(move || {
+                            crate::push_notification(&script_title, &text, "", 0);
+                            if !crate::is_dnd_enabled() {
+                                crate::ui::show_notification_osd(
+                                    None,
+                                    &script_title,
+                                    &text,
+                                    "",
+                                    "",
+                                    4500,
+                                );
+                            }
+                        });
                     }
                 }
             });

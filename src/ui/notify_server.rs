@@ -1,9 +1,10 @@
 //! D-Bus notification server: zeshicast owns `org.freedesktop.Notifications`
 //! and records incoming notifications into the in-process store
 //! (`services::notifications`). No external daemon (swaync/dunst) is involved.
-//! Popups are not (yet) shown — this is history capture only.
+//! Popups are rendered as an on-screen toast in the top-right corner.
 
 use std::cell::RefCell;
+
 
 use gtk::gio;
 use gtk::glib::{self, variant::ToVariant};
@@ -108,14 +109,29 @@ fn handle_method_call(
         "Notify" => {
             let app_name = params.child_value(0).get::<String>().unwrap_or_default();
             let replaces_id = params.child_value(1).get::<u32>().unwrap_or(0);
+            let app_icon = params.child_value(2).get::<String>().unwrap_or_default();
             let summary = params.child_value(3).get::<String>().unwrap_or_default();
             let body = params.child_value(4).get::<String>().unwrap_or_default();
+            let expire_timeout = params.child_value(7).get::<i32>().unwrap_or(-1);
             let id = crate::push_notification(&app_name, &summary, &body, replaces_id);
+
+            if !crate::is_dnd_enabled() {
+                super::osd::show_notification_osd(
+                    None,
+                    &app_name,
+                    &summary,
+                    &body,
+                    &app_icon,
+                    expire_timeout,
+                );
+            }
+
             invocation.return_value(Some(&(id,).to_variant()));
         }
         "CloseNotification" => {
             let id = params.child_value(0).get::<u32>().unwrap_or(0);
             crate::close_notification(id);
+            super::osd::dismiss_notification_osd();
             // reason 3 = closed by a call to CloseNotification.
             let _ = connection.emit_signal(
                 None,

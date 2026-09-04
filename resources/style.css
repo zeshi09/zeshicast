@@ -1315,6 +1315,64 @@ window.osd-window,
   color: alpha(@window_fg_color, 0.95);
 }
 
+/* ── Notification Toast OSD (top-right corner) ── */
+.osd-notification {
+  margin: 20px;
+  min-width: 320px;
+  max-width: 420px;
+  background-color: @window_bg_color;
+  border: 1px solid alpha(@window_fg_color, 0.12);
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  transition: border-color 140ms ease;
+}
+
+.osd-notification:hover {
+  border-color: alpha(@window_fg_color, 0.22);
+}
+
+.osd-notification-app {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: alpha(@window_fg_color, 0.50);
+}
+
+.osd-notification-close {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 2px;
+  margin: 0;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: alpha(@window_fg_color, 0.45);
+  cursor: default;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.osd-notification-close:hover {
+  background-color: alpha(@window_fg_color, 0.12);
+  color: alpha(@window_fg_color, 0.95);
+}
+
+.osd-notification-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: alpha(@window_fg_color, 0.95);
+  letter-spacing: -0.01em;
+}
+
+.osd-notification-body {
+  font-size: 12px;
+  line-height: 1.35;
+  color: alpha(@window_fg_color, 0.72);
+  margin-top: 2px;
+}
+
 /* ════════════════════════════════════════════════════════════
    WINDOW GRID OVERLAY
    ════════════════════════════════════════════════════════════ */
