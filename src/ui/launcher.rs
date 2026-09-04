@@ -2,6 +2,9 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use super::action_panel_controller::*;
+use super::clipboard_capture::*;
+use super::keybindings::*;
 
 use crate::ui::launcher_helpers::{
     ai_snippet_name, ask_ai_from_view, preference_duration_ms, preference_enabled, preference_list,
@@ -12,10 +15,9 @@ use crate::ui::launcher_views::{
     show_script_output_view, show_system_monitor_view,
 };
 use crate::{
-    Action, ActionKind, ActionPanelSection, ActionRisk, ClipboardKind, ClipboardSummary,
-    SecondaryActionKind, SnippetSummary, Zeshicast, ui::ActionPanelDisplayItem,
+    Action, ActionKind, ActionRisk, ClipboardKind, ClipboardSummary,
+    SecondaryActionKind, SnippetSummary, Zeshicast,
 };
-use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
@@ -26,24 +28,6 @@ use gtk::{
 
 pub type WindowConfigurator = fn(&ApplicationWindow);
 
-#[derive(Clone)]
-struct ActionPanelItem {
-    display: ActionPanelDisplayItem,
-    section: ActionPanelSection,
-    kind: ActionPanelItemKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ActionPanelItemKind {
-    Secondary(SecondaryActionKind),
-    SetAlias,
-}
-
-#[derive(Clone)]
-enum DisplayedActionPanelRow {
-    Header(ActionPanelSection),
-    Action(ActionPanelItem),
-}
 
 #[derive(Clone, Copy)]
 enum NetworkCopyValue {
@@ -1160,26 +1144,6 @@ pub fn present_launcher_view(state: &GuiState, view: Option<&str>) {
     state.window.present();
 }
 
-fn install_clipboard_monitor(launcher: &Rc<RefCell<Zeshicast>>) {
-    if !launcher.borrow().clipboard_history_enabled() {
-        return;
-    }
-
-    let Some(display) = gdk::Display::default() else {
-        return;
-    };
-
-    let clipboard = display.clipboard();
-    let last = Rc::new(RefCell::new(None::<String>));
-    let launcher = Rc::clone(launcher);
-
-    capture_clipboard(&clipboard, &launcher, &last);
-
-    clipboard.connect_changed(move |clipboard| {
-        capture_clipboard(clipboard, &launcher, &last);
-    });
-}
-
 /// Fetch the Ollama model list off the main thread and fill the AI model bar.
 fn populate_ai_models(launcher: &Rc<RefCell<Zeshicast>>, view: &crate::ui::AiChatView) {
     let endpoint = {
@@ -1283,244 +1247,7 @@ fn fill_ai_model_bar(
     }
 }
 
-/// Background clipboard capture via `wl-paste --watch`. The gdk
-/// `connect_changed` monitor only fires while the launcher window is focused —
-/// on Wayland a client receives clipboard events only when focused — so
-/// everything copied while the launcher is hidden collapses to just the latest
-/// value on next focus, and rapid copies race (the async read sees the newest
-/// content). `wl-paste --watch` fires for *every* change in the background.
-/// Text only; image copies stay on the gdk path.
-fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshicast>>) {
-    if !launcher.borrow().clipboard_history_enabled() {
-        return;
-    }
-
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
-    std::thread::spawn(move || watch_clipboard_text(tx));
-
-    let launcher = Rc::clone(launcher);
-    glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
-        while let Ok(text) = rx.try_recv() {
-            if let Err(error) = launcher.borrow_mut().add_clipboard_text(&text) {
-                eprintln!("failed to save clipboard history: {error}");
-            }
-        }
-        glib::ControlFlow::Continue
-    });
-}
-
-fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
-    watch_clipboard_text_with(tx, || {
-        std::process::Command::new("wl-paste")
-            .args(["--watch", "sh", "-c", "cat; printf '\\0'"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-    })
-}
-
-fn watch_clipboard_text_with(
-    tx: std::sync::mpsc::Sender<String>,
-    mut spawn: impl FnMut() -> std::io::Result<std::process::Child>,
-) {
-    use std::io::BufRead;
-    use std::io::Read;
-    /// Hard cap on bytes read per clipboard record: `MAX_CLIPBOARD_TEXT_BYTES`
-    /// plus slack for the NUL terminator, so a multi-gigabyte paste cannot
-    /// balloon the read buffer.
-    const CLIPBOARD_RECORD_READ_LIMIT: u64 =
-        (crate::search::clipboard::MAX_CLIPBOARD_TEXT_BYTES + 4096) as u64;
-    loop {
-        // Each selection change runs the command with the new content on stdin;
-        // we frame entries with a trailing NUL (clipboard text never contains
-        // one) so multi-line values stay intact.
-        let mut child = match spawn() {
-            Ok(child) => child,
-            // wl-clipboard not installed — leave the gdk monitor as the only path.
-            Err(_) => return,
-        };
-        let Some(stdout) = child.stdout.take() else {
-            return;
-        };
-
-        let record_truncated;
-        {
-            let mut reader = std::io::BufReader::new(stdout).take(CLIPBOARD_RECORD_READ_LIMIT);
-            let mut buf: Vec<u8> = Vec::new();
-            let mut truncated = false;
-            loop {
-                buf.clear();
-                match reader.read_until(0, &mut buf) {
-                    Ok(0) => break, // producer exited or the read cap was exhausted
-                    Ok(_) => {
-                        let terminated = buf.last() == Some(&0);
-                        if terminated {
-                            buf.pop();
-                        }
-                        // A record clipped by the read cap can end mid-UTF-8
-                        // character; trim to the last valid boundary so it decodes
-                        // like any other entry instead of being dropped.
-                        let valid_len = match std::str::from_utf8(&buf) {
-                            Ok(_) => buf.len(),
-                            Err(error) => error.valid_up_to(),
-                        };
-                        if let Some(text) = decode_clipboard_text(&buf[..valid_len])
-                            && tx.send(text).is_err()
-                        {
-                            return; // receiver gone, stop the thread
-                        }
-                        if !terminated {
-                            truncated = true;
-                            break; // oversized record: nothing else in this batch
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-            record_truncated = truncated;
-        } // reader dropped here: our pipe end closes before we reap the child
-        if record_truncated {
-            // Log the event only; never echo clipboard content here.
-            eprintln!(
-                "clipboard record exceeded {CLIPBOARD_RECORD_READ_LIMIT} bytes; truncated"
-            );
-        }
-        // Kill before reaping: an oversized record leaves the producer blocked
-        // writing into a pipe nobody drains any more, so a plain wait() would
-        // hang forever and silently kill this watcher thread. kill() is also
-        // harmless when the child already exited on its own.
-        let _ = child.kill();
-        let _ = child.wait();
-        // wl-paste died (e.g. compositor restart); reconnect shortly, unless the
-        // receiver is gone (empty probe doubles as a liveness check).
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        if tx.send(String::new()).is_err() {
-            return;
-        }
-    }
-}
-
-/// Accept a clipboard chunk only if it's valid UTF-8 text without binary control
-/// characters — filters out image/binary fragments `wl-paste` delivers for
-/// non-text content.
-fn decode_clipboard_text(bytes: &[u8]) -> Option<String> {
-    let text = std::str::from_utf8(bytes).ok()?;
-    if text.trim().is_empty() {
-        return None;
-    }
-    if text
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
-    {
-        return None;
-    }
-    Some(text.to_string())
-}
-
-/// Dispatch a clipboard change to image or text capture. Image copies rarely
-/// carry a usable text/plain fallback, so an image, when present, wins.
-fn capture_clipboard(
-    clipboard: &gdk::Clipboard,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    last: &Rc<RefCell<Option<String>>>,
-) {
-    if !launcher.borrow().clipboard_history_enabled() || launcher.borrow().clipboard_private_mode()
-    {
-        return;
-    }
-
-    let formats = clipboard.formats();
-    if formats.contain_mime_type("image/png") || formats.contains_type(gdk::Texture::static_type())
-    {
-        capture_clipboard_image(clipboard, launcher, last);
-    } else {
-        capture_clipboard_text(clipboard, launcher, last);
-    }
-}
-
-fn capture_clipboard_image(
-    clipboard: &gdk::Clipboard,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    last: &Rc<RefCell<Option<String>>>,
-) {
-    use std::hash::{Hash, Hasher};
-    if !launcher.borrow().clipboard_capture_images() {
-        return;
-    }
-
-    let launcher = Rc::clone(launcher);
-    let last = Rc::clone(last);
-    clipboard.read_texture_async(gio::Cancellable::NONE, move |result| {
-        let Ok(Some(texture)) = result else {
-            return;
-        };
-        let png = texture.save_to_png_bytes();
-        let bytes: &[u8] = &png;
-
-        // Content-addressed cache file so identical images dedupe naturally.
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        bytes.hash(&mut hasher);
-        let dir = crate::clipboard_cache_dir();
-        let path = dir.join(format!("{:016x}.png", hasher.finish()));
-        if !path.exists() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if std::fs::create_dir_all(&dir).is_err()
-                    || std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
-                        .is_err()
-                {
-                    return;
-                }
-            }
-            #[cfg(not(unix))]
-            if std::fs::create_dir_all(&dir).is_err() {
-                return;
-            }
-            // Same 0o600 contract as other persisted files (config.rs
-            // write_file_atomic): cached clipboard images may hold secrets.
-            if crate::write_file_atomic(&path, bytes, 0o600).is_err() {
-                return;
-            }
-        }
-
-        let path_str = path.to_string_lossy().into_owned();
-        let value = format!("{}{}", crate::CLIPBOARD_IMAGE_PREFIX, path_str);
-        if last.borrow().as_deref() == Some(value.as_str()) {
-            return;
-        }
-        *last.borrow_mut() = Some(value);
-        if let Err(error) = launcher.borrow_mut().add_clipboard_image(&path_str) {
-            eprintln!("failed to save clipboard image: {error}");
-        }
-    });
-}
-
-fn capture_clipboard_text(
-    clipboard: &gdk::Clipboard,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    last_text: &Rc<RefCell<Option<String>>>,
-) {
-    let launcher = Rc::clone(launcher);
-    let last_text = Rc::clone(last_text);
-    clipboard.read_text_async(gio::Cancellable::NONE, move |result| {
-        let Ok(Some(text)) = result else {
-            return;
-        };
-
-        let text = text.to_string();
-        if last_text.borrow().as_deref() == Some(text.as_str()) {
-            return;
-        }
-
-        *last_text.borrow_mut() = Some(text.clone());
-        if let Err(error) = launcher.borrow_mut().add_clipboard_text(&text) {
-            eprintln!("failed to save clipboard history: {error}");
-        }
-    });
-}
-
-fn update_results(
+pub(crate) fn update_results(
     launcher: &Zeshicast,
     results: &Rc<RefCell<Vec<Action>>>,
     list: &ListBox,
@@ -1748,632 +1475,8 @@ fn root_action_section(
     }
 }
 
-/// Resolve a hardware keycode to its keyval in the primary (Latin) layout group,
-/// independent of the currently active keyboard layout. Lets Ctrl-shortcuts
-/// match on e.g. a Cyrillic layout where the produced keyval would be Cyrillic.
-fn latin_keyval(keycode: u32) -> Option<gdk::Key> {
-    gdk::Display::default()
-        .and_then(|display| display.translate_key(keycode, gdk::ModifierType::empty(), 0))
-        .map(|(keyval, _, _, _)| keyval)
-}
 
-fn handle_key(
-    window: &ApplicationWindow,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
-    entry: &Entry,
-    list: &ListBox,
-    results: &Rc<RefCell<Vec<Action>>>,
-    action_bar: &GtkBox,
-    navigation: &crate::ui::NavigationStack,
-    action_panel_view: &crate::ui::ActionPanelView,
-    ai_chat_view: &crate::ui::AiChatView,
-    audio_view: &crate::ui::AudioView,
-    dashboard_view: &crate::ui::DashboardView,
-    emoji_view: &crate::ui::EmojiPickerView,
-    font_view: &crate::ui::FontBrowserView,
-    system_monitor_view: &crate::ui::SystemMonitorView,
-    media_view: &crate::ui::MediaView,
-    network_list: &ListBox,
-    notifications_view: &crate::ui::NotificationsView,
-    current_action: &Rc<RefCell<Option<Action>>>,
-    action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
-    filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
-    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
-    clipboard_view: &crate::ui::ClipboardHistoryView,
-    clipboard_items: &Rc<RefCell<Vec<ClipboardSummary>>>,
-    extension_list: &ListBox,
-    snippet_list: &ListBox,
-    snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>,
-    key: gdk::Key,
-    state: gdk::ModifierType,
-) -> glib::Propagation {
-    if navigation.current() != crate::ui::LauncherView::Root {
-        return handle_view_key(
-            window,
-            launcher,
-            list,
-            results,
-            navigation,
-            entry,
-            action_bar,
-            &action_panel_view.list,
-            ai_chat_view,
-            audio_view,
-            dashboard_view,
-            system_monitor_view,
-            media_view,
-            network_list,
-            notifications_view,
-            current_action,
-            displayed_action_panel_rows,
-            clipboard_view,
-            clipboard_items,
-            extension_list,
-            snippet_list,
-            snippet_items,
-            key,
-            state,
-        );
-    }
-
-    match key {
-        gdk::Key::Escape => {
-            finish_interaction(window, hold);
-            glib::Propagation::Stop
-        }
-        gdk::Key::Return | gdk::Key::KP_Enter => {
-            if state.contains(gdk::ModifierType::CONTROL_MASK) {
-                copy_selected(list, results);
-            } else {
-                run_selected_with_views(
-                    window,
-                    launcher,
-                    hold,
-                    entry,
-                    list,
-                    results,
-                    navigation,
-                    action_bar,
-                    ai_chat_view,
-                    audio_view,
-                    dashboard_view,
-                    emoji_view,
-                    font_view,
-                    system_monitor_view,
-                    media_view,
-                    network_list,
-                    notifications_view,
-                );
-            }
-            glib::Propagation::Stop
-        }
-        gdk::Key::k if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_action_panel_view(
-                navigation,
-                entry,
-                action_bar,
-                action_panel_view,
-                current_action,
-                action_panel_items,
-                filtered_action_panel_items,
-                displayed_action_panel_rows,
-                launcher,
-                list,
-                results,
-            );
-            glib::Propagation::Stop
-        }
-        gdk::Key::s if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_snippet_view(
-                navigation,
-                entry,
-                action_bar,
-                snippet_list,
-                snippet_items,
-                launcher,
-            );
-            glib::Propagation::Stop
-        }
-        gdk::Key::d if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_dashboard_view(navigation, entry, action_bar, dashboard_view);
-            glib::Propagation::Stop
-        }
-        gdk::Key::t if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_system_monitor_view(navigation, entry, action_bar, system_monitor_view);
-            glib::Propagation::Stop
-        }
-        gdk::Key::i if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_ai_chat_view(navigation, entry, action_bar, ai_chat_view);
-            glib::Propagation::Stop
-        }
-        gdk::Key::m if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_media_view(navigation, entry, action_bar, media_view);
-            glib::Propagation::Stop
-        }
-        gdk::Key::o if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_audio_view(navigation, entry, action_bar, audio_view);
-            glib::Propagation::Stop
-        }
-        gdk::Key::n if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_network_view(navigation, entry, action_bar, network_list);
-            glib::Propagation::Stop
-        }
-        gdk::Key::u if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_notifications_view(navigation, entry, action_bar, notifications_view);
-            glib::Propagation::Stop
-        }
-        gdk::Key::h if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_clipboard_view(
-                navigation,
-                entry,
-                action_bar,
-                clipboard_view,
-                clipboard_items,
-                launcher,
-            );
-            glib::Propagation::Stop
-        }
-        gdk::Key::b if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_extension_view(navigation, entry, action_bar, extension_list);
-            glib::Propagation::Stop
-        }
-        gdk::Key::e if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_emoji_view(navigation, entry, action_bar, emoji_view);
-            glib::Propagation::Stop
-        }
-        gdk::Key::f if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_font_browser_view(navigation, entry, action_bar, font_view);
-            glib::Propagation::Stop
-        }
-        gdk::Key::comma if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_preferences_view(navigation, entry, action_bar);
-            glib::Propagation::Stop
-        }
-        gdk::Key::Down => {
-            crate::ui::move_selection(list, 1);
-            glib::Propagation::Stop
-        }
-        gdk::Key::Up => {
-            crate::ui::move_selection(list, -1);
-            glib::Propagation::Stop
-        }
-        _ => glib::Propagation::Proceed,
-    }
-}
-
-fn handle_view_key(
-    window: &ApplicationWindow,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    list: &ListBox,
-    results: &Rc<RefCell<Vec<Action>>>,
-    navigation: &crate::ui::NavigationStack,
-    entry: &Entry,
-    action_bar: &GtkBox,
-    action_panel_list: &ListBox,
-    ai_chat_view: &crate::ui::AiChatView,
-    audio_view: &crate::ui::AudioView,
-    dashboard_view: &crate::ui::DashboardView,
-    system_monitor_view: &crate::ui::SystemMonitorView,
-    media_view: &crate::ui::MediaView,
-    network_list: &ListBox,
-    notifications_view: &crate::ui::NotificationsView,
-    current_action: &Rc<RefCell<Option<Action>>>,
-    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
-    clipboard_view: &crate::ui::ClipboardHistoryView,
-    clipboard_items: &Rc<RefCell<Vec<ClipboardSummary>>>,
-    extension_list: &ListBox,
-    snippet_list: &ListBox,
-    snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>,
-    key: gdk::Key,
-    state: gdk::ModifierType,
-) -> glib::Propagation {
-    match key {
-        gdk::Key::Escape => {
-            if navigation.pop().is_some() {
-                entry.set_visible(true);
-                action_bar.set_visible(true);
-                entry.grab_focus();
-                glib::Propagation::Stop
-            } else {
-                glib::Propagation::Proceed
-            }
-        }
-        gdk::Key::Return | gdk::Key::KP_Enter => match navigation.current() {
-            crate::ui::LauncherView::Actions => {
-                if let Some(row) = action_panel_list.selected_row() {
-                    run_action_panel_row(
-                        window,
-                        launcher,
-                        entry,
-                        list,
-                        results,
-                        navigation,
-                        action_bar,
-                        current_action,
-                        displayed_action_panel_rows,
-                        row.index() as usize,
-                    );
-                }
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Clipboard => {
-                if let Some(row) = clipboard_view.list.selected_row() {
-                    copy_clipboard_row(&clipboard_view.list, row.index() as usize, clipboard_items);
-                }
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Extensions => {
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Dashboard => {
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::SystemMonitor => {
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::AiChat => {
-                if ai_chat_view.input.text().is_empty() {
-                    show_root_view(navigation, entry, action_bar);
-                    glib::Propagation::Stop
-                } else {
-                    glib::Propagation::Proceed
-                }
-            }
-            crate::ui::LauncherView::Audio => {
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Media => {
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Network => {
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Notifications => {
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Snippets => {
-                if let Some(row) = snippet_list.selected_row() {
-                    copy_snippet_row(row.index() as usize, snippet_items);
-                }
-                show_root_view(navigation, entry, action_bar);
-                glib::Propagation::Stop
-            }
-            _ => glib::Propagation::Proceed,
-        },
-        gdk::Key::Down => match navigation.current() {
-            crate::ui::LauncherView::Actions => {
-                crate::ui::move_selection(action_panel_list, 1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Clipboard => {
-                crate::ui::move_selection(&clipboard_view.list, 1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Extensions => {
-                crate::ui::move_selection(extension_list, 1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Dashboard => {
-                crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::SystemMonitor => {
-                crate::ui::move_selection(&system_monitor_view.list, 1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Audio => {
-                crate::ui::move_selection(&audio_view.streams_list, 1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Media => {
-                crate::ui::set_media_snapshot(media_view, &crate::media_snapshot());
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Network => {
-                crate::ui::move_selection(network_list, 1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Notifications => {
-                crate::ui::set_notification_snapshot(
-                    notifications_view,
-                    &crate::notification_snapshot(),
-                );
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Snippets => {
-                crate::ui::move_selection(snippet_list, 1);
-                glib::Propagation::Stop
-            }
-            _ => glib::Propagation::Proceed,
-        },
-        gdk::Key::Up => match navigation.current() {
-            crate::ui::LauncherView::Actions => {
-                crate::ui::move_selection(action_panel_list, -1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Clipboard => {
-                crate::ui::move_selection(&clipboard_view.list, -1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Extensions => {
-                crate::ui::move_selection(extension_list, -1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Dashboard => {
-                crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::SystemMonitor => {
-                crate::ui::move_selection(&system_monitor_view.list, -1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Audio => {
-                crate::ui::move_selection(&audio_view.streams_list, -1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Media => {
-                crate::ui::set_media_snapshot(media_view, &crate::media_snapshot());
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Network => {
-                crate::ui::move_selection(network_list, -1);
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Notifications => {
-                crate::ui::set_notification_snapshot(
-                    notifications_view,
-                    &crate::notification_snapshot(),
-                );
-                glib::Propagation::Stop
-            }
-            crate::ui::LauncherView::Snippets => {
-                crate::ui::move_selection(snippet_list, -1);
-                glib::Propagation::Stop
-            }
-            _ => glib::Propagation::Proceed,
-        },
-        gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::Clipboard => {
-            if state.contains(gdk::ModifierType::CONTROL_MASK) {
-                let launcher_for_done = Rc::clone(launcher);
-                let clipboard_view = clipboard_view.clone();
-                let clipboard_items = Rc::clone(clipboard_items);
-                clear_clipboard_history_or_confirm(window, launcher, move || {
-                    refresh_clipboard_view(&launcher_for_done, &clipboard_view, &clipboard_items);
-                });
-            } else if let Some(row) = clipboard_view.list.selected_row()
-                && let Some(item) = clipboard_items.borrow().get(row.index() as usize)
-            {
-                // The Delete hotkey must pass the same destructive-action
-                // confirmation gate as the action panel entry.
-                let action = clipboard_item_action(&item.value);
-                let launcher_for_done = Rc::clone(launcher);
-                let clipboard_view = clipboard_view.clone();
-                let clipboard_items = Rc::clone(clipboard_items);
-                run_secondary_action_or_confirm(
-                    window,
-                    launcher,
-                    action,
-                    SecondaryActionKind::DeleteClipboardItem,
-                    move || {
-                        refresh_clipboard_view(
-                            &launcher_for_done,
-                            &clipboard_view,
-                            &clipboard_items,
-                        );
-                    },
-                );
-            }
-            if !state.contains(gdk::ModifierType::CONTROL_MASK) {
-                refresh_clipboard_view(launcher, clipboard_view, clipboard_items);
-            }
-            glib::Propagation::Stop
-        }
-        gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::Snippets => {
-            if let Some(row) = snippet_list.selected_row()
-                && let Some(item) = snippet_items.borrow().get(row.index() as usize)
-                && let Err(error) = launcher
-                    .borrow_mut()
-                    .delete_snippet(&item.name, &item.value)
-            {
-                eprintln!("failed to delete snippet: {error}");
-            }
-            refresh_snippet_view(launcher, snippet_list, snippet_items);
-            glib::Propagation::Stop
-        }
-        gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::SystemMonitor => {
-            let system_monitor_view = system_monitor_view.clone();
-            terminate_selected_system_process_or_confirm(
-                window,
-                &system_monitor_view.clone(),
-                move || {
-                    crate::ui::set_system_monitor_snapshot(
-                        &system_monitor_view,
-                        &crate::system_snapshot(),
-                        &crate::top_processes_by_memory(8),
-                    );
-                },
-            );
-            glib::Propagation::Stop
-        }
-        _ => glib::Propagation::Proceed,
-    }
-}
-
-fn show_action_panel_view(
-    navigation: &crate::ui::NavigationStack,
-    entry: &Entry,
-    action_bar: &GtkBox,
-    action_panel_view: &crate::ui::ActionPanelView,
-    current_action: &Rc<RefCell<Option<Action>>>,
-    action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
-    filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
-    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    list: &ListBox,
-    results: &Rc<RefCell<Vec<Action>>>,
-) {
-    let Some(action) = selected_action(list, results) else {
-        return;
-    };
-
-    let mut items = launcher
-        .borrow()
-        .available_secondary_actions(&action)
-        .into_iter()
-        .map(|secondary| ActionPanelItem {
-            display: ActionPanelDisplayItem {
-                title: secondary.title,
-                icon_name: secondary.icon_name,
-                is_section_header: false,
-                is_destructive: secondary.section.is_danger(),
-            },
-            section: secondary.section,
-            kind: ActionPanelItemKind::Secondary(secondary.kind),
-        })
-        .collect::<Vec<_>>();
-    items.push(ActionPanelItem {
-        display: ActionPanelDisplayItem {
-            title: "Set Alias".to_string(),
-            icon_name: "insert-link-symbolic".to_string(),
-            is_section_header: false,
-            is_destructive: false,
-        },
-        section: ActionPanelSection::Manage,
-        kind: ActionPanelItemKind::SetAlias,
-    });
-
-    *current_action.borrow_mut() = Some(action.clone());
-    *action_panel_items.borrow_mut() = items.clone();
-    *filtered_action_panel_items.borrow_mut() = items;
-    action_panel_view.search.set_text("");
-    let rows = action_panel_display_rows(&filtered_action_panel_items.borrow());
-    let displays = action_panel_display_items(&rows);
-    *displayed_action_panel_rows.borrow_mut() = rows;
-    crate::ui::set_action_panel_items(action_panel_view, &action, &displays);
-
-    entry.set_visible(false);
-    action_bar.set_visible(false);
-    navigation.push(crate::ui::LauncherView::Actions);
-    action_panel_view.search.grab_focus();
-}
-
-fn filter_action_panel_items(
-    query: &str,
-    action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
-    filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
-    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
-    action_panel_list: &ListBox,
-) {
-    let query = query.trim().to_lowercase();
-    let filtered = action_panel_items
-        .borrow()
-        .iter()
-        .filter(|item| query.is_empty() || item.display.title.to_lowercase().contains(&query))
-        .cloned()
-        .collect::<Vec<_>>();
-    let rows = action_panel_display_rows(&filtered);
-    let displays = action_panel_display_items(&rows);
-    *filtered_action_panel_items.borrow_mut() = filtered;
-    *displayed_action_panel_rows.borrow_mut() = rows;
-    crate::ui::set_action_panel_list(action_panel_list, &displays);
-}
-
-fn action_panel_display_rows(items: &[ActionPanelItem]) -> Vec<DisplayedActionPanelRow> {
-    const SECTION_ORDER: &[ActionPanelSection] = &[
-        ActionPanelSection::Primary,
-        ActionPanelSection::Manage,
-        ActionPanelSection::Clipboard,
-        ActionPanelSection::Danger,
-    ];
-
-    let mut result = Vec::new();
-    for &section in SECTION_ORDER {
-        let section_items: Vec<&ActionPanelItem> = items
-            .iter()
-            .filter(|item| item.section == section)
-            .collect();
-        if section_items.is_empty() {
-            continue;
-        }
-        result.push(DisplayedActionPanelRow::Header(section));
-        for item in section_items {
-            result.push(DisplayedActionPanelRow::Action(item.clone()));
-        }
-    }
-    result
-}
-
-fn action_panel_display_items(rows: &[DisplayedActionPanelRow]) -> Vec<ActionPanelDisplayItem> {
-    rows.iter()
-        .map(|row| match row {
-            DisplayedActionPanelRow::Header(section) => ActionPanelDisplayItem {
-                title: section.title().to_string(),
-                icon_name: String::new(),
-                is_section_header: true,
-                is_destructive: false,
-            },
-            DisplayedActionPanelRow::Action(item) => item.display.clone(),
-        })
-        .collect()
-}
-
-fn run_action_panel_row(
-    window: &ApplicationWindow,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    entry: &Entry,
-    list: &ListBox,
-    results: &Rc<RefCell<Vec<Action>>>,
-    navigation: &crate::ui::NavigationStack,
-    action_bar: &GtkBox,
-    current_action: &Rc<RefCell<Option<Action>>>,
-    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
-    index: usize,
-) {
-    let Some(action) = current_action.borrow().clone() else {
-        return;
-    };
-    let Some(DisplayedActionPanelRow::Action(item)) =
-        displayed_action_panel_rows.borrow().get(index).cloned()
-    else {
-        return;
-    };
-
-    match item.kind {
-        ActionPanelItemKind::Secondary(kind) => {
-            let entry = entry.clone();
-            let list = list.clone();
-            let results = Rc::clone(results);
-            let navigation = navigation.clone();
-            let action_bar = action_bar.clone();
-            let launcher_for_done = Rc::clone(launcher);
-            run_secondary_action_or_confirm(window, launcher, action, kind, move || {
-                update_results(
-                    &launcher_for_done.borrow(),
-                    &results,
-                    &list,
-                    entry.text().as_str(),
-                    None,
-                );
-                show_root_view(&navigation, &entry, &action_bar);
-            });
-        }
-        ActionPanelItemKind::SetAlias => {
-            crate::ui::show_alias_panel(window, launcher, &action);
-            show_root_view(navigation, entry, action_bar);
-        }
-    }
-}
-
-fn show_clipboard_view(
+pub(crate) fn show_clipboard_view(
     navigation: &crate::ui::NavigationStack,
     entry: &Entry,
     action_bar: &GtkBox,
@@ -2391,7 +1494,7 @@ fn show_clipboard_view(
     clipboard_view.list.grab_focus();
 }
 
-fn refresh_clipboard_view(
+pub(crate) fn refresh_clipboard_view(
     launcher: &Rc<RefCell<Zeshicast>>,
     clipboard_view: &crate::ui::ClipboardHistoryView,
     clipboard_items: &Rc<RefCell<Vec<ClipboardSummary>>>,
@@ -2429,7 +1532,7 @@ fn clipboard_filter_matches(filter: ClipboardFilter, item: &ClipboardSummary) ->
     }
 }
 
-fn terminate_selected_system_process_or_confirm<F>(
+pub(crate) fn terminate_selected_system_process_or_confirm<F>(
     window: &ApplicationWindow,
     system_monitor_view: &crate::ui::SystemMonitorView,
     on_done: F,
@@ -2521,7 +1624,7 @@ fn run_selected_network_command(list: &ListBox, value: NetworkCommandValue) {
     }
 }
 
-fn copy_clipboard_row(
+pub(crate) fn copy_clipboard_row(
     list: &ListBox,
     index: usize,
     clipboard_items: &Rc<RefCell<Vec<ClipboardSummary>>>,
@@ -2556,7 +1659,7 @@ fn copy_clipboard_image(path: &str) {
     }
 }
 
-fn show_snippet_view(
+pub(crate) fn show_snippet_view(
     navigation: &crate::ui::NavigationStack,
     entry: &Entry,
     action_bar: &GtkBox,
@@ -2574,7 +1677,7 @@ fn show_snippet_view(
     snippet_list.grab_focus();
 }
 
-fn refresh_snippet_view(
+pub(crate) fn refresh_snippet_view(
     launcher: &Rc<RefCell<Zeshicast>>,
     snippet_list: &ListBox,
     snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>,
@@ -2584,13 +1687,13 @@ fn refresh_snippet_view(
     *snippet_items.borrow_mut() = items;
 }
 
-fn copy_snippet_row(index: usize, snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>) {
+pub(crate) fn copy_snippet_row(index: usize, snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>) {
     if let Some(item) = snippet_items.borrow().get(index) {
         crate::copy_text(&item.value);
     }
 }
 
-fn show_preferences_view(
+pub(crate) fn show_preferences_view(
     navigation: &crate::ui::NavigationStack,
     entry: &Entry,
     action_bar: &GtkBox,
@@ -2600,7 +1703,7 @@ fn show_preferences_view(
     navigation.push(crate::ui::LauncherView::Preferences);
 }
 
-fn show_extension_view(
+pub(crate) fn show_extension_view(
     navigation: &crate::ui::NavigationStack,
     entry: &Entry,
     action_bar: &GtkBox,
@@ -2615,7 +1718,7 @@ fn show_extension_view(
     extension_list.grab_focus();
 }
 
-fn show_root_view(navigation: &crate::ui::NavigationStack, entry: &Entry, action_bar: &GtkBox) {
+pub(crate) fn show_root_view(navigation: &crate::ui::NavigationStack, entry: &Entry, action_bar: &GtkBox) {
     navigation.reset();
     entry.set_visible(true);
     action_bar.set_visible(true);
@@ -2840,7 +1943,7 @@ fn show_form_for_action(
     });
 }
 
-fn run_selected_with_views(
+pub(crate) fn run_selected_with_views(
     window: &ApplicationWindow,
     launcher: &Rc<RefCell<Zeshicast>>,
     hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
@@ -3010,7 +2113,7 @@ fn run_shell_request(command: &str) {
     });
 }
 
-fn run_secondary_action_or_confirm<F>(
+pub(crate) fn run_secondary_action_or_confirm<F>(
     window: &ApplicationWindow,
     launcher: &Rc<RefCell<Zeshicast>>,
     action: Action,
@@ -3079,7 +2182,7 @@ fn secondary_action_confirmation_detail(action: &Action, kind: SecondaryActionKi
     }
 }
 
-fn clear_clipboard_history_or_confirm<F>(
+pub(crate) fn clear_clipboard_history_or_confirm<F>(
     window: &ApplicationWindow,
     launcher: &Rc<RefCell<Zeshicast>>,
     on_done: F,
@@ -3097,7 +2200,7 @@ fn clear_clipboard_history_or_confirm<F>(
 
 /// Builds a synthetic Clipboard-category action so clipboard secondary kinds
 /// route through the shared confirmation panel and app-level choke point.
-fn clipboard_item_action(value: &str) -> Action {
+pub(crate) fn clipboard_item_action(value: &str) -> Action {
     Action::new(
         "Clipboard",
         value.to_string(),
@@ -3106,7 +2209,7 @@ fn clipboard_item_action(value: &str) -> Action {
     )
 }
 
-fn finish_interaction(
+pub(crate) fn finish_interaction(
     window: &ApplicationWindow,
     hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
 ) {
@@ -3117,7 +2220,7 @@ fn finish_interaction(
     }
 }
 
-fn copy_selected(list: &ListBox, results: &Rc<RefCell<Vec<Action>>>) {
+pub(crate) fn copy_selected(list: &ListBox, results: &Rc<RefCell<Vec<Action>>>) {
     if let Some(action) = selected_action(list, results) {
         action.copy_value();
     }
@@ -3145,7 +2248,7 @@ fn run_secondary_for_selected(
     }
 }
 
-fn selected_action(list: &ListBox, results: &Rc<RefCell<Vec<Action>>>) -> Option<Action> {
+pub(crate) fn selected_action(list: &ListBox, results: &Rc<RefCell<Vec<Action>>>) -> Option<Action> {
     let row = list.selected_row()?;
     let index = action_index_for_row(list, &row)?;
     results.borrow().get(index).cloned()

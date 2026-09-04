@@ -1,6 +1,9 @@
+mod action_panel_controller;
+mod clipboard_capture;
 mod fonts;
 mod forms;
 pub(crate) mod icons;
+mod keybindings;
 mod launcher;
 mod launcher_helpers;
 mod launcher_views;
