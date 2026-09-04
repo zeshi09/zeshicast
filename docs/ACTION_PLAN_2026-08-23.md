@@ -285,11 +285,9 @@
   RestrictAddressFamilies(AF_UNIX AF_INET AF_INET6 AF_NETLINK).
   MemoryDenyWriteExecute и SystemCallFilter оставлены закомментированными
   с пояснением (GTK4/malloc/rustls под W^X и строгим фильтром не проверены на
-  живой сессии). Известный нюанс: `ensure_fonts()` пишет встроенные шрифты в
-  `~/.local/share/fonts/zeshicast` при первом запуске (`src/ui/fonts.rs`) —
-  этот путь НЕ входит в ReadWritePaths, запись тихо не удастся (код деградирует
-  штатно), на свежих установках шрифты нужно поставить вручную либо добавить
-  `%h/.local/share/fonts/zeshicast` в ReadWritePaths после решения.
+  живой сессии). Каталог встроенных шрифтов `%h/.local/share/fonts/zeshicast`
+  включён в `ReadWritePaths` во всех трёх юнитах, чтобы `ensure_fonts()` мог
+  распаковывать шрифты при первом старте.
   Живая проверка опций (clipboard/notify/MPRIS/AI) — за рамками этого коммита.
 
 ---
