@@ -359,22 +359,56 @@ fn build_ui(
         list.connect_row_activated(move |_, row| {
             if let Some(action) = action_for_row(&list_ref, &results, row) {
                 if let Some(command) = action.launcher_command() {
-                    run_launcher_command(
-                        command,
-                        &navigation,
-                        &entry,
-                        &action_bar,
-                        &ai_chat_view,
-                        &audio_view,
-                        &dashboard_view,
-                        &emoji_view,
-                        &font_view,
-                        &system_monitor_view,
-                        &media_view,
-                        &network_list,
-                        &notifications_view,
-                        &window_grid_view,
-                    );
+                    match command {
+                        crate::LauncherCommand::CreateSnippet(content) => {
+                            crate::ui::show_snippet_editor_panel(
+                                &window,
+                                &launcher,
+                                None,
+                                "",
+                                "",
+                                &content,
+                                || {},
+                            );
+                        }
+                        crate::LauncherCommand::AiChatWithPrompt(prompt) => {
+                            run_launcher_command(
+                                crate::LauncherCommand::AiChatWithPrompt(prompt),
+                                &navigation,
+                                &entry,
+                                &action_bar,
+                                &ai_chat_view,
+                                &audio_view,
+                                &dashboard_view,
+                                &emoji_view,
+                                &font_view,
+                                &system_monitor_view,
+                                &media_view,
+                                &network_list,
+                                &notifications_view,
+                                &window_grid_view,
+                            );
+                            ask_ai_from_view(&launcher, &ai_chat_view);
+                        }
+                        other => {
+                            run_launcher_command(
+                                other,
+                                &navigation,
+                                &entry,
+                                &action_bar,
+                                &ai_chat_view,
+                                &audio_view,
+                                &dashboard_view,
+                                &emoji_view,
+                                &font_view,
+                                &system_monitor_view,
+                                &media_view,
+                                &network_list,
+                                &notifications_view,
+                                &window_grid_view,
+                            );
+                        }
+                    }
                 } else if action.form_data().is_some() {
                     show_form_for_action(
                         &window,
@@ -1230,6 +1264,54 @@ fn fill_ai_model_bar(
     }
 }
 
+fn empty_state_fallback_actions(query: &str) -> Vec<Action> {
+    let query_trimmed = query.trim();
+    if query_trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let display_query = if query_trimmed.chars().count() > 36 {
+        let truncated: String = query_trimmed.chars().take(36).collect();
+        format!("{truncated}…")
+    } else {
+        query_trimmed.to_string()
+    };
+
+    vec![
+        Action::new(
+            "AI Assistant",
+            format!("Ask AI: \"{display_query}\""),
+            ActionKind::Launcher(crate::LauncherCommand::AiChatWithPrompt(
+                query_trimmed.to_string(),
+            )),
+            100,
+        )
+        .with_subtitle("Stream answer from local Ollama model")
+        .with_icon("face-smile-symbolic"),
+        Action::new(
+            "Web Search",
+            format!("Search Web for \"{display_query}\""),
+            ActionKind::OpenUrl(format!(
+                "https://www.google.com/search?q={}",
+                crate::percent_encode(query_trimmed)
+            )),
+            90,
+        )
+        .with_subtitle("Search Google in default browser")
+        .with_icon("system-search-symbolic"),
+        Action::new(
+            "Snippets",
+            format!("Create Snippet with \"{display_query}\""),
+            ActionKind::Launcher(crate::LauncherCommand::CreateSnippet(
+                query_trimmed.to_string(),
+            )),
+            80,
+        )
+        .with_subtitle("Save text as a reusable snippet")
+        .with_icon("document-edit-symbolic"),
+    ]
+}
+
 pub(crate) fn update_results(
     launcher: &Zeshicast,
     results: &Rc<RefCell<Vec<Action>>>,
@@ -1250,7 +1332,7 @@ pub(crate) fn update_results(
     let actions = launcher.search(query);
     let displayed_actions = if query.trim().is_empty() {
         append_grouped_root_actions(launcher, list, actions)
-    } else {
+    } else if !actions.is_empty() {
         let mut stagger = 0usize;
         for action in &actions {
             let row = crate::ui::result_row(action);
@@ -1261,22 +1343,38 @@ pub(crate) fn update_results(
             list.append(&row);
         }
         actions
-    };
+    } else if !query.starts_with('=') {
+        let header_row = gtk::ListBoxRow::new();
+        header_row.set_selectable(false);
+        header_row.set_activatable(false);
 
-    // No results empty state
-    if displayed_actions.is_empty() && !query.trim().is_empty() && !query.starts_with('=') {
-        let row = gtk::ListBoxRow::new();
-        row.set_selectable(false);
-        row.set_activatable(false);
-        let lbl = Label::new(Some(&format!("No results for \"{query}\"")));
-        lbl.add_css_class("no-results-label");
-        lbl.set_halign(gtk::Align::Center);
-        lbl.set_hexpand(true);
-        lbl.set_margin_top(30);
-        lbl.set_margin_bottom(30);
-        row.set_child(Some(&lbl));
-        list.append(&row);
-    }
+        let header_box = GtkBox::new(Orientation::Vertical, 4);
+        header_box.set_margin_top(16);
+        header_box.set_margin_bottom(8);
+        header_box.set_margin_start(16);
+        header_box.set_margin_end(16);
+
+        let title_lbl = Label::new(Some(&format!("No results for \"{query}\"")));
+        title_lbl.add_css_class("no-results-label");
+        title_lbl.set_halign(gtk::Align::Start);
+
+        let subtitle_lbl = Label::new(Some("Quick actions"));
+        subtitle_lbl.add_css_class("section-header");
+        subtitle_lbl.set_halign(gtk::Align::Start);
+
+        header_box.append(&title_lbl);
+        header_box.append(&subtitle_lbl);
+        header_row.set_child(Some(&header_box));
+        list.append(&header_row);
+
+        let fallbacks = empty_state_fallback_actions(query);
+        for action in &fallbacks {
+            list.append(&crate::ui::result_row(action));
+        }
+        fallbacks
+    } else {
+        Vec::new()
+    };
 
     let total = displayed_actions.len();
     *results.borrow_mut() = displayed_actions;
@@ -1974,22 +2072,56 @@ pub(crate) fn run_selected_with_views(
 ) {
     if let Some(action) = selected_action(list, results) {
         if let Some(command) = action.launcher_command() {
-            run_launcher_command(
-                command,
-                navigation,
-                entry,
-                action_bar,
-                ai_chat_view,
-                audio_view,
-                dashboard_view,
-                emoji_view,
-                font_view,
-                system_monitor_view,
-                media_view,
-                network_list,
-                notifications_view,
-                window_grid_view,
-            );
+            match command {
+                crate::LauncherCommand::CreateSnippet(content) => {
+                    crate::ui::show_snippet_editor_panel(
+                        window,
+                        launcher,
+                        None,
+                        "",
+                        "",
+                        &content,
+                        || {},
+                    );
+                }
+                crate::LauncherCommand::AiChatWithPrompt(prompt) => {
+                    run_launcher_command(
+                        crate::LauncherCommand::AiChatWithPrompt(prompt),
+                        navigation,
+                        entry,
+                        action_bar,
+                        ai_chat_view,
+                        audio_view,
+                        dashboard_view,
+                        emoji_view,
+                        font_view,
+                        system_monitor_view,
+                        media_view,
+                        network_list,
+                        notifications_view,
+                        window_grid_view,
+                    );
+                    ask_ai_from_view(launcher, ai_chat_view);
+                }
+                other => {
+                    run_launcher_command(
+                        other,
+                        navigation,
+                        entry,
+                        action_bar,
+                        ai_chat_view,
+                        audio_view,
+                        dashboard_view,
+                        emoji_view,
+                        font_view,
+                        system_monitor_view,
+                        media_view,
+                        network_list,
+                        notifications_view,
+                        window_grid_view,
+                    );
+                }
+            }
         } else if action.form_data().is_some() {
             show_form_for_action(
                 window,
@@ -2548,8 +2680,8 @@ mod tests {
     use super::{
         ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, ScriptCaptureOutcome,
         action_panel_display_items, action_panel_display_rows, decode_clipboard_text,
-        read_png_from_stream, run_script_capture, secondary_action_risk,
-        watch_clipboard_text_with,
+        empty_state_fallback_actions, read_png_from_stream, run_script_capture,
+        secondary_action_risk, watch_clipboard_text_with,
     };
     use crate::{
         Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
@@ -2925,4 +3057,38 @@ mod tests {
             None => panic!("expected action row at {index}, got no row"),
         }
     }
+
+    #[test]
+    fn test_empty_state_fallback_actions() {
+        assert!(empty_state_fallback_actions("").is_empty());
+        assert!(empty_state_fallback_actions("   ").is_empty());
+
+        let actions = empty_state_fallback_actions("rust borrow checker");
+        assert_eq!(actions.len(), 3);
+        assert_eq!(actions[0].title, "Ask AI: \"rust borrow checker\"");
+        assert_eq!(
+            actions[0].launcher_command(),
+            Some(crate::LauncherCommand::AiChatWithPrompt("rust borrow checker".to_string()))
+        );
+        assert_eq!(actions[1].title, "Search Web for \"rust borrow checker\"");
+        assert!(matches!(
+            actions[1].kind,
+            ActionKind::OpenUrl(ref url) if url.contains("rust") && url.contains("google.com")
+        ));
+        assert_eq!(actions[2].title, "Create Snippet with \"rust borrow checker\"");
+        assert_eq!(
+            actions[2].launcher_command(),
+            Some(crate::LauncherCommand::CreateSnippet("rust borrow checker".to_string()))
+        );
+
+        let long_query = "this is a very long query that definitely exceeds 36 characters in total length";
+        let long_actions = empty_state_fallback_actions(long_query);
+        assert_eq!(long_actions.len(), 3);
+        assert!(long_actions[0].title.contains('…'));
+        assert_eq!(
+            long_actions[0].launcher_command(),
+            Some(crate::LauncherCommand::AiChatWithPrompt(long_query.to_string()))
+        );
+    }
 }
+

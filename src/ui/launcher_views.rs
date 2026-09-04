@@ -180,6 +180,10 @@ pub(super) fn run_launcher_command(
         crate::LauncherCommand::AiChat => {
             show_ai_chat_view(navigation, entry, action_bar, ai_chat_view)
         }
+        crate::LauncherCommand::AiChatWithPrompt(prompt) => {
+            show_ai_chat_view(navigation, entry, action_bar, ai_chat_view);
+            ai_chat_view.input.set_text(&prompt);
+        }
         crate::LauncherCommand::Audio => show_audio_view(navigation, entry, action_bar, audio_view),
         crate::LauncherCommand::Dashboard => {
             show_dashboard_view(navigation, entry, action_bar, dashboard_view)
@@ -201,5 +205,6 @@ pub(super) fn run_launcher_command(
         crate::LauncherCommand::WindowGrid => {
             show_window_grid_view(navigation, entry, action_bar, window_grid_view)
         }
+        crate::LauncherCommand::CreateSnippet(_) => {}
     }
 }

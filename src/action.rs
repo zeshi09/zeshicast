@@ -253,9 +253,10 @@ impl ActionPanelSection {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LauncherCommand {
     AiChat,
+    AiChatWithPrompt(String),
     Audio,
     Dashboard,
     Emoji,
@@ -265,6 +266,7 @@ pub enum LauncherCommand {
     Notifications,
     SystemMonitor,
     WindowGrid,
+    CreateSnippet(String),
 }
 
 #[derive(Debug, Clone)]
@@ -388,8 +390,8 @@ impl Action {
     }
 
     pub fn launcher_command(&self) -> Option<LauncherCommand> {
-        match self.kind {
-            ActionKind::Launcher(command) => Some(command),
+        match &self.kind {
+            ActionKind::Launcher(command) => Some(command.clone()),
             _ => None,
         }
     }

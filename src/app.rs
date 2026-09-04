@@ -979,7 +979,7 @@ impl Zeshicast {
                     fuzzy_score(text, query)? + 120
                 };
                 Some(
-                    Action::new("Zeshicast", *title, ActionKind::Launcher(*command), score)
+                    Action::new("Zeshicast", *title, ActionKind::Launcher(command.clone()), score)
                         .with_subtitle(*subtitle)
                         .with_icon(*icon),
                 )
