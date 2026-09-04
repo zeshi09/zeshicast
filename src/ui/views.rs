@@ -3458,7 +3458,7 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                 let privacy_rows = [
                     (
                         "Clipboard history",
-                        "Stores last 50 clipboard entries locally",
+                        "Stores last 100 clipboard entries locally (configurable)",
                     ),
                     (
                         "Usage frequency",

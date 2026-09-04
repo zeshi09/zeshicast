@@ -114,8 +114,7 @@ NetworkManager where present.
 - MPRIS players.
 - Current track.
 - Play/pause/next/previous.
-- Current output device.
-- Volume.
+- Volume and audio devices live in the dedicated Audio View (`audio` / `Ctrl+A`).
 
 This should also expose media actions in root search.
 

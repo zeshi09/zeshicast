@@ -11,6 +11,10 @@
 
 ### P0-1. Закрыть обход shell-quoting через двойные кавычки плейсхолдеров
 
+- [x] **Done.** Где: `src/placeholders.rs` (`expand()`, `neutralize_shell_substitution_inside_double_quotes`).
+  При `shell_escape = true` в контексте незакрытых двойных кавычек применяется
+  экранирование `\" \$ \` \\`. Тест `command_placeholders_neutralize_shell_injection_inside_double_quotes`
+  проверяет отсутствие исполнения подстановки в `sh -c`.
 - **Where:** `src/placeholders.rs` (`expand()`, блок `is_wrapped_in_single_quotes`)
 - **Problem:** шаблон автора вида `cmd "{{query}}"` подставляет значение как `'…'`
   внутрь двойных кавычек, где одинарные кавычки литеральны, а `$()` / `` ` `` /
@@ -28,6 +32,9 @@
 
 ### P0-2. Запускать GUI-тесты в CI
 
+- [x] **Done.** Где: `.github/workflows/rust.yml`. Добавлен шаг
+  `cargo test --features gui` в Nix-окружении (`nix develop --command cargo test --features gui`)
+  и кэширование Rust через `Swatinem/rust-cache@v2`.
 - **Where:** `.github/workflows/rust.yml`, nix-job
 - **Problem:** нет ни одного `cargo test --features gui` — ~17 GUI-тестов мертвы
   в CI; development.md требует эту команду перед коммитом.

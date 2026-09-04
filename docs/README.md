@@ -19,6 +19,8 @@
 - [📄 Vicinae Parity Roadmap (`vicinae-parity-roadmap.md`)](vicinae-parity-roadmap.md) — Дорожная карта паритета с командными центрами (Vicinae/Raycast), метрики покрытия тестами.
 - [📄 Linux Command Center Vision (`linux-command-center-plan.md`)](linux-command-center-plan.md) — Концепция превращения Zeshicast в полноценный системный командный центр.
 - [📄 Raycast Linux Feature Matrix (`raycast-linux-features.md`)](raycast-linux-features.md) — Сравнительная матрица возможностей Zeshicast и Raycast.
+- [📄 Action Plan 2026-08-23 (`ACTION_PLAN_2026-08-23.md`)](ACTION_PLAN_2026-08-23.md) — Текущий план действий по устранению замечаний аудита и рефакторингу P3.
+- [📄 Full Review 2026-08-23 (`full-review-2026-08-23.md`)](full-review-2026-08-23.md) — Полный отчет комплексного аудита архитектуры, безопасности и тестов.
 
 ---
 

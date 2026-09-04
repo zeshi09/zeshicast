@@ -37,7 +37,7 @@ pub(crate) const KNOWN_PREFERENCES: &[(&str, &str)] = &[
     ("ui_font_size", "UI base font size 12-22 (restart required)"),
     (
         "ui_density",
-        "Row density: comfortable (default) or compact",
+        "Row density: compact (default) or comfortable",
     ),
     ("ui_theme", "Theme: system (default), dark, or light"),
     ("show_status_strip", "Show status strip (true/false)"),
