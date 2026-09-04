@@ -63,6 +63,7 @@ pub(crate) fn handle_key(
     extension_list: &ListBox,
     snippet_list: &ListBox,
     snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>,
+    script_output_view: &crate::ui::ScriptOutputView,
     key: gdk::Key,
     state: gdk::ModifierType,
 ) -> glib::Propagation {
@@ -122,6 +123,7 @@ pub(crate) fn handle_key(
                     media_view,
                     network_list,
                     notifications_view,
+                    script_output_view,
                 );
             }
             glib::Propagation::Stop

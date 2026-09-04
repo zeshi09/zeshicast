@@ -1101,7 +1101,7 @@ impl Zeshicast {
         summaries
     }
 
-    fn record_recent(&mut self, action: &Action) -> io::Result<()> {
+    pub(crate) fn record_recent(&mut self, action: &Action) -> io::Result<()> {
         let identity = action.identity().to_lowercase();
         storage::usage_record(&self.config_dir, &identity)
             .map_err(|e| io::Error::other(e.to_string()))?;

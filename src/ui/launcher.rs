@@ -15,7 +15,7 @@ use crate::ui::launcher_views::{
     show_script_output_view, show_system_monitor_view,
 };
 use crate::{
-    Action, ActionKind, ActionRisk, ClipboardKind, ClipboardSummary,
+    Action, ActionFormCommand, ActionKind, ActionRisk, ClipboardKind, ClipboardSummary,
     SecondaryActionKind, SnippetSummary, Zeshicast,
 };
 use gtk::gio;
@@ -234,6 +234,7 @@ fn build_ui(
         &media_view,
         &network_view.list,
         &notifications_view,
+        &script_output_view,
     );
 
     let status_strip = crate::ui::StatusStrip::new();
@@ -368,82 +369,33 @@ fn build_ui(
                     );
                 } else if action.form_data().is_some() {
                     show_form_for_action(
-                        &window, &launcher, &hold, &entry, &list_ref, &results, action,
+                        &window,
+                        &launcher,
+                        &hold,
+                        &entry,
+                        &list_ref,
+                        &results,
+                        &navigation,
+                        &action_bar,
+                        &script_output_view,
+                        action,
                     );
                 } else if action.json_command_data().is_some() {
                     run_json_command_action_or_confirm(
                         &window, &entry, &list_ref, &results, action,
                     );
-                } else if action.category == "Script" {
-                    // Scripts carry ActionRisk::Shell, so they must go through
-                    // the confirmation panel before any execution. The capture
-                    // path (run_script_stdout) spawns the script, therefore it
-                    // only runs after the user confirms.
-                    if !action.risk.requires_confirmation() {
-                        run_action_or_confirm(&window, &launcher, &hold, action);
-                    } else {
-                        let title = action.risk.label().to_string();
-                        let detail = action_confirmation_detail(&action);
-                        let confirm_window = window.clone();
-                        let confirm_launcher = Rc::clone(&launcher);
-                        let confirm_hold = Rc::clone(&hold);
-                        let navigation = navigation.clone();
-                        let entry = entry.clone();
-                        let action_bar = action_bar.clone();
-                        let script_output_view = script_output_view.clone();
-                        crate::ui::show_confirmation_panel(
-                            &window,
-                            &title,
-                            &detail,
-                            "Confirm",
-                            move || {
-                                // Confirmed: run the script off the main thread
-                                // so activation never blocks rendering; the
-                                // outcome is delivered back over a channel and
-                                // applied on the main loop.
-                                let (sender, receiver) = std::sync::mpsc::channel();
-                                let worker_action = action.clone();
-                                std::thread::spawn(move || {
-                                    let _ = sender.send(run_script_capture(&worker_action));
-                                });
-                                show_script_output_view(
-                                    &navigation,
-                                    &entry,
-                                    &action_bar,
-                                    &script_output_view,
-                                    &action.title,
-                                    "Running…",
-                                );
-                                let script_output_view = script_output_view.clone();
-                                let action = action.clone();
-                                let confirm_launcher = Rc::clone(&confirm_launcher);
-                                let confirm_window = confirm_window.clone();
-                                let confirm_hold = Rc::clone(&confirm_hold);
-                                glib::timeout_add_local(
-                                    std::time::Duration::from_millis(30),
-                                    move || match receiver.try_recv() {
-                                        Ok(outcome) => {
-                                            finish_script_run(
-                                                outcome,
-                                                &script_output_view,
-                                                &action,
-                                                &confirm_launcher,
-                                                &confirm_window,
-                                                &confirm_hold,
-                                            );
-                                            glib::ControlFlow::Break
-                                        }
-                                        Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                            glib::ControlFlow::Continue
-                                        }
-                                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                            glib::ControlFlow::Break
-                                        }
-                                    },
-                                );
-                            },
-                        );
-                    }
+                } else if action.category == "Script" || action.script_mode().is_some() {
+                    execute_script_action(
+                        &window,
+                        &launcher,
+                        &hold,
+                        &navigation,
+                        &entry,
+                        &action_bar,
+                        &script_output_view,
+                        action,
+                        Vec::new(),
+                    );
                 } else {
                     run_action_or_confirm(&window, &launcher, &hold, action);
                 }
@@ -479,6 +431,7 @@ fn build_ui(
         let clipboard_items = Rc::clone(&clipboard_items);
         let snippet_list = snippet_view.list.clone();
         let snippet_items = Rc::clone(&snippet_items);
+        let script_output_view = script_output_view.clone();
         let key_controller = EventControllerKey::new();
         key_controller.connect_key_pressed(move |_, key, keycode, state| {
             // Match shortcuts against the Latin-layout keyval so Ctrl+O etc. work
@@ -513,6 +466,7 @@ fn build_ui(
                 &extension_list,
                 &snippet_list,
                 &snippet_items,
+                &script_output_view,
                 key,
                 state,
             )
@@ -1764,6 +1718,7 @@ fn action_bar(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    script_output_view: &crate::ui::ScriptOutputView,
 ) -> (GtkBox, Label) {
     let bar = GtkBox::new(Orientation::Horizontal, 6);
     bar.add_css_class("action-bar");
@@ -1803,6 +1758,7 @@ fn action_bar(
         let media_view = media_view.clone();
         let network_list = network_list.clone();
         let notifications_view = notifications_view.clone();
+        let script_output_view = script_output_view.clone();
         run.connect_clicked(move |_| {
             run_selected_with_views(
                 &window,
@@ -1822,6 +1778,7 @@ fn action_bar(
                 &media_view,
                 &network_list,
                 &notifications_view,
+                &script_output_view,
             )
         });
     }
@@ -1920,6 +1877,9 @@ fn show_form_for_action(
     entry: &Entry,
     list: &ListBox,
     results: &Rc<RefCell<Vec<Action>>>,
+    navigation: &crate::ui::NavigationStack,
+    action_bar: &GtkBox,
+    script_output_view: &crate::ui::ScriptOutputView,
     action: Action,
 ) {
     let parent_window = window.clone();
@@ -1929,17 +1889,49 @@ fn show_form_for_action(
     let entry = entry.clone();
     let list = list.clone();
     let results = Rc::clone(results);
+    let navigation = navigation.clone();
+    let action_bar = action_bar.clone();
+    let script_output_view = script_output_view.clone();
 
     crate::ui::show_form_panel(&parent_window, action, move |action, values| {
-        launcher.borrow_mut().run_form_action(&action, values);
-        update_results(
-            &launcher.borrow(),
-            &results,
-            &list,
-            entry.text().as_str(),
-            None,
-        );
-        finish_interaction(&finish_window, &hold);
+        if action.category == "Script" || action.script_mode().is_some() {
+            let args: Vec<String> = if let Some(form) = action.form_data() {
+                form.fields
+                    .iter()
+                    .map(|f| {
+                        let val = values.get(&f.name).cloned().unwrap_or_default();
+                        if f.percent_encoded {
+                            crate::percent_encode(&val)
+                        } else {
+                            val
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            execute_script_action(
+                &finish_window,
+                &launcher,
+                &hold,
+                &navigation,
+                &entry,
+                &action_bar,
+                &script_output_view,
+                action,
+                args,
+            );
+        } else {
+            launcher.borrow_mut().run_form_action(&action, values);
+            update_results(
+                &launcher.borrow(),
+                &results,
+                &list,
+                entry.text().as_str(),
+                None,
+            );
+            finish_interaction(&finish_window, &hold);
+        }
     });
 }
 
@@ -1961,6 +1953,7 @@ pub(crate) fn run_selected_with_views(
     media_view: &crate::ui::MediaView,
     network_list: &ListBox,
     notifications_view: &crate::ui::NotificationsView,
+    script_output_view: &crate::ui::ScriptOutputView,
 ) {
     if let Some(action) = selected_action(list, results) {
         if let Some(command) = action.launcher_command() {
@@ -1980,9 +1973,32 @@ pub(crate) fn run_selected_with_views(
                 notifications_view,
             );
         } else if action.form_data().is_some() {
-            show_form_for_action(window, launcher, hold, entry, list, results, action);
+            show_form_for_action(
+                window,
+                launcher,
+                hold,
+                entry,
+                list,
+                results,
+                navigation,
+                action_bar,
+                script_output_view,
+                action,
+            );
         } else if action.json_command_data().is_some() {
             run_json_command_action_or_confirm(window, entry, list, results, action);
+        } else if action.category == "Script" || action.script_mode().is_some() {
+            execute_script_action(
+                window,
+                launcher,
+                hold,
+                navigation,
+                entry,
+                action_bar,
+                script_output_view,
+                action,
+                Vec::new(),
+            );
         } else {
             run_action_or_confirm(window, launcher, hold, action);
         }
@@ -2324,19 +2340,163 @@ fn finish_script_run(
 
 /// Run a Script action's executable synchronously (call from a worker thread)
 /// and classify its result for the capture path.
+#[allow(dead_code)]
 fn run_script_capture(action: &Action) -> ScriptCaptureOutcome {
-    let ActionKind::Shell(cmd) = &action.kind else {
-        return ScriptCaptureOutcome::NotCapturable;
+    run_script_capture_with_args(action, &[])
+}
+
+fn run_script_capture_with_args(action: &Action, args: &[String]) -> ScriptCaptureOutcome {
+    let path_str = match &action.kind {
+        ActionKind::Shell(cmd) => &cmd.command,
+        ActionKind::Form(form) => match &form.command {
+            ActionFormCommand::Argv { program, .. } => program,
+            ActionFormCommand::Shell(cmd) => cmd,
+        },
+        ActionKind::Command(cmd) => &cmd.program,
+        _ => return ScriptCaptureOutcome::NotCapturable,
     };
-    let path = std::path::Path::new(&cmd.command);
+    let path = std::path::Path::new(path_str);
     if !path.exists() {
         return ScriptCaptureOutcome::NotCapturable;
     }
-    match crate::search::scripts::run_script_stdout(path) {
+    match crate::search::scripts::run_script_stdout_with_args(path, args) {
         Ok(stdout) if !stdout.trim().is_empty() => ScriptCaptureOutcome::Output(stdout),
         // Executed with empty stdout (or the spawn failed after we attempted
         // it): the script was tried, so callers must never respawn it.
         _ => ScriptCaptureOutcome::RanWithoutOutput,
+    }
+}
+
+fn execute_script_action(
+    window: &ApplicationWindow,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    navigation: &crate::ui::NavigationStack,
+    entry: &Entry,
+    action_bar: &GtkBox,
+    script_output_view: &crate::ui::ScriptOutputView,
+    action: Action,
+    args: Vec<String>,
+) {
+    let mode = action.script_mode().unwrap_or(crate::ScriptMode::FullOutput);
+
+    if args.is_empty() && action.risk.requires_confirmation() {
+        let title = action.risk.label().to_string();
+        let detail = action_confirmation_detail(&action);
+        let confirm_window = window.clone();
+        let launcher = Rc::clone(launcher);
+        let hold = Rc::clone(hold);
+        let navigation = navigation.clone();
+        let entry = entry.clone();
+        let action_bar = action_bar.clone();
+        let script_output_view = script_output_view.clone();
+        crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
+            dispatch_script_run(
+                &confirm_window,
+                &launcher,
+                &hold,
+                &navigation,
+                &entry,
+                &action_bar,
+                &script_output_view,
+                &action,
+                &args,
+                mode,
+            );
+        });
+    } else {
+        dispatch_script_run(
+            window,
+            launcher,
+            hold,
+            navigation,
+            entry,
+            action_bar,
+            script_output_view,
+            &action,
+            &args,
+            mode,
+        );
+    }
+}
+
+fn dispatch_script_run(
+    window: &ApplicationWindow,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    navigation: &crate::ui::NavigationStack,
+    entry: &Entry,
+    action_bar: &GtkBox,
+    script_output_view: &crate::ui::ScriptOutputView,
+    action: &Action,
+    args: &[String],
+    mode: crate::ScriptMode,
+) {
+    let _ = launcher.borrow_mut().record_recent(action);
+
+    match mode {
+        crate::ScriptMode::Silent => {
+            let worker_action = action.clone();
+            let worker_args = args.to_vec();
+            std::thread::spawn(move || {
+                let _ = run_script_capture_with_args(&worker_action, &worker_args);
+            });
+            finish_interaction(window, hold);
+        }
+        crate::ScriptMode::Compact => {
+            let worker_action = action.clone();
+            let worker_args = args.to_vec();
+            let script_title = action.title.clone();
+            std::thread::spawn(move || {
+                let outcome = run_script_capture_with_args(&worker_action, &worker_args);
+                if let ScriptCaptureOutcome::Output(stdout) = outcome {
+                    let trimmed = stdout.trim();
+                    if !trimmed.is_empty() {
+                        crate::push_notification(&script_title, trimmed, "", 0);
+                    }
+                }
+            });
+            finish_interaction(window, hold);
+        }
+        crate::ScriptMode::FullOutput | crate::ScriptMode::Inline => {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let worker_action = action.clone();
+            let worker_args = args.to_vec();
+            std::thread::spawn(move || {
+                let _ = sender.send(run_script_capture_with_args(&worker_action, &worker_args));
+            });
+            show_script_output_view(
+                navigation,
+                entry,
+                action_bar,
+                script_output_view,
+                &action.title,
+                "Running…",
+            );
+            let script_output_view = script_output_view.clone();
+            let action = action.clone();
+            let launcher = Rc::clone(launcher);
+            let window = window.clone();
+            let hold = Rc::clone(hold);
+            glib::timeout_add_local(
+                std::time::Duration::from_millis(30),
+                move || match receiver.try_recv() {
+                    Ok(outcome) => {
+                        finish_script_run(
+                            outcome,
+                            &script_output_view,
+                            &action,
+                            &launcher,
+                            &window,
+                            &hold,
+                        );
+                        glib::ControlFlow::Break
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+                },
+            );
+        }
     }
 }
 

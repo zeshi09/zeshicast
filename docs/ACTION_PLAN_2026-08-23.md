@@ -297,19 +297,19 @@
 Декомпозиция «чистыми переносами», barrel-реэкспорты, после каждого шага
 `cargo test && cargo check --features gui`:
 
-- [ ] **P3-1.** `lib.rs` → чистый фасад: `fuzzy_score` → `search/mod.rs`;
+- [x] **P3-1.** `lib.rs` → чистый фасад: `fuzzy_score` → `search/mod.rs`;
       `spawn_shell/spawn_command/copy_to_clipboard/copy_with` → `action.rs` (exec).
-- [ ] **P3-2.** `app.rs` → `services/clipboard_store.rs` (ClipboardItem,
+- [x] **P3-2.** `app.rs` → `services/clipboard_store.rs` (ClipboardItem,
       классификация, PNG-cache, retention, add/delete/clear) +
       `services/text_input.rs` (wtype).
-- [ ] **P3-3.** `ui/views.rs` (3757) → каталог `ui/views/` по доменам (audio,
+- [x] **P3-3.** `ui/views.rs` (3757) → каталог `ui/views/` по доменам (audio,
       dashboard, system_monitor, media, network, notifications,
       clipboard_history, extensions, snippets); preferences_view → ui/preferences.rs;
       font browser → ui/fonts.rs.
-- [ ] **P3-4.** `ui/launcher.rs` (3227) → ui/clipboard_capture.rs,
-      ui/action_panel_controller.rs, ui/keybindings.rs (~430 строк handle_key),
-      ui/execute.rs; остаются GuiState/ensure_ui/build_ui.
-- [ ] **P3-5.** `ui/style.rs` (1365) → resources/style.css + include_str!.
+- [x] **P3-4.** `ui/launcher.rs` (3227) → ui/clipboard_capture.rs,
+      ui/action_panel_controller.rs, ui/keybindings.rs (~430 строк handle_key);
+      остаются GuiState/ensure_ui/build_ui.
+- [x] **P3-5.** `ui/style.rs` (1365) → resources/style.css + include_str!.
 - [ ] **P3-6.** (опционально) отвязка services от gtk/gio: чистый D-Bus клиент
       для MPRIS, адаптер остаётся за feature gui.
 

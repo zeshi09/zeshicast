@@ -14,6 +14,31 @@ pub enum CommandArgumentKind {
     Enum,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScriptMode {
+    #[default]
+    FullOutput,
+    Compact,
+    Silent,
+    Inline,
+}
+
+pub fn percent_encode(input: &str) -> String {
+    let mut encoded = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(encoded, "%{:02X}", byte);
+            }
+        }
+    }
+    encoded
+}
+
 #[derive(Debug, Clone)]
 pub struct ActionFormField {
     pub name: String,
@@ -22,6 +47,7 @@ pub struct ActionFormField {
     pub default: String,
     pub options: Vec<String>,
     pub current_value: String,
+    pub percent_encoded: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +162,7 @@ pub struct Action {
     pub risk: ActionRisk,
     pub(crate) kind: ActionKind,
     pub score: i32,
+    pub(crate) script_mode: Option<ScriptMode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,6 +317,7 @@ impl Action {
             risk: ActionRisk::Normal,
             kind,
             score,
+            script_mode: None,
         }
     }
 
@@ -306,6 +334,15 @@ impl Action {
     pub(crate) fn with_risk(mut self, risk: ActionRisk) -> Self {
         self.risk = risk;
         self
+    }
+
+    pub fn with_script_mode(mut self, mode: ScriptMode) -> Self {
+        self.script_mode = Some(mode);
+        self
+    }
+
+    pub fn script_mode(&self) -> Option<ScriptMode> {
+        self.script_mode
     }
 
     pub fn run(&self) {

@@ -1,11 +1,24 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::commands::parse_capabilities;
 use crate::{
-    Action, ActionKind, ActionRisk, Capability, ExtensionManifest, ExtensionOrigin, ShellCommand,
-    fuzzy_score,
+    Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
+    CommandArgumentKind, ExtensionManifest, ExtensionOrigin, ScriptMode, ShellCommand, fuzzy_score,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScriptArgument {
+    pub(crate) index: usize,
+    pub(crate) name: String,
+    pub(crate) placeholder: String,
+    pub(crate) kind: CommandArgumentKind,
+    pub(crate) optional: bool,
+    pub(crate) percent_encoded: bool,
+    pub(crate) options: Vec<String>,
+    pub(crate) default: String,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ScriptEntry {
@@ -16,14 +29,9 @@ pub(crate) struct ScriptEntry {
     pub(crate) path: PathBuf,
     pub(crate) origin: Option<ExtensionOrigin>,
     pub(crate) capabilities: Vec<Capability>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ScriptMode {
-    Compact,
-    FullOutput,
-    Silent,
+    pub(crate) mode: ScriptMode,
+    pub(crate) arguments: Vec<ScriptArgument>,
+    pub(crate) needs_confirmation: Option<bool>,
 }
 
 impl ScriptEntry {
@@ -94,6 +102,87 @@ fn is_script_file(path: &Path) -> bool {
     )
 }
 
+fn parse_argument_meta(comment: &str) -> Option<(usize, ScriptArgument)> {
+    let rest = comment
+        .strip_prefix("@raycast.argument")
+        .or_else(|| comment.strip_prefix("@vicinae.argument"))?;
+
+    let split_pos = rest.find(|c: char| c.is_whitespace() || c == '{')?;
+    let (idx_str, remainder) = rest.split_at(split_pos);
+    let index: usize = idx_str.parse().ok()?;
+    let json_start = remainder.find('{')?;
+    let json_str = &remainder[json_start..];
+
+    let val: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let obj = val.as_object()?;
+
+    let arg_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("text");
+    let kind = match arg_type {
+        "dropdown" | "enum" => CommandArgumentKind::Enum,
+        "number" => CommandArgumentKind::Number,
+        "path" => CommandArgumentKind::Path,
+        "bool" | "boolean" => CommandArgumentKind::Bool,
+        _ => CommandArgumentKind::Text,
+    };
+
+    let placeholder = obj
+        .get("placeholder")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let name = if !placeholder.is_empty() {
+        placeholder.clone()
+    } else {
+        format!("argument{index}")
+    };
+
+    let optional = obj
+        .get("optional")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let percent_encoded = obj
+        .get("percentEncoded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let mut options = Vec::new();
+    if let Some(data) = obj.get("data").and_then(|v| v.as_array()) {
+        for item in data {
+            if let Some(s) = item.as_str() {
+                options.push(s.to_string());
+            } else if let Some(opt_obj) = item.as_object() {
+                if let Some(val) = opt_obj.get("value").and_then(|v| v.as_str()) {
+                    options.push(val.to_string());
+                } else if let Some(title) = opt_obj.get("title").and_then(|v| v.as_str()) {
+                    options.push(title.to_string());
+                }
+            }
+        }
+    }
+
+    let default = obj
+        .get("default")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Some((
+        index,
+        ScriptArgument {
+            index,
+            name,
+            placeholder,
+            kind,
+            optional,
+            percent_encoded,
+            options,
+            default,
+        },
+    ))
+}
+
 pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
     let content = fs::read_to_string(path).ok()?;
 
@@ -102,7 +191,9 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
     let mut description = String::new();
     let mut package = String::new();
     let mut icon = "text-x-script-symbolic".to_string();
-    let mut _mode = ScriptMode::Compact;
+    let mut mode = ScriptMode::FullOutput;
+    let mut needs_confirmation: Option<bool> = None;
+    let mut arguments_map: BTreeMap<usize, ScriptArgument> = BTreeMap::new();
 
     for line in content.lines().take(50) {
         let line = line.trim();
@@ -125,11 +216,17 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
         } else if let Some(value) = raycast_meta(comment, "icon") {
             icon = value.to_string();
         } else if let Some(value) = raycast_meta(comment, "mode") {
-            _mode = match value {
+            mode = match value {
                 "fullOutput" => ScriptMode::FullOutput,
                 "silent" => ScriptMode::Silent,
-                _ => ScriptMode::Compact,
+                "compact" => ScriptMode::Compact,
+                "inline" => ScriptMode::Inline,
+                _ => ScriptMode::FullOutput,
             };
+        } else if let Some(value) = raycast_meta(comment, "needsConfirmation") {
+            needs_confirmation = value.parse().ok();
+        } else if let Some((idx, arg)) = parse_argument_meta(comment) {
+            arguments_map.insert(idx, arg);
         }
     }
 
@@ -145,6 +242,9 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
         path: path.to_path_buf(),
         origin: None,
         capabilities: Vec::new(),
+        mode,
+        arguments: arguments_map.into_values().collect(),
+        needs_confirmation,
     })
 }
 
@@ -162,13 +262,38 @@ fn raycast_meta<'a>(comment: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
+/// Run a script with arguments and return its stdout.
+#[cfg(feature = "gui")]
+pub(crate) fn run_script_stdout_with_args(
+    path: &std::path::Path,
+    args: &[String],
+) -> std::io::Result<String> {
+    let res = std::process::Command::new(path).args(args).output();
+    let output = match res {
+        Ok(o) => o,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            let mut cmd = match ext {
+                "py" => std::process::Command::new("python3"),
+                "js" | "ts" => std::process::Command::new("node"),
+                "rb" => std::process::Command::new("ruby"),
+                _ => std::process::Command::new("sh"),
+            };
+            cmd.arg(path)
+                .args(args)
+                .output()
+                .map_err(|err| std::io::Error::other(err.to_string()))?
+        }
+        Err(e) => return Err(std::io::Error::other(e.to_string())),
+    };
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 /// Run a script and return its stdout. Used for mode=fullOutput / compact result display.
 #[cfg(feature = "gui")]
+#[allow(dead_code)]
 pub(crate) fn run_script_stdout(path: &std::path::Path) -> std::io::Result<String> {
-    let output = std::process::Command::new(path)
-        .output()
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    run_script_stdout_with_args(path, &[])
 }
 
 pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action> {
@@ -218,9 +343,40 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
                     "Blocked: script extension manifest lacks capabilities = [\"shell\"]"
                         .to_string();
                 (ActionKind::None, "dialog-warning-symbolic")
-            } else {
+            } else if entry.arguments.is_empty() {
                 let cmd = entry.path.to_string_lossy().to_string();
                 (ActionKind::Shell(ShellCommand::new(&cmd)), entry.icon.as_str())
+            } else {
+                let fields = entry
+                    .arguments
+                    .iter()
+                    .map(|arg| ActionFormField {
+                        name: arg.name.clone(),
+                        kind: arg.kind,
+                        required: !arg.optional,
+                        default: arg.default.clone(),
+                        options: arg.options.clone(),
+                        current_value: arg.default.clone(),
+                        percent_encoded: arg.percent_encoded,
+                    })
+                    .collect();
+                let form = ActionForm {
+                    name: entry.title.clone(),
+                    fields,
+                    command: ActionFormCommand::Argv {
+                        program: entry.path.to_string_lossy().to_string(),
+                        args: entry
+                            .arguments
+                            .iter()
+                            .map(|arg| format!("{{{{arg:{}}}}}", arg.name))
+                            .collect(),
+                    },
+                    env: std::collections::HashMap::new(),
+                    preferences: std::collections::HashMap::new(),
+                    current_args: std::collections::HashMap::new(),
+                    partial_query: String::new(),
+                };
+                (ActionKind::Form(form), entry.icon.as_str())
             };
             let mut action = Action::new(
                 category,
@@ -229,8 +385,9 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
                 score + if explicit { 120 } else { 0 },
             )
             .with_subtitle(subtitle)
-            .with_icon(icon_name);
-            if !blocked {
+            .with_icon(icon_name)
+            .with_script_mode(entry.mode);
+            if !blocked && entry.needs_confirmation != Some(false) {
                 action = action.with_risk(ActionRisk::Shell);
             }
             Some(action)
@@ -348,6 +505,118 @@ mod tests {
         assert!(action.risk.requires_confirmation());
         assert!(action.execution_request().is_some());
         assert!(!action.subtitle.starts_with("Blocked"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parse_script_metadata_modes_and_arguments() {
+        let dir = test_dir("meta-args");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("search.sh");
+        let content = "#!/bin/sh\n\
+            # @raycast.schemaVersion 1\n\
+            # @raycast.title Web Search\n\
+            # @raycast.mode compact\n\
+            # @raycast.packageName web.search\n\
+            # @raycast.needsConfirmation false\n\
+            # @raycast.argument1 { \"type\": \"text\", \"placeholder\": \"Search Query\", \"percentEncoded\": true }\n\
+            # @raycast.argument2 { \"type\": \"dropdown\", \"placeholder\": \"Engine\", \"optional\": true, \"data\": [{\"title\": \"Google\", \"value\": \"g\"}, {\"title\": \"Bing\", \"value\": \"b\"}] }\n\
+            echo \"searching\"\n";
+        fs::write(&path, content).unwrap();
+
+        let entry = parse_script_entry(&path).expect("should parse script entry");
+        assert_eq!(entry.title, "Web Search");
+        assert_eq!(entry.mode, ScriptMode::Compact);
+        assert_eq!(entry.needs_confirmation, Some(false));
+        assert_eq!(entry.arguments.len(), 2);
+
+        let arg1 = &entry.arguments[0];
+        assert_eq!(arg1.index, 1);
+        assert_eq!(arg1.name, "Search Query");
+        assert_eq!(arg1.kind, CommandArgumentKind::Text);
+        assert!(arg1.percent_encoded);
+        assert!(!arg1.optional);
+
+        let arg2 = &entry.arguments[1];
+        assert_eq!(arg2.index, 2);
+        assert_eq!(arg2.name, "Engine");
+        assert_eq!(arg2.kind, CommandArgumentKind::Enum);
+        assert!(arg2.optional);
+        assert_eq!(arg2.options, vec!["g", "b"]);
+
+        // Search creates ActionKind::Form because arguments are required
+        let actions = search_scripts(&[entry], "Web Search");
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert_eq!(action.script_mode(), Some(ScriptMode::Compact));
+        // needsConfirmation was false, so risk should remain Normal
+        assert_eq!(action.risk, ActionRisk::Normal);
+        assert!(action.form_data().is_some());
+        let form = action.form_data().unwrap();
+        assert_eq!(form.fields.len(), 2);
+        assert_eq!(form.fields[0].name, "Search Query");
+        assert!(form.fields[0].percent_encoded);
+        assert_eq!(form.fields[1].name, "Engine");
+        assert_eq!(form.fields[1].options, vec!["g", "b"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parse_vicinae_script_metadata() {
+        let dir = test_dir("vicinae-meta");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("vicinae_test.sh");
+        let content = "#!/bin/sh\n\
+            // @vicinae.schemaVersion 1\n\
+            // @vicinae.title Vicinae Test\n\
+            // @vicinae.mode silent\n\
+            // @vicinae.argument1 { \"type\": \"text\", \"placeholder\": \"Vicinae Arg\" }\n";
+        fs::write(&path, content).unwrap();
+
+        let entry = parse_script_entry(&path).expect("should parse vicinae entry");
+        assert_eq!(entry.title, "Vicinae Test");
+        assert_eq!(entry.mode, ScriptMode::Silent);
+        assert_eq!(entry.arguments.len(), 1);
+        assert_eq!(entry.arguments[0].name, "Vicinae Arg");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn percent_encoding_works() {
+        assert_eq!(crate::percent_encode("hello world"), "hello%20world");
+        assert_eq!(
+            crate::percent_encode("foo+bar/baz?a=1&b=2"),
+            "foo%2Bbar%2Fbaz%3Fa%3D1%26b%3D2"
+        );
+        assert_eq!(
+            crate::percent_encode("unreserved-_.~123"),
+            "unreserved-_.~123"
+        );
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn run_script_with_args_captures_output() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = test_dir("run-args");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("greet.sh");
+        let content = "#!/bin/sh\necho \"Hello $1, welcome to $2!\"\n";
+        fs::write(&path, content).unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+
+        let output = run_script_stdout_with_args(
+            &path,
+            &["Zeshi".to_string(), "Zeshicast".to_string()],
+        )
+        .expect("script execution succeeded");
+
+        assert_eq!(output.trim(), "Hello Zeshi, welcome to Zeshicast!");
 
         fs::remove_dir_all(&dir).ok();
     }

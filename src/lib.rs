@@ -11,8 +11,8 @@ pub mod ui;
 
 pub use action::{
     Action, ActionForm, ActionFormField, ActionPanelSection, ActionRisk, Capability,
-    CommandArgumentKind, ExecutionDecision, ExecutionPolicy, LauncherCommand, SecondaryAction,
-    SecondaryActionKind, copy_text,
+    CommandArgumentKind, ExecutionDecision, ExecutionPolicy, LauncherCommand, ScriptMode,
+    SecondaryAction, SecondaryActionKind, copy_text, percent_encode,
 };
 pub(crate) use action::{
     ActionFormCommand, ActionKind, HttpRequest, JsonCommandAction, ProcessCommand, ShellCommand,

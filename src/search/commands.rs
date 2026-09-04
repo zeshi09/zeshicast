@@ -408,6 +408,7 @@ pub(crate) fn search_commands(
                             .get(&arg.name)
                             .cloned()
                             .unwrap_or_default(),
+                        percent_encoded: false,
                     })
                     .collect();
                 let form = ActionForm {
