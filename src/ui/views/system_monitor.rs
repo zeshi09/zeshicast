@@ -240,8 +240,10 @@ pub fn system_monitor_view(
 
     let sort_cpu = Button::with_label("CPU ↓");
     sort_cpu.add_css_class("action-bar-more");
+    sort_cpu.set_tooltip_text(Some("Sort by CPU usage"));
     let sort_mem = Button::with_label("MEM");
     sort_mem.add_css_class("action-bar-more");
+    sort_mem.set_tooltip_text(Some("Sort by Memory usage"));
     table_header.append(&sort_cpu);
     table_header.append(&sort_mem);
     root.append(&table_header);

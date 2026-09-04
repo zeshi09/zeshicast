@@ -197,6 +197,7 @@ fn media_ctrl_btn(icon_name: &str, tooltip: &str, css_class: &str) -> Button {
 fn media_play_btn(_icon: &str) -> Button {
     let btn = Button::from_icon_name("media-playback-pause-symbolic");
     btn.add_css_class("media-btn-primary");
+    btn.set_tooltip_text(Some("Play / Pause"));
     btn.set_size_request(48, 48);
     btn.set_halign(gtk::Align::Center);
     btn.set_valign(gtk::Align::Center);

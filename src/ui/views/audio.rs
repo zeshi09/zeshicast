@@ -102,6 +102,7 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
 
     let mute_input = Button::with_label("🎙");
     mute_input.add_css_class("action-bar-btn");
+    mute_input.set_tooltip_text(Some("Toggle microphone mute"));
     mute_input.set_valign(gtk::Align::Center);
 
     let input_bar_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);

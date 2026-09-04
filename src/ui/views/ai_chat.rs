@@ -96,12 +96,14 @@ pub fn ai_chat_view() -> AiChatView {
 
     let ask = Button::with_label("↑");
     ask.add_css_class("ai-send-btn");
+    ask.set_tooltip_text(Some("Send prompt (Enter)"));
     ask.set_valign(gtk::Align::Center);
     input_row.append(&ask);
 
     let stop = Button::with_label("■");
     stop.add_css_class("dashboard-button");
     stop.add_css_class("widget-btn");
+    stop.set_tooltip_text(Some("Stop generation"));
     stop.set_visible(false);
     input_row.append(&stop);
 

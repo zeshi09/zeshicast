@@ -186,6 +186,7 @@ fn notification_history_row(
     dismiss.add_css_class("action-bar-btn");
     dismiss.add_css_class("kill-btn");
     dismiss.set_valign(gtk::Align::Start);
+    dismiss.set_tooltip_text(Some("Dismiss notification"));
     if let Some(id) = entry.id {
         let row_weak = row.downgrade();
         dismiss.connect_clicked(move |_| {
