@@ -1,0 +1,32 @@
+pub mod action_panel;
+pub mod ai_chat;
+pub mod audio;
+pub mod clipboard_history;
+pub mod dashboard;
+pub mod emoji;
+pub mod extensions;
+pub mod media;
+pub mod metric_graph;
+pub mod network;
+pub mod notifications;
+pub mod script_output;
+pub mod snippets;
+pub mod system_monitor;
+
+pub use action_panel::*;
+pub use ai_chat::*;
+pub use audio::*;
+pub use clipboard_history::*;
+pub use dashboard::*;
+pub use emoji::*;
+pub use extensions::*;
+pub use media::*;
+pub use network::*;
+pub use notifications::*;
+pub use script_output::*;
+pub use snippets::*;
+pub use system_monitor::*;
+
+pub use super::fonts::{FontBrowserView, font_browser_view};
+pub use super::preferences::{PreferencesView, preferences_view};
+pub(crate) use super::widgets::*;
