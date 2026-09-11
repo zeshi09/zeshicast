@@ -2010,7 +2010,9 @@ fn show_form_for_action(
         let navigation = navigation.clone();
         let action_bar = action_bar.clone();
         let script_output_view = script_output_view.clone();
-        crate::ui::show_confirmation_panel(&window, &title, &detail, "Confirm", move || {
+        // The panel borrows a clone: `window` itself is moved into the closure.
+        let confirm_window = window.clone();
+        crate::ui::show_confirmation_panel(&confirm_window, &title, &detail, "Confirm", move || {
             present_form_panel(
                 &window,
                 &launcher,
