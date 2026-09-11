@@ -2,7 +2,7 @@ use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use zeshicast::cli::{CliCommand, parse_cli_args};
+use zeshicast::cli::{parse_cli_args, CliCommand};
 use zeshicast::{Action, ExecutionDecision, SecondaryActionKind, Zeshicast};
 
 fn main() {
