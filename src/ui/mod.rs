@@ -13,6 +13,7 @@ mod notify_server;
 mod osd;
 mod panels;
 mod preferences;
+mod search_flow;
 mod status_strip;
 mod style;
 mod views;

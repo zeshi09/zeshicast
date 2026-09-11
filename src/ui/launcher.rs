@@ -294,24 +294,32 @@ fn build_ui(
         let list = list.clone();
         let mode_badge = mode_badge.clone();
         let result_counter = result_counter.clone();
+        let search_flow = crate::ui::search_flow::SearchFlow::new();
         entry.connect_changed(move |entry| {
-            let query = entry.text();
-            let q = query.as_str();
-            if q.starts_with('=') {
-                mode_badge.set_text("Calculator");
-                mode_badge.set_visible(true);
-            } else if q.starts_with("file ") || q.starts_with("find ") {
-                mode_badge.set_text("File Search");
-                mode_badge.set_visible(true);
-            } else {
-                mode_badge.set_visible(false);
-            }
-            update_results(
-                &launcher.borrow(),
-                &results,
-                &list,
-                q,
-                Some(&result_counter),
+            let query = entry.text().to_string();
+            update_mode_badge(&mode_badge, &query);
+
+            // Debounced (M-1): a burst of keystrokes runs one search, and a
+            // result that a newer query made stale is not rendered.
+            let launcher = Rc::clone(&launcher);
+            let results = Rc::clone(&results);
+            let list = list.clone();
+            let result_counter = result_counter.clone();
+            let displayed_query = query.clone();
+            let searching = Rc::clone(&launcher);
+            search_flow.request(
+                query,
+                move |query| searching.borrow().search(query),
+                move |actions| {
+                    render_results(
+                        &launcher.borrow(),
+                        &results,
+                        &list,
+                        &displayed_query,
+                        Some(&result_counter),
+                        actions,
+                    );
+                },
             );
         });
     }
@@ -1317,6 +1325,36 @@ pub(crate) fn update_results(
     query: &str,
     counter: Option<&Label>,
 ) {
+    render_results(launcher, results, list, query, counter, launcher.search(query));
+}
+
+/// The mode badge follows every keystroke immediately: it is cheap, and the
+/// debounced search must not delay visible feedback (M-1).
+fn update_mode_badge(mode_badge: &Label, query: &str) {
+    if query.starts_with('=') {
+        mode_badge.set_text("Calculator");
+        mode_badge.set_visible(true);
+    } else if query.starts_with("file ") || query.starts_with("find ") {
+        mode_badge.set_text("File Search");
+        mode_badge.set_visible(true);
+    } else {
+        mode_badge.set_visible(false);
+    }
+}
+
+/// The rendering half of the search flow: everything that touches widgets.
+///
+/// Split out of [`update_results`] so the search itself can run later (debounced
+/// and, eventually, off the main loop) while rendering happens on the main
+/// thread (M-1).
+pub(crate) fn render_results(
+    launcher: &Zeshicast,
+    results: &Rc<RefCell<Vec<Action>>>,
+    list: &ListBox,
+    query: &str,
+    counter: Option<&Label>,
+    actions: Vec<Action>,
+) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
@@ -1327,7 +1365,6 @@ pub(crate) fn update_results(
         list.append(&calc_result_row(expr));
     }
 
-    let actions = launcher.search(query);
     let displayed_actions = if query.trim().is_empty() {
         append_grouped_root_actions(launcher, list, actions)
     } else if !actions.is_empty() {
