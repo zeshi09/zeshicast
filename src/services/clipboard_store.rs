@@ -146,10 +146,7 @@ fn is_png_file(path: &Path) -> bool {
             .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
 }
 
-pub fn prune_clipboard_image_cache_dir(
-    cache_dir: &Path,
-    entries: &[String],
-) -> io::Result<()> {
+pub fn prune_clipboard_image_cache_dir(cache_dir: &Path, entries: &[String]) -> io::Result<()> {
     if !cache_dir.exists() {
         return Ok(());
     }

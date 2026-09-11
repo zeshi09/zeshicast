@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use super::commands::parse_capabilities;
 use crate::{
-    Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
-    CapabilitySet, CommandArgumentKind, ExtensionManifest, ExtensionOrigin, ProcessCommand,
-    ScriptMode, fuzzy_score,
+    fuzzy_score, Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk,
+    Capability, CapabilitySet, CommandArgumentKind, ExtensionManifest, ExtensionOrigin,
+    ProcessCommand, ScriptMode,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -434,7 +434,7 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ActionRisk, ExecutionRequest, ExecutionTicket, ExtensionManifest, execute};
+    use crate::{execute, ActionRisk, ExecutionRequest, ExecutionTicket, ExtensionManifest};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};

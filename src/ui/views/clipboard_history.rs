@@ -1,6 +1,6 @@
+use crate::ClipboardSummary;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, DropDown, Label, ListBox, Orientation, StringList};
-use crate::ClipboardSummary;
 
 #[derive(Clone)]
 pub struct ClipboardHistoryView {
@@ -14,7 +14,6 @@ pub struct ClipboardHistoryView {
     pub detail_size: Label,
     pub detail_mime: Label,
 }
-
 
 pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryView {
     let root = GtkBox::new(Orientation::Horizontal, 0);
@@ -156,7 +155,6 @@ pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryVie
     view
 }
 
-
 pub fn set_clipboard_history_items(list: &ListBox, items: &[ClipboardSummary]) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -229,7 +227,6 @@ pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&Clipboard
     }
 }
 
-
 fn clipboard_row(item: &ClipboardSummary) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.add_css_class("result-row");
@@ -290,4 +287,3 @@ fn clipboard_detail_text(value: &str) -> String {
     detail.push_str("\n...");
     detail
 }
-

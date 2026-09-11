@@ -15,7 +15,7 @@ For contributor workflows, read [docs/development.md](docs/development.md).
 ![Dashboard](docs/img/dashboard.png)
 
 | | |
-|---|---|
+| --- | --- |
 | **Media** — MPRIS over D-Bus, album art, scrubber | **Audio** — output/input devices and volumes |
 | ![Media](docs/img/media.png) | ![Audio](docs/img/audio.png) |
 | **Notifications** — built-in freedesktop D-Bus server | **Network** — Ethernet + Wi-Fi |
