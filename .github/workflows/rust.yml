@@ -9,6 +9,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Least privilege: every job here only reads the repository (zizmor:
+# excessive-permissions).
+permissions:
+  contents: read
+
 jobs:
   rust:
     name: Rust / ${{ matrix.name }}
@@ -25,9 +30,13 @@ jobs:
             command: cargo test
 
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned to a full commit SHA (zizmor: unpinned-uses) so a
+      # re-pointed tag cannot inject code into CI.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false # zizmor: artipacked
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.command }}
 
@@ -52,14 +61,16 @@ jobs:
             command: nix develop --command cargo check --features gui,layer-shell
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
       - name: Cache Nix store
-        uses: DeterminateSystems/magic-nix-cache-action@v14
+        uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d # v14
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.command }}
 
@@ -68,9 +79,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check licenses bans sources
           arguments: --all-features
