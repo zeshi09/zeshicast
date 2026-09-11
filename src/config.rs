@@ -1,10 +1,22 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const EXPORT_SECRETS_PREFERENCE_KEY: &str = "export_include_secrets";
+const EXPORT_HISTORY_PREFERENCE_KEY: &str = "export_include_history";
+
+/// Resolve the `--include-history` CLI flag against the global preferences.
+///
+/// Clipboard/usage history (`zeshicast.db`, `calc_history.json`) is *not*
+/// exported by default: a "safe" export is meant to be shareable (M-12).
+pub fn resolve_include_history(
+    cli_flag: Option<bool>,
+    preferences: &HashMap<String, String>,
+) -> bool {
+    cli_flag.unwrap_or_else(|| preference_bool(preferences, EXPORT_HISTORY_PREFERENCE_KEY, false))
+}
 
 /// Resolve the `--include-secrets` CLI flag against the global preferences.
 /// An explicit CLI value wins; without one the `export_include_secrets`
@@ -25,6 +37,7 @@ pub fn export_config_with_options(
     config_dir: &Path,
     dest: &Path,
     include_secrets: bool,
+    include_history: bool,
 ) -> io::Result<()> {
     if include_secrets {
         return export_config_dir(config_dir, dest);
@@ -41,7 +54,7 @@ pub fn export_config_with_options(
     fs::create_dir_all(&staged_config)?;
 
     let result = (|| {
-        copy_config_sanitized(config_dir, &staged_config)?;
+        copy_config_sanitized(config_dir, &staged_config, Path::new(""), include_history)?;
         sanitize_export_preferences(&staged_config.join("preferences.toml"))?;
         export_config_dir(&staged_config, dest)
     })();
@@ -54,13 +67,67 @@ fn export_config_dir(config_dir: &Path, dest: &Path) -> io::Result<()> {
     let dest_file = fs::File::create(dest)?;
     let enc = flate2::write::GzEncoder::new(dest_file, flate2::Compression::default());
     let mut builder = tar::Builder::new(enc);
-    let root_name = config_dir.file_name().unwrap_or_default();
-    builder.append_dir_all(root_name, config_dir)?;
+    // Append the tree by hand instead of `append_dir_all`: the latter follows
+    // symlinks, so a link pointing at `/etc/shadow` would be archived as its
+    // target's content (M-12).
+    let base = config_dir.parent().unwrap_or(Path::new("/"));
+    append_tree(&mut builder, base, config_dir)?;
     builder.finish()?;
     Ok(())
 }
 
-fn copy_config_sanitized(src: &Path, dest: &Path) -> io::Result<()> {
+/// Archive `dir` (relative to `base`) without ever following a symlink.
+fn append_tree<W: io::Write>(
+    builder: &mut tar::Builder<W>,
+    base: &Path,
+    dir: &Path,
+) -> io::Result<()> {
+    let mut entries: Vec<fs::DirEntry> = fs::read_dir(dir)?.collect::<Result<_, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        // `file_type` comes from the directory entry, so it reports a symlink
+        // instead of resolving it.
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(base)
+            .map_err(|_| io::Error::other("path outside the config directory"))?
+            .to_path_buf();
+        let metadata = entry.metadata()?;
+
+        if file_type.is_dir() {
+            let mut header = tar::Header::new_gnu();
+            header.set_metadata(&metadata);
+            builder.append_data(&mut header, &relative, io::empty())?;
+            append_tree(builder, base, &path)?;
+        } else if file_type.is_file() {
+            let mut header = tar::Header::new_gnu();
+            header.set_metadata(&metadata);
+            let mut file = fs::File::open(&path)?;
+            builder.append_data(&mut header, &relative, &mut file)?;
+        }
+    }
+    Ok(())
+}
+
+/// Clipboard/usage history files, excluded from a "safe" export.
+const HISTORY_FILES: [&str; 4] = [
+    "zeshicast.db",
+    "zeshicast.db-wal",
+    "zeshicast.db-shm",
+    "calc_history.json",
+];
+
+fn copy_config_sanitized(
+    src: &Path,
+    dest: &Path,
+    relative: &Path,
+    include_history: bool,
+) -> io::Result<()> {
     if !src.exists() {
         return Ok(());
     }
@@ -72,16 +139,67 @@ fn copy_config_sanitized(src: &Path, dest: &Path) -> io::Result<()> {
             continue;
         }
 
+        let name = entry.file_name();
+        let name = name.to_string_lossy().into_owned();
+        let child_relative = relative.join(&name);
         let path = entry.path();
-        let dest_path = dest.join(entry.file_name());
+        let dest_path = dest.join(&name);
         if file_type.is_dir() {
             fs::create_dir_all(&dest_path)?;
-            copy_config_sanitized(&path, &dest_path)?;
+            copy_config_sanitized(&path, &dest_path, &child_relative, include_history)?;
         } else if file_type.is_file() {
-            fs::copy(&path, &dest_path)?;
+            if !include_history && HISTORY_FILES.contains(&name.as_str()) {
+                continue;
+            }
+            if is_command_toml(&child_relative) {
+                // `[env]` values are frequently tokens, so the safe export
+                // drops the table (M-12).
+                let content = fs::read_to_string(&path).unwrap_or_default();
+                fs::write(&dest_path, strip_env_table(&content))?;
+            } else {
+                fs::copy(&path, &dest_path)?;
+            }
         }
     }
     Ok(())
+}
+
+/// `commands/*.toml` (custom commands) and `extensions/*/extension.toml`.
+fn is_command_toml(relative: &Path) -> bool {
+    relative.extension().is_some_and(|ext| ext == "toml")
+        && matches!(
+            relative
+                .components()
+                .next()
+                .and_then(|component| match component {
+                    std::path::Component::Normal(name) => name.to_str(),
+                    _ => None,
+                }),
+            Some("commands" | "extensions")
+        )
+}
+
+/// Remove the `[env]` table (and any `[env.*]` sub-table) from a command TOML.
+fn strip_env_table(content: &str) -> String {
+    let mut stripped = String::with_capacity(content.len());
+    let mut in_env = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            in_env = trimmed.starts_with("[env]")
+                || trimmed.starts_with("[env.")
+                || trimmed.starts_with("[ env]");
+            if in_env {
+                continue;
+            }
+        }
+        if in_env {
+            continue;
+        }
+        stripped.push_str(line);
+        stripped.push('\n');
+    }
+    stripped
 }
 
 fn sanitize_export_preferences(path: &Path) -> io::Result<()> {
@@ -113,12 +231,36 @@ fn preference_bool(preferences: &HashMap<String, String>, key: &str, default_val
 }
 
 pub fn import_config(src: &Path, config_dir: &Path) -> io::Result<()> {
-    // Untrusted archive: validate the member list *before* extracting, extract
-    // into an isolated staging dir, reject symlinks, then atomically swap. This
-    // prevents path traversal (`../`, absolute paths) and symlink write-through
-    // from clobbering files outside `config_dir`.
-    validate_archive_members(src)?;
+    import_config_with_limits(src, config_dir, ImportLimits::default())
+}
 
+/// Limits for importing an untrusted archive (M-11).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ImportLimits {
+    pub(crate) archive_bytes: u64,
+    pub(crate) members: usize,
+    pub(crate) unpacked_bytes: u64,
+}
+
+impl Default for ImportLimits {
+    fn default() -> Self {
+        Self {
+            archive_bytes: 64 * 1024 * 1024,
+            members: 4096,
+            unpacked_bytes: 256 * 1024 * 1024,
+        }
+    }
+}
+
+pub(crate) fn import_config_with_limits(
+    src: &Path,
+    config_dir: &Path,
+    limits: ImportLimits,
+) -> io::Result<()> {
+    // Untrusted archive: validate *and* extract from one decoder into an
+    // isolated staging dir, reject symlinks, then atomically swap. Validating a
+    // member list separately and unpacking it afterwards decoded the archive
+    // twice and left a TOCTOU window between the checks and the writes.
     let parent = config_dir.parent().unwrap_or(config_dir);
     fs::create_dir_all(parent)?;
     let temp_staging = tempfile::Builder::new()
@@ -126,10 +268,7 @@ pub fn import_config(src: &Path, config_dir: &Path) -> io::Result<()> {
         .tempdir_in(parent)?;
     let staging = temp_staging.path();
 
-    let file = fs::File::open(src)?;
-    let gz = flate2::read::GzDecoder::new(file);
-    let mut archive = tar::Archive::new(gz);
-    archive.unpack(staging)?;
+    extract_archive(src, staging, limits)?;
 
     let imported = staging.join(config_dir.file_name().unwrap_or_default());
     if !imported.is_dir() {
@@ -160,49 +299,116 @@ pub fn import_config(src: &Path, config_dir: &Path) -> io::Result<()> {
     }
 }
 
-/// Reject archives whose members are absolute, contain a `..` component, or sit
-/// outside a single top-level `zeshicast/` directory.
-fn validate_archive_members(src: &Path) -> io::Result<()> {
-    let file = fs::File::open(src)?;
-    let gz = flate2::read::GzDecoder::new(file);
-    let mut archive = tar::Archive::new(gz);
-    let mut saw_member = false;
+/// Check one archive member for safety (path traversal, absolute paths, links).
+/// Returns `Ok(false)` for members that should be skipped entirely.
+fn member_is_extractable(path: &Path, entry_type: tar::EntryType) -> io::Result<()> {
+    use std::path::Component;
 
-    for entry in archive.entries()? {
-        let entry = entry?;
-        let path = entry.path()?;
-        let raw = path.to_string_lossy();
-        let member = raw.trim_end_matches('/').trim();
-        if member.is_empty() {
-            continue;
-        }
-        saw_member = true;
-        if path.is_absolute() {
-            return Err(io::Error::other(format!("unsafe absolute path: {member}")));
-        }
-        use std::path::Component;
-        let mut components = path.components();
-        match components.next() {
-            Some(Component::Normal(root)) if root == "zeshicast" => {}
-            _ => {
-                return Err(io::Error::other(format!(
-                    "member outside zeshicast/: {member}"
-                )));
-            }
-        }
-        if path
-            .components()
-            .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
-        {
-            return Err(io::Error::other(format!("unsafe path component: {member}")));
-        }
-        if entry.header().entry_type().is_symlink() || entry.header().entry_type().is_hard_link() {
+    let raw = path.to_string_lossy();
+    let member = raw.trim_end_matches('/').trim().to_string();
+    if member.is_empty() {
+        return Ok(());
+    }
+    if entry_type.is_symlink() || entry_type.is_hard_link() {
+        return Err(io::Error::other(format!(
+            "archive contains a symlink/hardlink: {member}"
+        )));
+    }
+    if path.is_absolute() {
+        return Err(io::Error::other(format!("unsafe absolute path: {member}")));
+    }
+    let mut components = path.components();
+    match components.next() {
+        Some(Component::Normal(root)) if root == "zeshicast" => {}
+        _ => {
             return Err(io::Error::other(format!(
-                "archive contains a symlink/hardlink: {member}"
+                "member outside zeshicast/: {member}"
             )));
         }
     }
-    if !saw_member {
+    if path
+        .components()
+        .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+    {
+        return Err(io::Error::other(format!("unsafe path component: {member}")));
+    }
+    Ok(())
+}
+
+/// Validate and write every member of `src` in one pass, bounded by `limits`.
+///
+/// The byte counter wraps the *decompressed* stream, so a member whose declared
+/// size lies (a decompression bomb) is stopped after `unpacked_bytes + 1` bytes
+/// have been written instead of filling the disk.
+fn extract_archive(src: &Path, staging: &Path, limits: ImportLimits) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let compressed = fs::metadata(src)?.len();
+    if compressed > limits.archive_bytes {
+        return Err(io::Error::other(format!(
+            "archive is too large: {compressed} bytes > {} bytes",
+            limits.archive_bytes
+        )));
+    }
+
+    let file = fs::File::open(src)?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(gz);
+    let mut members = 0usize;
+    let mut unpacked: u64 = 0;
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        members += 1;
+        if members > limits.members {
+            return Err(io::Error::other(format!(
+                "archive has more than {} members",
+                limits.members
+            )));
+        }
+
+        let path = entry.path()?.into_owned();
+        let entry_type = entry.header().entry_type();
+        member_is_extractable(&path, entry_type)?;
+        if path
+            .to_string_lossy()
+            .trim_end_matches('/')
+            .trim()
+            .is_empty()
+        {
+            continue;
+        }
+
+        let out_path = staging.join(&path);
+        if entry_type.is_dir() {
+            fs::create_dir_all(&out_path)?;
+            continue;
+        }
+        if !entry_type.is_file() {
+            // Devices, FIFOs and sockets are not part of our format.
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let remaining = limits.unpacked_bytes.saturating_sub(unpacked);
+        let mut out = fs::File::create(&out_path)?;
+        let written = io::copy(&mut (&mut entry).take(remaining + 1), &mut out)?;
+        unpacked += written;
+        if unpacked > limits.unpacked_bytes {
+            return Err(io::Error::other(format!(
+                "archive unpacks to more than {} bytes",
+                limits.unpacked_bytes
+            )));
+        }
+        let mode = entry.header().mode()? & 0o777;
+        if mode != 0 {
+            fs::set_permissions(&out_path, fs::Permissions::from_mode(mode))?;
+        }
+    }
+
+    if members == 0 {
         return Err(io::Error::other("empty archive"));
     }
     Ok(())
@@ -693,6 +899,246 @@ mod tests {
                 .unwrap()
                 .file_type()
                 .is_symlink()
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Build a `.tar.gz` from `(member path, content)` pairs.
+    fn write_archive(path: &Path, members: &[(&str, &[u8])]) {
+        let file = fs::File::create(path).unwrap();
+        let enc = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut builder = tar::Builder::new(enc);
+        for (name, content) in members {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, *content).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+
+    fn archive_members(path: &Path) -> Vec<(String, Vec<u8>)> {
+        let file = fs::File::open(path).unwrap();
+        let gz = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(gz);
+        let mut members = Vec::new();
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let name = entry.path().unwrap().to_string_lossy().into_owned();
+            let mut content = Vec::new();
+            entry.read_to_end(&mut content).unwrap();
+            members.push((name, content));
+        }
+        members
+    }
+
+    fn archive_names(path: &Path) -> Vec<String> {
+        archive_members(path)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    #[test]
+    fn import_rejects_oversized_archive() {
+        let dir = test_dir("import-size");
+        fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("big.tar.gz");
+        write_archive(
+            &src,
+            &[("zeshicast/preferences.toml", b"ai_model = \"llama\"\n")],
+        );
+
+        let limits = ImportLimits {
+            archive_bytes: 10,
+            members: 100,
+            unpacked_bytes: 1 << 20,
+        };
+        let target = dir.join("config");
+        let error = import_config_with_limits(&src, &target, limits).unwrap_err();
+        assert!(
+            error.to_string().contains("archive is too large"),
+            "{error}"
+        );
+        assert!(
+            !target.exists(),
+            "nothing may be swapped in after a failure"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn import_rejects_too_many_members() {
+        let dir = test_dir("import-members");
+        fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("many.tar.gz");
+        write_archive(
+            &src,
+            &[("zeshicast/one.txt", b"1"), ("zeshicast/two.txt", b"2")],
+        );
+
+        let limits = ImportLimits {
+            archive_bytes: 1 << 20,
+            members: 1,
+            unpacked_bytes: 1 << 20,
+        };
+        let error = import_config_with_limits(&src, &dir.join("config"), limits).unwrap_err();
+        assert!(error.to_string().contains("members"), "{error}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn import_rejects_bomb() {
+        let dir = test_dir("import-bomb");
+        fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("bomb.tar.gz");
+        // Compresses to a few bytes but unpacks to far more than the budget the
+        // caller allows (M-11).
+        let payload = vec![b'a'; 8192];
+        write_archive(&src, &[("zeshicast/huge.txt", &payload)]);
+
+        let limits = ImportLimits {
+            archive_bytes: 1 << 20,
+            members: 16,
+            unpacked_bytes: 1024,
+        };
+        let error = import_config_with_limits(&src, &dir.join("config"), limits).unwrap_err();
+        assert!(
+            error.to_string().contains("unpacks to more than"),
+            "{error}"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn import_rejects_traversal_and_unsafe_members() {
+        let dir = test_dir("import-unsafe");
+        fs::create_dir_all(&dir).unwrap();
+        let limits = ImportLimits::default();
+
+        // A member outside the single `zeshicast/` root.
+        let outside = dir.join("outside.tar.gz");
+        write_archive(&outside, &[("other/preferences.toml", b"x = 1")]);
+        let error = import_config_with_limits(&outside, &dir.join("config-b"), limits).unwrap_err();
+        assert!(error.to_string().contains("outside zeshicast/"), "{error}");
+        assert!(!dir.join("config-b").exists());
+
+        // Path traversal, absolute paths and links never get that far: the tar
+        // crate refuses to *write* such a member, so validate the check itself.
+        use tar::EntryType;
+        assert!(member_is_extractable(Path::new("zeshicast/p.toml"), EntryType::Regular).is_ok());
+        assert!(member_is_extractable(Path::new("zeshicast/"), EntryType::Directory).is_ok());
+        for bad in [
+            "/etc/passwd",
+            "zeshicast/../../escape.txt",
+            "../zeshicast/preferences.toml",
+            "other/preferences.toml",
+        ] {
+            let error = member_is_extractable(Path::new(bad), EntryType::Regular)
+                .expect_err("unsafe member must be rejected");
+            assert!(
+                error.to_string().contains("unsafe") || error.to_string().contains("outside"),
+                "{bad}: {error}"
+            );
+        }
+        assert!(member_is_extractable(Path::new("zeshicast/link"), EntryType::Symlink).is_err());
+        assert!(member_is_extractable(Path::new("zeshicast/link"), EntryType::Link).is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn safe_export_excludes_clipboard_db() {
+        let dir = test_dir("export-safe");
+        let config = dir.join("zeshicast");
+        fs::create_dir_all(config.join("commands")).unwrap();
+        fs::write(config.join("zeshicast.db"), b"clipboard history").unwrap();
+        fs::write(config.join("zeshicast.db-wal"), b"wal").unwrap();
+        fs::write(config.join("calc_history.json"), b"[]").unwrap();
+        fs::write(
+            config.join("preferences.toml"),
+            "ai_model = \"llama\"\nai_api_key = \"sk-secret\"\n",
+        )
+        .unwrap();
+        fs::write(
+            config.join("commands/deploy.toml"),
+            "name = \"Deploy\"\ncommand = \"deploy\"\n\n[env]\nDEPLOY_TOKEN = \"tok\"\n",
+        )
+        .unwrap();
+
+        let dest = dir.join("safe.tar.gz");
+        export_config_with_options(&config, &dest, false, false).unwrap();
+
+        let names = archive_names(&dest);
+        assert!(
+            names.iter().any(|name| name.ends_with("preferences.toml")),
+            "{names:?}"
+        );
+        for excluded in ["zeshicast.db", "zeshicast.db-wal", "calc_history.json"] {
+            assert!(
+                !names.iter().any(|name| name.ends_with(excluded)),
+                "{excluded} must not be exported: {names:?}"
+            );
+        }
+        let deploy = archive_members(&dest)
+            .into_iter()
+            .find(|(name, _)| name.ends_with("deploy.toml"))
+            .expect("command TOML is exported")
+            .1;
+        let deploy = String::from_utf8(deploy).unwrap();
+        assert!(deploy.contains("name = \"Deploy\""), "{deploy}");
+        assert!(!deploy.contains("DEPLOY_TOKEN"), "env leaked: {deploy}");
+        assert!(!deploy.contains("[env]"), "env table leaked: {deploy}");
+
+        // `--include-history` keeps the history but still strips secrets.
+        let dest_all = dir.join("all.tar.gz");
+        export_config_with_options(&config, &dest_all, false, true).unwrap();
+        let names = archive_names(&dest_all);
+        assert!(
+            names.iter().any(|name| name.ends_with("zeshicast.db")),
+            "{names:?}"
+        );
+        let prefs = archive_members(&dest_all)
+            .into_iter()
+            .find(|(name, _)| name.ends_with("preferences.toml"))
+            .expect("preferences are exported")
+            .1;
+        assert!(!String::from_utf8_lossy(&prefs).contains("sk-secret"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn export_does_not_follow_symlinks() {
+        let dir = test_dir("export-symlink");
+        let config = dir.join("zeshicast");
+        fs::create_dir_all(&config).unwrap();
+        let secret = dir.join("outside-secret.txt");
+        fs::write(&secret, b"TOP SECRET").unwrap();
+        std::os::unix::fs::symlink(&secret, config.join("link-to-secret")).unwrap();
+        fs::write(
+            config.join("quicklinks.txt"),
+            "Docs = https://example.com\n",
+        )
+        .unwrap();
+
+        // The `--include-secrets` path archives the tree directly (M-12).
+        let dest = dir.join("with-secrets.tar.gz");
+        export_config_with_options(&config, &dest, true, true).unwrap();
+
+        let members = archive_members(&dest);
+        let names: Vec<String> = members.iter().map(|(name, _)| name.clone()).collect();
+        assert!(
+            !names.iter().any(|name| name.ends_with("link-to-secret")),
+            "symlink entry archived: {names:?}"
+        );
+        assert!(
+            !members.iter().any(|(_, content)| content == b"TOP SECRET"),
+            "symlink target content leaked into the archive"
+        );
+        assert!(
+            names.iter().any(|name| name.ends_with("quicklinks.txt")),
+            "regular files are still exported: {names:?}"
         );
         let _ = fs::remove_dir_all(dir);
     }

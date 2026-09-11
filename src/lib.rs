@@ -35,7 +35,8 @@ pub(crate) use config::{
     write_lines, write_preferences,
 };
 pub use config::{
-    export_config_with_options, import_config, load_global_preferences, resolve_include_secrets,
+    export_config_with_options, import_config, load_global_preferences, resolve_include_history,
+    resolve_include_secrets,
 };
 pub(crate) use extensions::{ExtensionManifest, ExtensionOrigin, load_extension_manifests};
 #[cfg(test)]

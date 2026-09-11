@@ -107,8 +107,13 @@ fn reap_locked(children: &mut Vec<Child>) -> usize {
 }
 
 #[cfg(test)]
-pub(crate) fn detached_child_count() -> usize {
-    registry().lock().unwrap_or_else(|e| e.into_inner()).len()
+pub(crate) fn detached_child_pids() -> Vec<u32> {
+    registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|child| child.id())
+        .collect()
 }
 
 #[cfg(test)]
@@ -150,10 +155,16 @@ mod tests {
             pids.push(child.pid());
         }
 
-        for pid in pids {
-            assert!(sweep_until_gone(pid), "pid {pid} is still in the table");
+        for pid in &pids {
+            assert!(sweep_until_gone(*pid), "pid {pid} is still in the table");
         }
-        assert_eq!(detached_child_count(), 0, "registry must be drained");
+        // Other tests spawn through the same registry, so only *our* children
+        // must be gone.
+        let registered = detached_child_pids();
+        assert!(
+            pids.iter().all(|pid| !registered.contains(pid)),
+            "still registered: {registered:?}"
+        );
     }
 
     #[test]
@@ -164,7 +175,11 @@ mod tests {
         let child = spawn_detached(Command::new("sleep").arg("60")).expect("spawn sleep");
         let pid = child.pid();
         assert!(pid_is_present(pid), "child should be running");
-        assert_eq!(reap_finished(), 0, "a running child must be kept");
+        reap_finished();
+        assert!(
+            detached_child_pids().contains(&pid),
+            "a running child must stay registered"
+        );
 
         let killed = Command::new("kill")
             .arg(pid.to_string())
@@ -173,7 +188,7 @@ mod tests {
         assert!(killed.success(), "kill {pid} failed");
 
         assert!(sweep_until_gone(pid), "zombie {pid} was never reaped");
-        assert_eq!(detached_child_count(), 0);
+        assert!(!detached_child_pids().contains(&pid), "still registered");
     }
 
     #[test]

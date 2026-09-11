@@ -15,14 +15,26 @@ fn main() {
         CliCommand::Export {
             dest,
             include_secrets,
+            include_history,
         } => {
             let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
             let config_dir = home.join(".config/zeshicast");
-            // Explicit --include-secrets wins; otherwise fall back to the
-            // `export_include_secrets` preference from preferences.toml.
+            // Explicit flags win; otherwise fall back to the
+            // `export_include_secrets` / `export_include_history` preferences.
             let preferences = zeshicast::load_global_preferences(&config_dir);
             let include_secrets = zeshicast::resolve_include_secrets(include_secrets, &preferences);
-            match zeshicast::export_config_with_options(&config_dir, &dest, include_secrets) {
+            let include_history = zeshicast::resolve_include_history(include_history, &preferences);
+            if !include_history {
+                eprintln!(
+                    "note: clipboard and usage history are not exported (pass --include-history to include them)"
+                );
+            }
+            match zeshicast::export_config_with_options(
+                &config_dir,
+                &dest,
+                include_secrets,
+                include_history,
+            ) {
                 Ok(()) => println!("exported to {}", dest.display()),
                 Err(err) => eprintln!("export failed: {err}"),
             }
@@ -189,6 +201,9 @@ Usage:
                             the export_include_secrets preference or the flag says otherwise
   zeshicast --export [file] --include-secrets[=true|false]
                             Override the export_include_secrets preference for this export
+  zeshicast --export [file] --include-history[=true|false]
+                            Also export clipboard/usage history (zeshicast.db,
+                            calc_history.json); excluded by default
   zeshicast --import <file> Import config from tar.gz
 
 Queries:
