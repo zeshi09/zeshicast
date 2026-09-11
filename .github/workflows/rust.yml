@@ -43,11 +43,11 @@ jobs:
           - name: package-build
             command: nix build
           - name: gui-check
-            command: nix develop --command cargo check --features gui
+            command: nix develop --command cargo check --features gui,layer-shell
           - name: gui-test
-            command: nix develop --command cargo test --features gui
+            command: nix develop --command cargo test --features gui,layer-shell
           - name: gui-clippy
-            command: nix develop --command cargo clippy --all-targets --features gui -- -D warnings
+            command: nix develop --command cargo clippy --all-targets --features gui,layer-shell -- -D warnings
           - name: layer-shell-check
             command: nix develop --command cargo check --features gui,layer-shell
 
@@ -72,5 +72,5 @@ jobs:
       - name: cargo-deny
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          command: check
+          command: check licenses bans sources
           arguments: --all-features
