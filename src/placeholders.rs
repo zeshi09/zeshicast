@@ -72,22 +72,23 @@ fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) 
 
         let (placeholder, after_end) = after_start.split_at(end);
 
-        // A template author may place the placeholder inside their own double
-        // quotes (e.g. `cmd "{{query}}"`). There, injected single quotes are
-        // literal, while `$()`, backticks and `$VAR` would still be expanded by
-        // the shell — so single-quote wrapping is not enough and the value must
-        // be escaped for the double-quote context instead. This is decided
-        // independently of the single-quote wrapper below: a nested
-        // `'{{query}}'` inside unclosed double quotes needs the double-quote
-        // treatment too (the author's single quotes stay literal there), so the
-        // wrapper collapse is skipped in that context.
-        let inside_double_quotes =
-            shell_escape && is_inside_unclosed_double_quotes(&output);
+        // Where the substituted value lands decides how it must be escaped. A
+        // template author may wrap a placeholder in their own quotes; all three
+        // contexts (unquoted, inside `'…'`, inside `"…"`) are safe because the
+        // value is escaped for the context it is inserted into.
+        let shell_context = if shell_escape {
+            shell_context(&output)
+        } else {
+            ShellContext::Unquoted
+        };
 
+        // Collapsing an author-written `'{{x}}'` wrapper is only correct in the
+        // unquoted context: inside an open single-quoted run the closing quote
+        // belongs to that run, and "collapsing" it would let the author's
+        // trailing quote swallow the rest of the template.
         let mut trailing_quote_to_skip = 0;
         let mut is_wrapped_in_single_quotes = false;
-        if shell_escape
-            && !inside_double_quotes
+        if shell_context == ShellContext::Unquoted
             && output.ends_with('\'')
             && after_end.len() >= 3
             && after_end[2..].starts_with('\'')
@@ -99,11 +100,7 @@ fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) 
 
         match render_placeholder(placeholder.trim(), context) {
             Some(value) if shell_escape => {
-                if inside_double_quotes {
-                    output.push_str(&double_quote_escape(&value));
-                } else {
-                    output.push_str(&shell_quote(&value));
-                }
+                output.push_str(&escape_for_context(&value, shell_context));
             }
             Some(value) => {
                 if is_wrapped_in_single_quotes {
@@ -141,6 +138,61 @@ fn shell_quote(value: &str) -> String {
     out
 }
 
+/// Which shell quoting context the text ends in, following POSIX lexing rules:
+/// inside single quotes every character is literal (a `"` does NOT open a
+/// double-quoted segment); inside double quotes a single quote is literal and
+/// does NOT open a single-quoted segment; a backslash escapes the following
+/// character outside single quotes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShellContext {
+    /// Outside any quotes: values need full `'…'` wrapping.
+    Unquoted,
+    /// Inside an open `'…'` run: everything is literal except `'`.
+    Single,
+    /// Inside an open `"…"` run: `$`, backtick, `\` and `"` stay special.
+    Double,
+}
+
+fn shell_context(text: &str) -> ShellContext {
+    let mut single = false;
+    let mut double = false;
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        if single {
+            if ch == '\'' {
+                single = false;
+            }
+        } else if ch == '\\' {
+            // Backslash escapes the next character (unquoted and inside double
+            // quotes), so neither character affects quoting state.
+            chars.next();
+        } else if ch == '\'' && !double {
+            single = true;
+        } else if ch == '"' {
+            double = !double;
+        }
+    }
+    if single {
+        ShellContext::Single
+    } else if double {
+        ShellContext::Double
+    } else {
+        ShellContext::Unquoted
+    }
+}
+
+/// Escape `value` for the context it is about to be inserted into.
+fn escape_for_context(value: &str, context: ShellContext) -> String {
+    match context {
+        ShellContext::Unquoted => shell_quote(value),
+        ShellContext::Double => double_quote_escape(value),
+        // Already inside an open single-quoted run: only an embedded apostrophe
+        // needs the POSIX `'\''` dance. Wrapping the value in quotes here would
+        // close the author's run early.
+        ShellContext::Single => value.replace('\'', "'\\''"),
+    }
+}
+
 /// Escape a value for interpolation inside an open double-quoted string in a
 /// POSIX shell: backslash-escape `\`, `"`, `$` and `` ` `` so the substituted
 /// text is treated literally (no command substitution, no parameter expansion,
@@ -157,35 +209,10 @@ fn double_quote_escape(value: &str) -> String {
     out
 }
 
-/// Report whether the next character appended to `text` would land inside
-/// unclosed double quotes, applying POSIX shell lexing rules: inside single
-/// quotes every character is literal; inside double quotes a single quote is
-/// literal (it does NOT open a single-quoted segment); a backslash escapes the
-/// following character outside single quotes. This lets `expand()` detect
-/// templates like `cmd "{{query}}"` where a placeholder sits inside the
-/// author's own quotes.
+/// Thin wrapper kept for the scanner regression tests.
+#[cfg(test)]
 fn is_inside_unclosed_double_quotes(text: &str) -> bool {
-    let mut inside_single_quotes = false;
-    let mut inside_double_quotes = false;
-    let mut chars = text.chars();
-    while let Some(ch) = chars.next() {
-        if inside_single_quotes {
-            if ch == '\'' {
-                inside_single_quotes = false;
-            }
-        } else if ch == '\\' {
-            // Backslash escapes the next character (both unquoted and inside
-            // double quotes), so neither character affects quoting state.
-            chars.next();
-        } else if ch == '\'' && !inside_double_quotes {
-            // Outside double quotes a single quote opens a literal segment;
-            // inside double quotes it is just an ordinary character.
-            inside_single_quotes = true;
-        } else if ch == '"' {
-            inside_double_quotes = !inside_double_quotes;
-        }
-    }
-    inside_double_quotes
+    shell_context(text) == ShellContext::Double
 }
 
 /// Resolve a placeholder to its value, or `None` if the name is unknown.
@@ -248,6 +275,83 @@ mod tests {
         let context = PlaceholderContext::new("foo bar", None);
         let result = expand_placeholders_shell("echo '{{query}}'", &context);
         assert_eq!(result, "echo 'foo bar'");
+    }
+
+    #[test]
+    fn single_quote_wrapper_still_collapses() {
+        let context = PlaceholderContext::new("foo bar", None);
+        let result = expand_placeholders_shell("echo '{{query}}'", &context);
+        assert_eq!(result, "echo 'foo bar'");
+    }
+
+    /// B-2: a placeholder inside an *already open* single-quoted run must be
+    /// inserted literally (only an apostrophe is escaped), so command
+    /// substitution in the value never reaches the shell.
+    #[test]
+    fn placeholder_inside_open_single_quote_run_is_literal() {
+        let ctx = PlaceholderContext::new("", Some(&"$(touch /tmp/z)".to_string()));
+        assert_eq!(
+            expand_placeholders_shell("xdotool type 'clip: {{clipboard}}'", &ctx),
+            "xdotool type 'clip: $(touch /tmp/z)'"
+        );
+    }
+
+    /// The author's closing quote must survive: the value is inserted into the
+    /// open run instead of consuming the template's tail.
+    #[test]
+    fn apostrophe_value_in_single_quote_run_round_trips() {
+        let ctx = PlaceholderContext::new("", Some(&"it's".to_string()));
+        let expanded = expand_placeholders_shell("printf '%s' '{{clipboard}}'", &ctx);
+        assert_eq!(expanded, "printf '%s' 'it'\\''s'");
+    }
+
+    #[test]
+    fn shell_context_scanner_reports_all_three_states() {
+        assert_eq!(shell_context("echo "), ShellContext::Unquoted);
+        assert_eq!(shell_context("echo \"closed\" "), ShellContext::Unquoted);
+        assert_eq!(shell_context("echo 'open"), ShellContext::Single);
+        assert_eq!(shell_context("echo 'it\"s open"), ShellContext::Single);
+        assert_eq!(shell_context("echo \"open"), ShellContext::Double);
+        assert_eq!(shell_context("echo \"it's open"), ShellContext::Double);
+    }
+
+    /// Round-trip guard for B-2: whatever the template context, the expanded
+    /// text must reach `sh -c` as exactly one word equal to the original value
+    /// — no command substitution, no extra words, no injection.
+    #[test]
+    fn shell_expansion_round_trips_evil_values_in_every_context() {
+        let evil = [
+            "$(touch /tmp/zeshicast-pwned)",
+            "`touch /tmp/zeshicast-pwned`",
+            "; rm -rf /",
+            "it's",
+            "\"quoted\"",
+            "back\\slash",
+            "line\nbreak",
+            "a'b\"c$d`e\\f",
+        ];
+        let templates = [
+            "printf '%s' {{clipboard}}",
+            "printf '%s' '{{clipboard}}'",
+            "printf '%s' \"{{clipboard}}\"",
+        ];
+
+        for value in evil {
+            for template in templates {
+                let ctx = PlaceholderContext::new("", Some(&value.to_string()));
+                let expanded = expand_placeholders_shell(template, &ctx);
+                let output = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&expanded)
+                    .output()
+                    .expect("sh is available");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    value,
+                    "value {value:?} escaped into {expanded:?}"
+                );
+            }
+        }
     }
 
     /// Template authors must not quote placeholders themselves, but if they
