@@ -12,8 +12,13 @@ pub(crate) struct ExtensionOrigin {
 #[derive(Debug, Clone)]
 pub(crate) struct ExtensionManifest {
     pub(crate) origin: ExtensionOrigin,
+    /// Command definitions: TOML files only (as documented in the README).
     pub(crate) commands: Vec<PathBuf>,
     pub(crate) scripts: Vec<PathBuf>,
+    /// Executable JSON-RPC extensions. Previously such binaries could be
+    /// smuggled through `commands`; they now need their own field and the
+    /// manifest must grant the `shell` capability (B-5).
+    pub(crate) binaries: Vec<PathBuf>,
 }
 
 pub(crate) fn load_extension_manifests(config_dir: &Path) -> Vec<ExtensionManifest> {
@@ -26,7 +31,10 @@ pub(crate) fn load_extension_manifests(config_dir: &Path) -> Vec<ExtensionManife
         .flatten()
         .filter_map(|entry| {
             let root = entry.path();
-            if !root.is_dir() {
+            // `file_type()` does not follow symlinks, so a symlinked directory
+            // cannot pull manifests in from outside the extensions dir.
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_dir() {
                 return None;
             }
             let content = fs::read_to_string(root.join("extension.toml")).ok()?;
@@ -43,8 +51,17 @@ pub(crate) fn parse_extension_manifest(root: &Path, input: &str) -> Option<Exten
     let name = toml_required_string(&table, "name")?;
     let version = toml_required_string(&table, "version")?;
     let capabilities = toml_string_array(&table, "capabilities");
-    let commands = manifest_paths(root, &table, "commands");
+    let commands = manifest_paths(root, &table, "commands")
+        .into_iter()
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("toml"))
+        .collect();
     let scripts = manifest_paths(root, &table, "scripts");
+    // Executing extension code requires the manifest to say so.
+    let binaries = if grants_shell_capability(&capabilities) {
+        manifest_paths(root, &table, "binaries")
+    } else {
+        Vec::new()
+    };
 
     Some(ExtensionManifest {
         origin: ExtensionOrigin {
@@ -55,6 +72,14 @@ pub(crate) fn parse_extension_manifest(root: &Path, input: &str) -> Option<Exten
         },
         commands,
         scripts,
+        binaries,
+    })
+}
+
+fn grants_shell_capability(capabilities: &[String]) -> bool {
+    capabilities.iter().any(|capability| {
+        let normalized = capability.trim().to_lowercase().replace('-', "_");
+        normalized == "shell" || normalized == "run" || normalized == "exec"
     })
 }
 
@@ -159,6 +184,57 @@ commands = ["/etc/passwd", "../escape.toml", "ok.toml"]
         .unwrap();
 
         assert_eq!(manifest.commands, vec![root.join("ok.toml")]);
+    }
+
+    #[test]
+    fn manifest_commands_rejects_non_toml() {
+        let root = PathBuf::from("/tmp/example-extension");
+        let manifest = parse_extension_manifest(
+            &root,
+            r#"
+id = "example.mixed"
+name = "Mixed"
+version = "0.1.0"
+capabilities = ["shell"]
+commands = ["git-log.toml", "bin/tool"]
+binaries = ["bin/tool"]
+"#,
+        )
+        .unwrap();
+
+        // B-5: `commands` is TOML-only; executables live in `binaries`.
+        assert_eq!(manifest.commands, vec![root.join("git-log.toml")]);
+        assert_eq!(manifest.binaries, vec![root.join("bin/tool")]);
+    }
+
+    #[test]
+    fn manifest_binaries_require_shell() {
+        let root = PathBuf::from("/tmp/example-extension");
+        let denied = parse_extension_manifest(
+            &root,
+            r#"
+id = "example.no-shell"
+name = "No Shell"
+version = "0.1.0"
+capabilities = ["network"]
+binaries = ["bin/tool"]
+"#,
+        )
+        .unwrap();
+        assert!(denied.binaries.is_empty());
+
+        let granted = parse_extension_manifest(
+            &root,
+            r#"
+id = "example.with-shell"
+name = "With Shell"
+version = "0.1.0"
+capabilities = ["shell"]
+binaries = ["bin/tool"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(granted.binaries, vec![root.join("bin/tool")]);
     }
 
     #[test]

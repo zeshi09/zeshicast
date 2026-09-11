@@ -190,11 +190,12 @@ pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&Clipboard
         view.detail_mime.set_text("");
     }
 
-    // Image entry → show the picture; otherwise the text label.
-    if let Some(path) = crate::clipboard_image_path(&item.value) {
+    // Image entry → show the picture; otherwise the text label. Only a
+    // validated cache path is ever loaded (M-15).
+    if let Some(path) = crate::validated_clipboard_image(&item.value) {
         view.detail_preview.set_visible(false);
         view.detail_image.set_visible(true);
-        match gtk::gdk::Texture::from_filename(path) {
+        match gtk::gdk::Texture::from_filename(&path) {
             Ok(texture) => {
                 view.detail_image.set_paintable(Some(&texture));
                 view.detail_size

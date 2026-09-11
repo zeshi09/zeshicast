@@ -38,7 +38,11 @@ pub(crate) fn write_clipboard_history(path: &Path, entries: &[String]) -> io::Re
 }
 
 pub(crate) fn normalize_clipboard_text(text: &str) -> String {
-    let text = text.replace('\0', "");
+    // Drop control characters, including the SOH sentinel that marks an image
+    // entry: text pasted from outside must never be able to claim to be an
+    // image reference (M-15). A forged `\x01zeshicast-image:…` therefore lands
+    // in the history as plain text.
+    let text = text.replace(['\0', '\u{1}'], "");
     if text.len() <= MAX_CLIPBOARD_TEXT_BYTES {
         return text.trim().to_string();
     }

@@ -5,6 +5,18 @@ use std::process::{Command, Stdio};
 
 use crate::execute_http_request;
 
+#[cfg(test)]
+thread_local! {
+    /// Per-thread count of requests that actually reached [`execute`]'s tail.
+    /// Thread-local so parallel tests cannot observe each other's executions.
+    pub(crate) static EXEC_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_exec_count() -> usize {
+    EXEC_COUNT.with(std::cell::Cell::take)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandArgumentKind {
     Text,
@@ -59,6 +71,11 @@ pub struct ActionForm {
     pub(crate) preferences: HashMap<String, String>,
     pub(crate) current_args: HashMap<String, String>,
     pub(crate) partial_query: String,
+    /// Capability ceiling inherited from the manifest that produced the form.
+    pub(crate) capabilities: CapabilitySet,
+    /// Risk of submitting this form; a form is never more trusted than the
+    /// action it came from.
+    pub(crate) risk: ActionRisk,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +137,21 @@ pub(crate) enum ExecutionRequest {
     Notification(crate::NotificationAction),
 }
 
+impl ExecutionRequest {
+    /// Capabilities this request needs. An empty set means "in-process effect
+    /// only" (media keys, notification toggles).
+    pub(crate) fn required_capabilities(&self) -> CapabilitySet {
+        match self {
+            Self::Shell { .. } | Self::Command(_) => CapabilitySet::new(vec![Capability::Shell]),
+            Self::OpenPath(_) => CapabilitySet::new(vec![Capability::OpenPath]),
+            Self::OpenUrl(_) => CapabilitySet::new(vec![Capability::OpenUrl]),
+            Self::Copy(_) => CapabilitySet::new(vec![Capability::ClipboardWrite]),
+            Self::Http(_) => CapabilitySet::new(vec![Capability::Network]),
+            Self::Media(_) | Self::Notification(_) => CapabilitySet::empty(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionDecision {
     RunNow,
@@ -141,16 +173,71 @@ impl ExecutionPolicy {
         Self { confirmed: true }
     }
 
+    fn is_confirmed(self) -> bool {
+        self.confirmed
+    }
+
+    /// Preflight decision for `action`: capability ceiling, then confirmation.
+    /// Does not execute anything — execution always goes through [`execute`].
     pub fn decide(self, action: &Action) -> ExecutionDecision {
-        if action.execution_request().is_none() {
-            return ExecutionDecision::Denied("action has no executable request".to_string());
-        }
-        if action.risk.requires_confirmation() && !self.confirmed {
-            ExecutionDecision::NeedsConfirmation(action.risk)
-        } else {
-            ExecutionDecision::RunNow
+        ExecutionTicket::for_action(self, action).preflight(action.execution_request().as_ref())
+    }
+}
+
+/// Everything an execution path must present before a request may run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExecutionTicket {
+    pub(crate) policy: ExecutionPolicy,
+    /// Capabilities granted to the action that produced the request.
+    pub(crate) capabilities: CapabilitySet,
+    /// Risk of the originating action; drives the confirmation gate.
+    pub(crate) risk: ActionRisk,
+}
+
+impl ExecutionTicket {
+    fn for_action(policy: ExecutionPolicy, action: &Action) -> Self {
+        Self {
+            policy,
+            capabilities: action.capabilities.clone(),
+            risk: action.risk,
         }
     }
+
+    /// Ticket for built-in launcher code that acts with the daemon's own
+    /// authority and whose confirmation the caller already obtained.
+    pub(crate) fn confirmed() -> Self {
+        Self {
+            policy: ExecutionPolicy::confirmed(),
+            capabilities: CapabilitySet::trusted(),
+            risk: ActionRisk::Normal,
+        }
+    }
+
+    /// The single gate: capability ceiling first, then confirmation. Fails
+    /// closed — an unknown/absent request is denied, not run.
+    pub(crate) fn preflight(&self, request: Option<&ExecutionRequest>) -> ExecutionDecision {
+        let Some(request) = request else {
+            return ExecutionDecision::Denied("action has no executable request".to_string());
+        };
+        let required = request.required_capabilities();
+        if !self.capabilities.covers(&required) {
+            return ExecutionDecision::Denied(missing_capabilities(&required, &self.capabilities));
+        }
+        if self.risk.requires_confirmation() && !self.policy.is_confirmed() {
+            return ExecutionDecision::NeedsConfirmation(self.risk);
+        }
+        ExecutionDecision::RunNow
+    }
+}
+
+fn missing_capabilities(required: &CapabilitySet, granted: &CapabilitySet) -> String {
+    let missing = required
+        .iter()
+        .filter(|capability| !granted.allows(*capability))
+        .map(Capability::label)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("missing capability: {missing}")
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +250,10 @@ pub struct Action {
     pub(crate) kind: ActionKind,
     pub score: i32,
     pub(crate) script_mode: Option<ScriptMode>,
+    /// Capability ceiling for this action. Built-in actions are `trusted`;
+    /// actions derived from commands/scripts/manifests narrow it to what the
+    /// manifest declared.
+    pub(crate) capabilities: CapabilitySet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +291,207 @@ impl Capability {
     }
 }
 
+/// Capability ceiling attached to one execution path.
+///
+/// Capabilities are enforced in exactly one place — [`execute`] — so a new
+/// call site cannot skip the check by forgetting to ask for one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct CapabilitySet {
+    capabilities: Vec<Capability>,
+}
+
+impl CapabilitySet {
+    pub(crate) fn new(capabilities: Vec<Capability>) -> Self {
+        let mut set = Self::empty();
+        for capability in capabilities {
+            set.grant(capability);
+        }
+        set
+    }
+
+    /// Add one capability to the set (idempotent).
+    pub(crate) fn grant(&mut self, capability: Capability) {
+        if !self.capabilities.contains(&capability) {
+            self.capabilities.push(capability);
+        }
+    }
+
+    /// No capability at all: only in-process effects (media keys,
+    /// notification toggles) may run with this set.
+    pub(crate) fn empty() -> Self {
+        Self {
+            capabilities: Vec::new(),
+        }
+    }
+
+    /// Everything the daemon itself may do. Reserved for code paths that are
+    /// not derived from user-authored manifests (built-in launcher rows,
+    /// internal helpers); manifests must never grant this.
+    pub(crate) fn trusted() -> Self {
+        Self::new(vec![
+            Capability::Shell,
+            Capability::Network,
+            Capability::Filesystem,
+            Capability::ClipboardRead,
+            Capability::ClipboardWrite,
+            Capability::OpenUrl,
+            Capability::OpenPath,
+        ])
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Capability> + '_ {
+        self.capabilities.iter().copied()
+    }
+
+    /// Like [`Self::iter`]-membership, but `network` also grants `open_url` and
+    /// `filesystem` also grants `open_path`, matching the documented manifest
+    /// semantics.
+    pub(crate) fn allows(&self, required: Capability) -> bool {
+        self.capabilities.iter().any(|capability| {
+            *capability == required
+                || matches!(
+                    (*capability, required),
+                    (Capability::Network, Capability::OpenUrl)
+                        | (Capability::Filesystem, Capability::OpenPath)
+                )
+        })
+    }
+
+    pub(crate) fn covers(&self, required: &CapabilitySet) -> bool {
+        required.iter().all(|capability| self.allows(capability))
+    }
+}
+
+impl From<Vec<Capability>> for CapabilitySet {
+    fn from(capabilities: Vec<Capability>) -> Self {
+        Self::new(capabilities)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A no-op request outside the GUI: media control does nothing without the
+    /// `gui` feature, so the counters below stay deterministic.
+    fn media_action(risk: ActionRisk) -> Action {
+        Action::new(
+            "Media",
+            "Play/Pause",
+            ActionKind::Media(crate::MediaControl::PlayPause),
+            0,
+        )
+        .with_risk(risk)
+    }
+
+    #[test]
+    fn gateway_denies_shell_without_capability() {
+        let _ = take_exec_count();
+        let action = Action::new(
+            "Ext",
+            "run",
+            ActionKind::Shell(ShellCommand::new("true")),
+            0,
+        )
+        .with_capabilities(CapabilitySet::empty());
+
+        let decision = action.run_with_policy(ExecutionPolicy::confirmed());
+        assert!(
+            matches!(decision, ExecutionDecision::Denied(_)),
+            "expected denial, got {decision:?}"
+        );
+        assert_eq!(take_exec_count(), 0, "a denied request must not execute");
+    }
+
+    #[test]
+    fn gateway_requires_confirmation_for_risk() {
+        let _ = take_exec_count();
+        let action = media_action(ActionRisk::Shell);
+
+        assert_eq!(
+            action.run_with_policy(ExecutionPolicy::interactive()),
+            ExecutionDecision::NeedsConfirmation(ActionRisk::Shell)
+        );
+        assert_eq!(take_exec_count(), 0);
+
+        assert_eq!(
+            action.run_with_policy(ExecutionPolicy::confirmed()),
+            ExecutionDecision::RunNow
+        );
+        assert_eq!(take_exec_count(), 1);
+    }
+
+    #[test]
+    fn gateway_is_the_only_execution_point() {
+        let _ = take_exec_count();
+        let action = media_action(ActionRisk::Normal);
+        assert_eq!(
+            action.run_with_policy(ExecutionPolicy::interactive()),
+            ExecutionDecision::RunNow
+        );
+        assert_eq!(take_exec_count(), 1);
+
+        assert_eq!(
+            execute(
+                ExecutionRequest::Media(crate::MediaControl::PlayPause),
+                &ExecutionTicket::confirmed()
+            ),
+            ExecutionDecision::RunNow
+        );
+        assert_eq!(take_exec_count(), 1);
+
+        let denied = execute(
+            ExecutionRequest::Shell {
+                command: ShellCommand::new("true"),
+            },
+            &ExecutionTicket {
+                policy: ExecutionPolicy::confirmed(),
+                capabilities: CapabilitySet::empty(),
+                risk: ActionRisk::Normal,
+            },
+        );
+        assert!(matches!(denied, ExecutionDecision::Denied(_)));
+        assert_eq!(take_exec_count(), 0);
+    }
+
+    #[test]
+    fn secondary_actions_share_single_risk_table() {
+        let shell = Action::new(
+            "Script",
+            "s",
+            ActionKind::Shell(ShellCommand::new("true")),
+            0,
+        )
+        .with_risk(ActionRisk::Shell);
+        let clipboard = Action::new("Clipboard", "c", ActionKind::Copy("x".to_string()), 0);
+
+        assert_eq!(
+            secondary_action_risk(&shell, SecondaryActionKind::Run),
+            ActionRisk::Shell
+        );
+        assert_eq!(
+            secondary_action_risk(&shell, SecondaryActionKind::RunInTerminal),
+            ActionRisk::Shell
+        );
+        assert_eq!(
+            secondary_action_risk(&clipboard, SecondaryActionKind::Run),
+            ActionRisk::Normal
+        );
+        assert_eq!(
+            secondary_action_risk(&clipboard, SecondaryActionKind::CopyValue),
+            ActionRisk::Normal
+        );
+        assert_eq!(
+            secondary_action_risk(&clipboard, SecondaryActionKind::DeleteClipboardItem),
+            ActionRisk::Destructive
+        );
+        assert_eq!(
+            secondary_action_risk(&clipboard, SecondaryActionKind::ClearClipboardHistory),
+            ActionRisk::ClipboardClear
+        );
+    }
+}
+
 impl ActionRisk {
     pub fn requires_confirmation(self) -> bool {
         !matches!(self, Self::Normal)
@@ -228,6 +520,18 @@ pub enum SecondaryActionKind {
     Unpin,
     DeleteClipboardItem,
     ClearClipboardHistory,
+}
+
+/// Risk of a secondary action. Single source of truth: both the model
+/// (`Zeshicast`) and the launcher UI ask this function, so the two tables can
+/// never drift apart (P1.1).
+pub(crate) fn secondary_action_risk(action: &Action, kind: SecondaryActionKind) -> ActionRisk {
+    match kind {
+        SecondaryActionKind::Run | SecondaryActionKind::RunInTerminal => action.risk,
+        SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
+        SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
+        _ => ActionRisk::Normal,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -322,6 +626,7 @@ impl Action {
             kind,
             score,
             script_mode: None,
+            capabilities: CapabilitySet::trusted(),
         }
     }
 
@@ -337,6 +642,11 @@ impl Action {
 
     pub(crate) fn with_risk(mut self, risk: ActionRisk) -> Self {
         self.risk = risk;
+        self
+    }
+
+    pub(crate) fn with_capabilities(mut self, capabilities: impl Into<CapabilitySet>) -> Self {
+        self.capabilities = capabilities.into();
         self
     }
 
@@ -380,13 +690,11 @@ impl Action {
     }
 
     pub(crate) fn run_with_policy(&self, policy: ExecutionPolicy) -> ExecutionDecision {
-        let decision = policy.decide(self);
-        if matches!(decision, ExecutionDecision::RunNow)
-            && let Some(request) = self.execution_request()
-        {
-            run_execution_request(request);
-        }
-        decision
+        let ticket = ExecutionTicket::for_action(policy, self);
+        let Some(request) = self.execution_request() else {
+            return ExecutionDecision::Denied("action has no executable request".to_string());
+        };
+        execute(request, &ticket)
     }
 
     pub fn launcher_command(&self) -> Option<LauncherCommand> {
@@ -412,7 +720,10 @@ impl Action {
     }
 
     pub fn copy_value(&self) {
-        run_execution_request(ExecutionRequest::Copy(self.value()));
+        execute(
+            ExecutionRequest::Copy(self.value()),
+            &ExecutionTicket::confirmed(),
+        );
     }
 
     pub fn value(&self) -> String {
@@ -445,10 +756,13 @@ impl Action {
 
     pub fn open_parent_dir(&self) {
         if let Some(parent) = self.parent_dir() {
-            run_execution_request(ExecutionRequest::Command(ProcessCommand::new(
-                "xdg-open",
-                vec![parent.display().to_string()],
-            )));
+            execute(
+                ExecutionRequest::Command(ProcessCommand::new(
+                    "xdg-open",
+                    vec![parent.display().to_string()],
+                )),
+                &ExecutionTicket::confirmed(),
+            );
         }
     }
 
@@ -457,7 +771,27 @@ impl Action {
     }
 }
 
-pub(crate) fn run_execution_request(request: ExecutionRequest) {
+/// **The** execution point of the daemon. Every path that can run a command,
+/// open a URL or path, copy to the clipboard, or touch the network must go
+/// through here: [`ExecutionTicket::preflight`] enforces the capability ceiling
+/// and the confirmation gate before anything is spawned (fail-closed).
+///
+/// `grep -rn "run_verified_request" src/` is expected to show exactly two
+/// hits: this definition and the call below.
+pub(crate) fn execute(request: ExecutionRequest, ticket: &ExecutionTicket) -> ExecutionDecision {
+    match ticket.preflight(Some(&request)) {
+        ExecutionDecision::RunNow => {
+            run_verified_request(request);
+            ExecutionDecision::RunNow
+        }
+        decision => decision,
+    }
+}
+
+/// Private tail of [`execute`]: only reached once a request passed preflight.
+fn run_verified_request(request: ExecutionRequest) {
+    #[cfg(test)]
+    EXEC_COUNT.with(|count| count.set(count.get() + 1));
     match request {
         ExecutionRequest::Shell { command } => spawn_shell(&command),
         ExecutionRequest::Command(command) => spawn_command(&command),
@@ -663,4 +997,3 @@ fn copy_with(program: &str, args: &[&str], text: &str) -> bool {
 
     child.wait().map(|status| status.success()).unwrap_or(false)
 }
-

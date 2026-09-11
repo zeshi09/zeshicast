@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use super::commands::parse_capabilities;
 use crate::{
     Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
-    CommandArgumentKind, ExtensionManifest, ExtensionOrigin, ScriptMode, ShellCommand, fuzzy_score,
+    CapabilitySet, CommandArgumentKind, ExtensionManifest, ExtensionOrigin, ProcessCommand,
+    ScriptMode, fuzzy_score,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +48,28 @@ impl ScriptEntry {
 
     fn has_shell_capability(&self) -> bool {
         self.capabilities.contains(&Capability::Shell)
+    }
+
+    /// Capabilities handed to the action built from this entry. User scripts
+    /// (no manifest) are gated by the confirmation prompt instead of a
+    /// capability list, so they carry the shell capability explicitly.
+    fn effective_capabilities(&self) -> CapabilitySet {
+        let mut capabilities = CapabilitySet::new(self.capabilities.clone());
+        if self.origin.is_none() {
+            capabilities.grant(Capability::Shell);
+        }
+        capabilities
+    }
+
+    /// Risk of running this script. Extension scripts always confirm — the
+    /// manifest decides, and `@raycast.needsConfirmation false` in the script
+    /// header cannot opt out of it.
+    fn confirmation_risk(&self) -> ActionRisk {
+        if self.origin.is_some() || self.needs_confirmation != Some(false) {
+            ActionRisk::Shell
+        } else {
+            ActionRisk::Normal
+        }
     }
 }
 
@@ -248,8 +271,6 @@ pub(crate) fn parse_script_entry(path: &Path) -> Option<ScriptEntry> {
     })
 }
 
-
-
 fn raycast_meta<'a>(comment: &'a str, key: &str) -> Option<&'a str> {
     let prefix = format!("@raycast.{key}");
     if comment.starts_with(&prefix) {
@@ -341,13 +362,19 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
             // and stay available.
             let blocked = entry.origin.is_some() && !entry.has_shell_capability();
             let (kind, icon_name) = if blocked {
-                subtitle =
-                    "Blocked: script extension manifest lacks capabilities = [\"shell\"]"
-                        .to_string();
+                subtitle = "Blocked: script extension manifest lacks capabilities = [\"shell\"]"
+                    .to_string();
                 (ActionKind::None, "dialog-warning-symbolic")
             } else if entry.arguments.is_empty() {
-                let cmd = entry.path.to_string_lossy().to_string();
-                (ActionKind::Shell(ShellCommand::new(&cmd)), entry.icon.as_str())
+                // Run the script file directly (argv, no `sh -c`): a path with
+                // shell metacharacters is a file name, never a command (M-16).
+                (
+                    ActionKind::Command(ProcessCommand::new(
+                        entry.path.to_string_lossy().to_string(),
+                        Vec::new(),
+                    )),
+                    entry.icon.as_str(),
+                )
             } else {
                 let fields = entry
                     .arguments
@@ -377,6 +404,8 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
                     preferences: std::collections::HashMap::new(),
                     current_args: std::collections::HashMap::new(),
                     partial_query: String::new(),
+                    capabilities: entry.effective_capabilities(),
+                    risk: entry.confirmation_risk(),
                 };
                 (ActionKind::Form(form), entry.icon.as_str())
             };
@@ -388,9 +417,10 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
             )
             .with_subtitle(subtitle)
             .with_icon(icon_name)
-            .with_script_mode(entry.mode);
-            if !blocked && entry.needs_confirmation != Some(false) {
-                action = action.with_risk(ActionRisk::Shell);
+            .with_script_mode(entry.mode)
+            .with_capabilities(entry.effective_capabilities());
+            if !blocked {
+                action = action.with_risk(entry.confirmation_risk());
             }
             Some(action)
         })
@@ -404,7 +434,7 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ExtensionManifest, ActionRisk, ExecutionRequest};
+    use crate::{ActionRisk, ExecutionRequest, ExtensionManifest};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -433,6 +463,14 @@ mod tests {
     }
 
     fn manifest_with_capabilities(root: &Path, capabilities: &[&str]) -> ExtensionManifest {
+        manifest_for_scripts(root, &["echo.sh"], capabilities)
+    }
+
+    fn manifest_for_scripts(
+        root: &Path,
+        scripts: &[&str],
+        capabilities: &[&str],
+    ) -> ExtensionManifest {
         ExtensionManifest {
             origin: ExtensionOrigin {
                 id: "test.extension".to_string(),
@@ -441,7 +479,8 @@ mod tests {
                 capabilities: capabilities.iter().map(|c| c.to_string()).collect(),
             },
             commands: Vec::new(),
-            scripts: vec![root.join("echo.sh")],
+            scripts: scripts.iter().map(|name| root.join(name)).collect(),
+            binaries: Vec::new(),
         }
     }
 
@@ -460,8 +499,12 @@ mod tests {
         assert_eq!(action.risk, ActionRisk::Shell);
         assert!(action.risk.requires_confirmation());
         match action.execution_request() {
-            Some(ExecutionRequest::Shell { .. }) => {}
-            other => panic!("expected shell execution request, got {other:?}"),
+            // P1.6: script paths run as argv, never through `sh -c`.
+            Some(ExecutionRequest::Command(command)) => {
+                assert_eq!(command.program, root.join("echo.sh").to_string_lossy());
+                assert!(command.args.is_empty());
+            }
+            other => panic!("expected argv execution request, got {other:?}"),
         }
         assert!(!action.subtitle.starts_with("Blocked"));
 
@@ -509,6 +552,97 @@ mod tests {
         assert!(!action.subtitle.starts_with("Blocked"));
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn script_path_with_semicolon_is_not_shell_interpreted() {
+        let root = test_dir("metachars");
+        let path = write_script(&root, "echo;touch pwned.sh");
+
+        let entries = load_script_entries(std::slice::from_ref(&root));
+        let actions = search_scripts(&entries, "script echo");
+        assert_eq!(actions.len(), 1);
+
+        match actions[0].execution_request() {
+            Some(ExecutionRequest::Command(command)) => {
+                assert_eq!(command.program, path.to_string_lossy());
+                assert!(command.args.is_empty());
+            }
+            other => panic!("expected argv execution request, got {other:?}"),
+        }
+        // No shell ever saw the `;`, so nothing was injected (M-16).
+        assert!(!root.join("pwned.sh").exists());
+        assert!(!Path::new("pwned.sh").exists());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn extension_script_form_inherits_manifest_capabilities() {
+        let root = test_dir("form-caps");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("greet.sh"),
+            "#!/bin/sh\n\
+            # @raycast.schemaVersion 1\n\
+            # @raycast.title Greet\n\
+            # @raycast.packageName test.scripts\n\
+            # @raycast.argument1 { \"type\": \"text\", \"placeholder\": \"Name\" }\n\
+            echo hello\n",
+        )
+        .unwrap();
+
+        let manifests = vec![manifest_for_scripts(&root, &["greet.sh"], &["shell"])];
+        let entries = load_extension_script_entries(&manifests);
+        assert_eq!(entries.len(), 1);
+
+        let actions = search_scripts(&entries, "script greet");
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert_eq!(action.risk, ActionRisk::Shell);
+        let form = action
+            .form_data()
+            .expect("script with arguments offers a form");
+        // P1.2: a form is never more trusted than the manifest behind it.
+        assert!(form.capabilities.allows(Capability::Shell));
+        assert_eq!(form.risk, ActionRisk::Shell);
+
+        // Without the manifest grant the same script is blocked entirely.
+        let blocked = vec![manifest_for_scripts(&root, &["greet.sh"], &[])];
+        let blocked_entries = load_extension_script_entries(&blocked);
+        let blocked_actions = search_scripts(&blocked_entries, "script greet");
+        assert_eq!(blocked_actions.len(), 1);
+        assert!(matches!(blocked_actions[0].kind, ActionKind::None));
+        assert!(blocked_actions[0].subtitle.starts_with("Blocked"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn extension_script_ignores_needs_confirmation_false() {
+        let root = test_dir("confirm-opt-out");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("quiet.sh"),
+            "#!/bin/sh\n\
+            # @raycast.schemaVersion 1\n\
+            # @raycast.title Quiet\n\
+            # @raycast.packageName test.scripts\n\
+            # @raycast.needsConfirmation false\n\
+            echo quiet\n",
+        )
+        .unwrap();
+
+        let manifests = vec![manifest_for_scripts(&root, &["quiet.sh"], &["shell"])];
+        let entries = load_extension_script_entries(&manifests);
+        assert_eq!(entries[0].needs_confirmation, Some(false));
+
+        let actions = search_scripts(&entries, "script quiet");
+        // P1.6: for extension scripts the manifest decides; the script header
+        // cannot opt out of the confirmation prompt.
+        assert_eq!(actions[0].risk, ActionRisk::Shell);
+
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]
@@ -612,11 +746,9 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
 
-        let output = run_script_stdout_with_args(
-            &path,
-            &["Zeshi".to_string(), "Zeshicast".to_string()],
-        )
-        .expect("script execution succeeded");
+        let output =
+            run_script_stdout_with_args(&path, &["Zeshi".to_string(), "Zeshicast".to_string()])
+                .expect("script execution succeeded");
 
         assert_eq!(output.trim(), "Hello Zeshi, welcome to Zeshicast!");
 

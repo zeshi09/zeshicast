@@ -457,10 +457,12 @@ Commands with missing required arguments are shown as disabled warning actions
 until the input is complete. Shell and JSON producer commands run through
 `sh -c`; argv commands run as `program` plus `args` directly.
 
-> **Do not wrap placeholders in your own quotes.** Substituted values
-> (`{{query}}`, `{{clipboard}}`, `{{arg:*}}`, `{{pref:*}}`, …) are automatically
-> shell-quoted before reaching `sh -c`, so untrusted input cannot inject
-> commands. Write `--env {{arg:env}}`, not `--env '{{arg:env}}'`.
+> **Placeholders are safe in any quoting context.** Substituted values
+> (`{{query}}`, `{{clipboard}}`, `{{arg:*}}`, `{{pref:*}}`, …) are escaped for
+> the context they land in before reaching `sh -c`, so untrusted input cannot
+> inject commands. `--env {{arg:env}}`, `--env "{{arg:env}}"` and
+> `'prefix {{arg:env}}'` are equally safe; prefer the unquoted form for
+> readability.
 
 `[env]` values are expanded with the same placeholders as `command` and injected
 only into that command process.
@@ -469,9 +471,11 @@ only into that command process.
 `"shell"` or they are shown as blocked actions. JSON-mode commands also require
 `"shell"` to execute their producer command, and returned actions require
 matching capabilities: `"shell"`, `"network"`/`"open_url"`,
-`"filesystem"`/`"open_path"`, and `"clipboard_write"`. Argv-mode commands do
-not require `"shell"` because they do not invoke `sh -c`, but they are still
-local executable extension code and should only come from trusted files.
+`"filesystem"`/`"open_path"`, and `"clipboard_write"`. Argv-mode commands run
+without a shell, but they still execute local code: extensions must grant
+`"shell"` (or `"exec"`) in the manifest, and argv actions always ask for
+confirmation. Commands with required arguments that lack `"shell"` are blocked
+instead of offering an argument form.
 
 ### Custom commands (JSON mode)
 
@@ -544,13 +548,21 @@ version = "0.1.0"
 capabilities = ["shell", "filesystem"]
 commands = ["git-log.toml"]
 scripts = ["scripts/status.sh"]
+# Executable JSON-RPC extensions (optional). Require capabilities = ["shell"].
+binaries = ["bin/git-tools"]
 ```
 
-`commands` points to normal command TOML files. `scripts` points to
-Raycast/Vicinae-style script commands with metadata comments. Paths are relative
-to the extension directory; absolute paths and `..` entries are ignored.
-Manifest capabilities are inherited by every command/script in that extension,
-and the extension browser groups entries by extension id/name/version.
+`commands` points to normal command TOML files (`*.toml` only), `scripts` points
+to Raycast/Vicinae-style script commands with metadata comments, and `binaries`
+points to executable JSON-RPC extensions. Paths are relative to the extension
+directory; absolute paths and `..` entries are ignored. `binaries` are loaded
+only when the manifest grants `capabilities = ["shell"]`.
+
+Manifest capabilities are a **ceiling, not a grant**: each command and script
+must also declare the permissions it needs (`effective = declared ∩ manifest`),
+so a command inside an extension with `capabilities = []` cannot self-grant
+`permissions = ["shell"]`. The extension browser groups entries by extension
+id/name/version.
 
 ### Global preferences
 

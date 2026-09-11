@@ -43,12 +43,17 @@ impl BrowserTab {
             kind: ActionKind::OpenUrl(self.url.clone()),
             script_mode: None,
             score,
+            capabilities: crate::CapabilitySet::trusted(),
         }
     }
 }
 
 pub fn search_browser_tabs(query: &str) -> Vec<Action> {
-    let query_clean = query.strip_prefix("tab:").unwrap_or(query).trim().to_lowercase();
+    let query_clean = query
+        .strip_prefix("tab:")
+        .unwrap_or(query)
+        .trim()
+        .to_lowercase();
     if query_clean.is_empty() && !query.starts_with("tab:") {
         return Vec::new();
     }
@@ -102,9 +107,21 @@ pub fn collect_open_tabs() -> Vec<BrowserTab> {
 
     // 2. Chromium / Chrome / Brave / Edge sessions
     let chromium_paths = [
-        ("Brave", "brave-browser", format!("{home}/.config/BraveSoftware/Brave-Browser/Default/Bookmarks")),
-        ("Chrome", "google-chrome", format!("{home}/.config/google-chrome/Default/Bookmarks")),
-        ("Chromium", "chromium", format!("{home}/.config/chromium/Default/Bookmarks")),
+        (
+            "Brave",
+            "brave-browser",
+            format!("{home}/.config/BraveSoftware/Brave-Browser/Default/Bookmarks"),
+        ),
+        (
+            "Chrome",
+            "google-chrome",
+            format!("{home}/.config/google-chrome/Default/Bookmarks"),
+        ),
+        (
+            "Chromium",
+            "chromium",
+            format!("{home}/.config/chromium/Default/Bookmarks"),
+        ),
     ];
 
     for (browser, icon, path_str) in chromium_paths {
@@ -178,8 +195,16 @@ pub fn parse_chromium_bookmarks(json_str: &str, browser: &str, icon: &str) -> Ve
 
     fn recurse(node: &serde_json::Value, browser: &str, icon: &str, out: &mut Vec<BrowserTab>) {
         if node.get("type").and_then(|t| t.as_str()) == Some("url") {
-            let title = node.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-            let url = node.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+            let title = node
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            let url = node
+                .get("url")
+                .and_then(|u| u.as_str())
+                .unwrap_or("")
+                .to_string();
             if !url.is_empty() && !title.is_empty() {
                 out.push(BrowserTab::new(title, url, browser, icon));
             }
@@ -205,9 +230,18 @@ mod tests {
 
     #[test]
     fn extract_domain_formats() {
-        assert_eq!(extract_domain("https://github.com/zeshi09/zeshicast"), "github.com");
-        assert_eq!(extract_domain("http://localhost:3000/dashboard"), "localhost");
-        assert_eq!(extract_domain("https://doc.rust-lang.org/std/"), "doc.rust-lang.org");
+        assert_eq!(
+            extract_domain("https://github.com/zeshi09/zeshicast"),
+            "github.com"
+        );
+        assert_eq!(
+            extract_domain("http://localhost:3000/dashboard"),
+            "localhost"
+        );
+        assert_eq!(
+            extract_domain("https://doc.rust-lang.org/std/"),
+            "doc.rust-lang.org"
+        );
     }
 
     #[test]

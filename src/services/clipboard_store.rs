@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::{home_dir, MAX_CLIPBOARD_ENTRIES};
 
@@ -46,13 +46,81 @@ impl ClipboardItem {
     }
 }
 
-/// If `value` is an image entry, return the cached PNG path.
+/// If `value` is a *validated* image entry, return the cached PNG path.
+///
+/// A value that merely carries the sentinel prefix is **not** enough: the path
+/// must be an existing `.png` file directly inside the clipboard cache dir, so
+/// pasted text like `\x01zeshicast-image:/etc/passwd` stays text and can never
+/// make the daemon read (or copy) an arbitrary file (M-15).
 pub fn clipboard_image_path(value: &str) -> Option<&str> {
-    value.strip_prefix(CLIPBOARD_IMAGE_PREFIX)
+    let raw = value.strip_prefix(CLIPBOARD_IMAGE_PREFIX)?;
+    validated_image_path(raw).map(|_| raw)
+}
+
+/// The single image validator. Returns the path only when it is safe to read.
+pub fn validated_clipboard_image(value: &str) -> Option<PathBuf> {
+    let raw = value.strip_prefix(CLIPBOARD_IMAGE_PREFIX)?;
+    validated_image_path(raw)
+}
+
+fn validated_image_path(raw: &str) -> Option<PathBuf> {
+    let path = Path::new(raw);
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    {
+        return None;
+    }
+    if !is_png_file(path) {
+        return None;
+    }
+    if !is_directly_inside_clipboard_cache(path) {
+        return None;
+    }
+    Some(path.to_path_buf())
+}
+
+/// `path` must resolve (symlinks included) to a file directly inside the
+/// clipboard cache directory. Canonicalising both sides rejects symlinks that
+/// point outside the cache.
+fn is_directly_inside_clipboard_cache(path: &Path) -> bool {
+    let Ok(canonical) = path.canonicalize() else {
+        return false;
+    };
+    let Ok(cache) = clipboard_cache_dir().canonicalize() else {
+        return false;
+    };
+    canonical.parent() == Some(cache.as_path())
 }
 
 pub fn clipboard_cache_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(dir) = test_cache_dir_override() {
+        return dir;
+    }
     home_dir().join(".cache/zeshicast/clipboard")
+}
+
+#[cfg(test)]
+thread_local! {
+    static CACHE_DIR_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn test_cache_dir_override() -> Option<PathBuf> {
+    CACHE_DIR_OVERRIDE.with(|slot| slot.borrow().clone())
+}
+
+/// Run `body` with [`clipboard_cache_dir`] pointing at `dir`, so tests can
+/// exercise the real validation rules against a temp directory.
+#[cfg(test)]
+pub(crate) fn with_clipboard_cache_dir<T>(dir: &Path, body: impl FnOnce() -> T) -> T {
+    let previous = CACHE_DIR_OVERRIDE.with(|slot| slot.replace(Some(dir.to_path_buf())));
+    let result = body();
+    CACHE_DIR_OVERRIDE.with(|slot| *slot.borrow_mut() = previous);
+    result
 }
 
 pub fn clipboard_retention_value(preferences: &HashMap<String, String>) -> usize {
@@ -168,7 +236,9 @@ pub struct ClipboardSummary {
 }
 
 pub fn classify_clipboard_text(text: &str) -> ClipboardKind {
-    if text.starts_with(CLIPBOARD_IMAGE_PREFIX) {
+    // Only a validated path counts as an image; a forged prefix falls through
+    // and is classified as ordinary text.
+    if clipboard_image_path(text).is_some() {
         return ClipboardKind::Image;
     }
     let trimmed = text.trim();
@@ -271,9 +341,12 @@ pub fn save_clipboard_image(bytes: &[u8]) -> io::Result<String> {
 }
 
 /// Put a cached image back on the clipboard as `image/png` (wl-clipboard, with
-/// an xclip fallback).
-pub fn copy_clipboard_image(path: &str) -> bool {
-    let spawned = fs::File::open(path).ok().and_then(|file| {
+/// an xclip fallback). Refuses any path outside the clipboard cache (M-15).
+pub fn copy_clipboard_image(value: &str) -> bool {
+    let Some(path) = validated_image_path(value) else {
+        return false;
+    };
+    let spawned = fs::File::open(&path).ok().and_then(|file| {
         std::process::Command::new("wl-copy")
             .args(["--type", "image/png"])
             .stdin(std::process::Stdio::from(file))
@@ -284,7 +357,14 @@ pub fn copy_clipboard_image(path: &str) -> bool {
         return child.wait().is_ok();
     }
     std::process::Command::new("xclip")
-        .args(["-selection", "clipboard", "-t", "image/png", "-i", path])
+        .args([
+            "-selection",
+            "clipboard",
+            "-t",
+            "image/png",
+            "-i",
+            &path.to_string_lossy(),
+        ])
         .spawn()
         .is_ok()
 }

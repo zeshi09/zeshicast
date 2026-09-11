@@ -296,15 +296,16 @@ impl SearchProvider for ExtensionsProvider<'_> {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
         for manifest in self.manifests {
-            for cmd_path in &manifest.commands {
+            let capabilities = commands::parse_capabilities(&manifest.origin.capabilities);
+            for binary in &manifest.binaries {
                 actions.extend(extensions::search_extension(
-                    cmd_path,
+                    binary,
                     &manifest.origin.name,
                     context.query,
+                    &capabilities,
                 ));
             }
         }
         actions
     }
 }
-

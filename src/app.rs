@@ -8,20 +8,21 @@ pub use crate::services::clipboard_store::*;
 use crate::services::storage;
 use crate::services::text_input::{is_wtype_available, type_text_via_wtype};
 use crate::{
-    Action, ActionFormCommand, ActionKind, ActionRisk, ActionTarget, AppEntry, AppsProvider, AudioProvider,
-    BrowserTabsProvider, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExecutionDecision,
-    ExecutionPolicy, ExecutionRequest, ExtensionManifest, ExtensionsProvider, FileEntry, FilesProvider,
-    HyprlandProvider, LauncherCommand, MAX_RESULTS, MediaProvider,
-    NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider,
-    PlaceholderContext, ProcessCommand, ProcessesProvider, ScriptEntry, ScriptsProvider,
-    SearchContext, SearchProvider, SecondaryAction, SecondaryActionKind, ShellCommand,
-    SwayProvider, SystemProvider, WebProvider, WindowsProvider, app_action, append_alias,
-    expand_placeholders, expand_placeholders_shell, fuzzy_score, home_dir, load_aliases, load_apps,
-    load_clipboard_history, load_command_entries, load_extension_command_entries,
-    load_extension_manifests, load_extension_script_entries, load_file_index, load_frequencies,
-    load_lines, load_named_values, load_preferences, load_script_entries, normalize_alias,
-    run_execution_request, search_audio_actions, search_media_actions, search_network_actions,
-    search_notification_actions, search_system_actions, write_lines, write_preferences,
+    Action, ActionFormCommand, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider,
+    BrowserTabsProvider, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider,
+    ExecutionDecision, ExecutionPolicy, ExecutionRequest, ExecutionTicket, ExtensionManifest,
+    ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider, LauncherCommand, MAX_RESULTS,
+    MediaProvider, NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider,
+    NotificationsProvider, PlaceholderContext, ProcessCommand, ProcessesProvider, ScriptEntry,
+    ScriptsProvider, SearchContext, SearchProvider, SecondaryAction, SecondaryActionKind,
+    ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider, app_action,
+    append_alias, execute, expand_placeholders, expand_placeholders_shell, fuzzy_score, home_dir,
+    load_aliases, load_apps, load_clipboard_history, load_command_entries,
+    load_extension_command_entries, load_extension_manifests, load_extension_script_entries,
+    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences,
+    load_script_entries, normalize_alias, search_audio_actions, search_media_actions,
+    search_network_actions, search_notification_actions, search_system_actions, write_lines,
+    write_preferences,
 };
 
 #[derive(Debug, Clone)]
@@ -528,25 +529,13 @@ impl Zeshicast {
         self.run_secondary_action_with_confirmation(action, secondary, true)
     }
 
-    fn secondary_action_risk(
-        action: &Action,
-        secondary: SecondaryActionKind,
-    ) -> ActionRisk {
-        match secondary {
-            SecondaryActionKind::Run => action.risk,
-            SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
-            SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
-            _ => ActionRisk::Normal,
-        }
-    }
-
     fn run_secondary_action_with_confirmation(
         &mut self,
         action: &Action,
         secondary: SecondaryActionKind,
         confirmed: bool,
     ) -> io::Result<ExecutionDecision> {
-        let risk = Self::secondary_action_risk(action, secondary);
+        let risk = crate::secondary_action_risk(action, secondary);
         if risk.requires_confirmation() && !confirmed {
             return Ok(ExecutionDecision::NeedsConfirmation(risk));
         }
@@ -979,9 +968,14 @@ impl Zeshicast {
                     fuzzy_score(text, query)? + 120
                 };
                 Some(
-                    Action::new("Zeshicast", *title, ActionKind::Launcher(command.clone()), score)
-                        .with_subtitle(*subtitle)
-                        .with_icon(*icon),
+                    Action::new(
+                        "Zeshicast",
+                        *title,
+                        ActionKind::Launcher(command.clone()),
+                        score,
+                    )
+                    .with_subtitle(*subtitle)
+                    .with_icon(*icon),
                 )
             })
             .collect()
@@ -1022,9 +1016,39 @@ impl Zeshicast {
         prune_clipboard_image_cache(&self.clipboard_history)
     }
 
-    pub fn run_form_action(&mut self, action: &Action, values: HashMap<String, String>) {
+    /// Submits a form under the interactive policy: the manifest capability
+    /// ceiling carried by the form is checked first, and a risky form returns
+    /// [`ExecutionDecision::NeedsConfirmation`] instead of executing.
+    pub fn run_form_action(
+        &mut self,
+        action: &Action,
+        values: HashMap<String, String>,
+    ) -> ExecutionDecision {
+        self.run_form_action_with_policy(action, values, ExecutionPolicy::interactive())
+    }
+
+    /// Submits a form after the caller obtained user confirmation.
+    pub fn run_form_action_confirmed(
+        &mut self,
+        action: &Action,
+        values: HashMap<String, String>,
+    ) -> ExecutionDecision {
+        self.run_form_action_with_policy(action, values, ExecutionPolicy::confirmed())
+    }
+
+    fn run_form_action_with_policy(
+        &mut self,
+        action: &Action,
+        values: HashMap<String, String>,
+        policy: ExecutionPolicy,
+    ) -> ExecutionDecision {
         let ActionKind::Form(form) = &action.kind else {
-            return;
+            return ExecutionDecision::Denied("action is not a form".to_string());
+        };
+        let ticket = ExecutionTicket {
+            policy,
+            capabilities: form.capabilities.clone(),
+            risk: form.risk,
         };
         let mut args = form.current_args.clone();
         args.extend(values);
@@ -1035,32 +1059,32 @@ impl Zeshicast {
             preferences: Cow::Owned(form.preferences.clone()),
             now: SystemTime::now(),
         };
-        let env = form
+        let env: HashMap<String, String> = form
             .env
             .iter()
             .map(|(k, v)| (k.clone(), expand_placeholders(v, &context)))
             .collect();
-        match &form.command {
-            ActionFormCommand::Shell(command) => {
-                let command = expand_placeholders_shell(command, &context);
-                run_execution_request(ExecutionRequest::Shell {
-                    command: ShellCommand::with_env(command, env),
-                });
-            }
+        let request = match &form.command {
+            ActionFormCommand::Shell(command) => ExecutionRequest::Shell {
+                command: ShellCommand::with_env(expand_placeholders_shell(command, &context), env),
+            },
             ActionFormCommand::Argv { program, args } => {
-                let program = expand_placeholders(program, &context);
-                let args = args
-                    .iter()
-                    .map(|arg| expand_placeholders(arg, &context))
-                    .collect();
-                run_execution_request(ExecutionRequest::Command(ProcessCommand::with_env(
-                    program, args, env,
-                )));
+                ExecutionRequest::Command(ProcessCommand::with_env(
+                    expand_placeholders(program, &context),
+                    args.iter()
+                        .map(|arg| expand_placeholders(arg, &context))
+                        .collect(),
+                    env,
+                ))
             }
-        }
-        if let Err(e) = self.record_recent(action) {
+        };
+        let decision = execute(request, &ticket);
+        if matches!(decision, ExecutionDecision::RunNow)
+            && let Err(e) = self.record_recent(action)
+        {
             eprintln!("failed to record recent: {e}");
         }
+        decision
     }
 
     pub fn get_preferences(&self) -> &HashMap<String, String> {
@@ -1305,6 +1329,7 @@ impl ExtensionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ActionRisk;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1398,7 +1423,11 @@ mod tests {
         fs::write(&orphan, b"png").unwrap();
         let entries = vec![image_entry(&kept)];
 
-        prune_clipboard_image_cache_dir(&dir, &entries).unwrap();
+        // M-15: only paths inside the clipboard cache count as image entries,
+        // so the cache dir is overridden for the duration of the prune.
+        with_clipboard_cache_dir(&dir, || {
+            prune_clipboard_image_cache_dir(&dir, &entries).unwrap();
+        });
 
         assert!(kept.exists());
         assert!(!orphan.exists());
@@ -1413,7 +1442,9 @@ mod tests {
         fs::write(&image, b"png").unwrap();
         let entries = vec![image_entry(&image), "plain text".to_string()];
 
-        prune_clipboard_image_cache_dir(&dir, &entries).unwrap();
+        with_clipboard_cache_dir(&dir, || {
+            prune_clipboard_image_cache_dir(&dir, &entries).unwrap();
+        });
 
         assert!(image.exists());
         let _ = fs::remove_dir_all(dir);
@@ -1446,32 +1477,30 @@ mod tests {
     }
 
     fn clipboard_action(value: &str) -> Action {
-        Action::new(
-            "Clipboard",
-            value,
-            ActionKind::Copy(value.to_string()),
-            1,
-        )
+        Action::new("Clipboard", value, ActionKind::Copy(value.to_string()), 1)
     }
 
     #[test]
     fn risky_secondary_actions_require_confirmation() {
-        let mut app = test_app(
-            test_cache_dir("secondary-risky-config"),
-            HashMap::new(),
-        );
+        let mut app = test_app(test_cache_dir("secondary-risky-config"), HashMap::new());
         app.clipboard_history = vec!["secret".to_string(), "other".to_string()];
         let action = clipboard_action("secret");
 
         let decision = app
             .run_secondary_action(&action, SecondaryActionKind::DeleteClipboardItem)
             .unwrap();
-        assert_eq!(decision, ExecutionDecision::NeedsConfirmation(ActionRisk::Destructive));
+        assert_eq!(
+            decision,
+            ExecutionDecision::NeedsConfirmation(ActionRisk::Destructive)
+        );
 
         let decision = app
             .run_secondary_action(&action, SecondaryActionKind::ClearClipboardHistory)
             .unwrap();
-        assert_eq!(decision, ExecutionDecision::NeedsConfirmation(ActionRisk::ClipboardClear));
+        assert_eq!(
+            decision,
+            ExecutionDecision::NeedsConfirmation(ActionRisk::ClipboardClear)
+        );
 
         assert_eq!(app.clipboard_history, vec!["secret", "other"]);
     }

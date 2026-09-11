@@ -9,9 +9,9 @@ use std::process::Command;
 
 use crate::{
     Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
-    CommandArgumentKind, ExtensionManifest, ExtensionOrigin, JsonCommandAction, PlaceholderContext,
-    ProcessCommand, ShellCommand, expand_placeholders, expand_placeholders_shell, fuzzy_score,
-    normalize_alias, tagged_subtitle, toml_value_string,
+    CapabilitySet, CommandArgumentKind, ExtensionManifest, ExtensionOrigin, JsonCommandAction,
+    PlaceholderContext, ProcessCommand, ShellCommand, expand_placeholders,
+    expand_placeholders_shell, fuzzy_score, normalize_alias, tagged_subtitle, toml_value_string,
 };
 
 #[derive(Debug, Clone)]
@@ -47,9 +47,20 @@ impl CommandEntry {
         )
     }
 
+    /// The extension manifest is a ceiling, not a grant: `effective =
+    /// declared ∩ manifest`. A command may narrow its own permissions further
+    /// but can never widen what the manifest granted (see P1.8).
     pub(crate) fn with_extension_origin(mut self, origin: ExtensionOrigin) -> Self {
-        merge_permissions(&mut self.permissions, &origin.capabilities);
-        self.capabilities = parse_capabilities(&self.permissions);
+        let manifest = CapabilitySet::new(parse_capabilities(&origin.capabilities));
+        let effective = parse_capabilities(&self.permissions)
+            .into_iter()
+            .filter(|capability| manifest.allows(*capability))
+            .collect::<Vec<_>>();
+        self.permissions = effective
+            .iter()
+            .map(|capability| capability.label().to_string())
+            .collect();
+        self.capabilities = effective;
         self.origin = Some(origin);
         self
     }
@@ -203,21 +214,9 @@ pub(crate) fn parse_capabilities(permissions: &[String]) -> Vec<Capability> {
     capabilities
 }
 
-fn merge_permissions(permissions: &mut Vec<String>, inherited: &[String]) {
-    for permission in inherited {
-        if permissions
-            .iter()
-            .any(|existing| existing.eq_ignore_ascii_case(permission))
-        {
-            continue;
-        }
-        permissions.push(permission.clone());
-    }
-}
-
 fn parse_capability(permission: &str) -> Option<Capability> {
     match permission.trim().to_lowercase().replace('-', "_").as_str() {
-        "shell" | "run" => Some(Capability::Shell),
+        "shell" | "run" | "exec" => Some(Capability::Shell),
         "network" | "net" => Some(Capability::Network),
         "filesystem" | "fs" => Some(Capability::Filesystem),
         "clipboard_read" | "clipboardread" => Some(Capability::ClipboardRead),
@@ -374,63 +373,73 @@ pub(crate) fn search_commands(
 
             let command_display = command_display(entry, &command_context);
             let mut subtitle = command_subtitle(entry, &command_display, &command_match.missing);
-            let (kind, icon_name) = if command_match.missing.is_empty() {
-                match entry.mode {
-                    CommandMode::Argv => (
-                        ActionKind::Command(argv_process_command(entry, &command_context, env)),
-                        entry.icon_name.as_str(),
-                    ),
-                    CommandMode::Shell | CommandMode::Json => {
-                        let command = expand_placeholders_shell(&entry.command, &command_context);
-                        let shell_command = ShellCommand::with_env(command, env);
-                        if has_capability(&entry.capabilities, Capability::Shell) {
-                            (ActionKind::Shell(shell_command), entry.icon_name.as_str())
-                        } else {
-                            subtitle = "Blocked: command manifest lacks permissions = [\"shell\"]"
-                                .to_string();
-                            (ActionKind::None, "dialog-warning-symbolic")
-                        }
+            let capabilities = effective_capabilities(entry);
+            let (kind, icon_name) =
+                match (capability_denial(entry), command_match.missing.is_empty()) {
+                    (Some(reason), _) => {
+                        subtitle = reason.to_string();
+                        (ActionKind::None, "dialog-warning-symbolic")
                     }
-                }
-            } else {
-                let fields = entry
-                    .arguments
-                    .iter()
-                    .filter(|arg| command_match.missing.contains(&arg.name))
-                    .map(|arg| ActionFormField {
-                        name: arg.name.clone(),
-                        kind: arg.kind,
-                        required: arg.required,
-                        default: arg.default.clone(),
-                        options: arg.options.clone(),
-                        current_value: command_match
-                            .args
-                            .get(&arg.name)
-                            .cloned()
-                            .unwrap_or_default(),
-                        percent_encoded: false,
-                    })
-                    .collect();
-                let form = ActionForm {
-                    name: entry.name.clone(),
-                    fields,
-                    command: form_command(entry),
-                    env: entry.env.clone(),
-                    preferences: command_preferences(entry, &context.preferences),
-                    current_args: command_match.args.clone(),
-                    partial_query: command_match.argument.clone(),
+                    (None, true) => match entry.mode {
+                        CommandMode::Argv => (
+                            ActionKind::Command(argv_process_command(entry, &command_context, env)),
+                            entry.icon_name.as_str(),
+                        ),
+                        CommandMode::Shell | CommandMode::Json => {
+                            let command =
+                                expand_placeholders_shell(&entry.command, &command_context);
+                            let shell_command = ShellCommand::with_env(command, env);
+                            (ActionKind::Shell(shell_command), entry.icon_name.as_str())
+                        }
+                    },
+                    (None, false) => {
+                        let fields = entry
+                            .arguments
+                            .iter()
+                            .filter(|arg| command_match.missing.contains(&arg.name))
+                            .map(|arg| ActionFormField {
+                                name: arg.name.clone(),
+                                kind: arg.kind,
+                                required: arg.required,
+                                default: arg.default.clone(),
+                                options: arg.options.clone(),
+                                current_value: command_match
+                                    .args
+                                    .get(&arg.name)
+                                    .cloned()
+                                    .unwrap_or_default(),
+                                percent_encoded: false,
+                            })
+                            .collect();
+                        let form = ActionForm {
+                            name: entry.name.clone(),
+                            fields,
+                            command: form_command(entry),
+                            env: entry.env.clone(),
+                            preferences: command_preferences(entry, &context.preferences),
+                            current_args: command_match.args.clone(),
+                            partial_query: command_match.argument.clone(),
+                            capabilities: capabilities.clone(),
+                            // A form is never more trusted than the command it
+                            // came from; submission asks for confirmation.
+                            risk: ActionRisk::Shell,
+                        };
+                        (ActionKind::Form(form), "dialog-question-symbolic")
+                    }
                 };
-                (ActionKind::Form(form), "dialog-question-symbolic")
-            };
 
             let mut action =
                 Action::new(&entry.category, &entry.name, kind, command_match.score + 85)
                     .with_subtitle(subtitle)
-                    .with_icon(icon_name);
-            if command_match.missing.is_empty()
-                && entry.mode != CommandMode::Argv
-                && has_capability(&entry.capabilities, Capability::Shell)
-            {
+                    .with_icon(icon_name)
+                    .with_capabilities(capabilities.clone());
+            // Anything that can execute code (directly or via a form) asks for
+            // confirmation; `None` (blocked) and JSON producers keep their own
+            // risk, which is set where the action is built.
+            if matches!(
+                action.kind,
+                ActionKind::Shell(_) | ActionKind::Command(_) | ActionKind::Form(_)
+            ) {
                 action = action.with_risk(ActionRisk::Shell);
             }
 
@@ -438,6 +447,36 @@ pub(crate) fn search_commands(
         })
         .flatten()
         .collect()
+}
+
+const BLOCKED_LACKS_SHELL: &str = "Blocked: command manifest lacks permissions = [\"shell\"]";
+
+/// `Some(reason)` when the command must not run at all (not even as a form).
+///
+/// Shell and JSON producer commands always need `sh -c`; an argv command from
+/// an extension is not a loophole and needs the manifest to grant
+/// `shell`/`exec` too. A hand-written argv command in the user's own config dir
+/// has no manifest behind it and is gated by the confirmation prompt instead.
+fn capability_denial(entry: &CommandEntry) -> Option<&'static str> {
+    if has_capability(&entry.capabilities, Capability::Shell) {
+        return None;
+    }
+    match entry.mode {
+        CommandMode::Shell | CommandMode::Json => Some(BLOCKED_LACKS_SHELL),
+        CommandMode::Argv if entry.origin.is_some() => Some(BLOCKED_LACKS_SHELL),
+        CommandMode::Argv => None,
+    }
+}
+
+/// Capabilities handed to the action/form built from `entry`.
+fn effective_capabilities(entry: &CommandEntry) -> CapabilitySet {
+    let mut capabilities = CapabilitySet::new(entry.capabilities.clone());
+    if entry.mode == CommandMode::Argv && entry.origin.is_none() {
+        // Local argv command: it executes a program directly (no `sh -c`) and
+        // is confirmed before running, so it may carry the shell capability.
+        capabilities.grant(Capability::Shell);
+    }
+    capabilities
 }
 
 fn command_display(entry: &CommandEntry, context: &PlaceholderContext<'_>) -> String {
@@ -478,10 +517,12 @@ fn form_command(entry: &CommandEntry) -> ActionFormCommand {
 }
 
 fn json_command_action(entry: &CommandEntry, command: ShellCommand, score: i32) -> Action {
+    let capabilities = CapabilitySet::new(entry.capabilities.clone());
     if !has_capability(&entry.capabilities, Capability::Shell) {
         return Action::new(&entry.category, &entry.name, ActionKind::None, score + 1)
-            .with_subtitle("Blocked: command manifest lacks permissions = [\"shell\"]")
-            .with_icon("dialog-warning-symbolic");
+            .with_subtitle(BLOCKED_LACKS_SHELL)
+            .with_icon("dialog-warning-symbolic")
+            .with_capabilities(capabilities);
     }
 
     let command_value = command.command.clone();
@@ -499,6 +540,7 @@ fn json_command_action(entry: &CommandEntry, command: ShellCommand, score: i32) 
     .with_subtitle(format!("Run JSON command - {command_value}"))
     .with_icon(&entry.icon_name)
     .with_risk(ActionRisk::Shell)
+    .with_capabilities(capabilities)
 }
 
 #[cfg(feature = "gui")]
@@ -641,11 +683,7 @@ fn parse_json_action(
             format!("{denial} - {subtitle}")
         };
     }
-    let risk = if matches!(&parsed.kind, ActionKind::Shell(_)) {
-        ActionRisk::Shell
-    } else {
-        ActionRisk::Normal
-    };
+    let risk = parsed.risk;
 
     Some(
         Action::new(
@@ -664,19 +702,125 @@ fn parse_json_action(
 struct ParsedJsonActionKind {
     kind: ActionKind,
     denial: Option<String>,
+    risk: ActionRisk,
 }
 
 #[cfg(any(feature = "gui", test))]
 impl ParsedJsonActionKind {
-    fn allowed(kind: ActionKind) -> Self {
-        Self { kind, denial: None }
+    fn blocked(reason: impl Into<String>) -> Self {
+        Self {
+            kind: ActionKind::None,
+            denial: Some(reason.into()),
+            risk: ActionRisk::Normal,
+        }
+    }
+}
+
+/// The effect an extension-produced result wants to perform, before any
+/// capability is consulted. Shared by JSON-command output and extension search
+/// items so both pass through exactly one gate (P1.5).
+// `ActionIntent` variants produced only by JSON-command output are compiled
+// only where that producer exists (`gui` or tests); extension search results
+// use the always-present subset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ActionIntent {
+    OpenUrl(String),
+    Copy(String),
+    /// Run the producing extension's command by id.
+    Launch(String),
+    #[cfg(any(feature = "gui", test))]
+    OpenPath(String),
+    #[cfg(any(feature = "gui", test))]
+    Shell(String),
+    #[cfg(any(feature = "gui", test))]
+    None,
+}
+
+/// Result of the shared capability gate: a kind to build an action from, the
+/// risk it must carry, and a denial reason when it is not allowed.
+pub(crate) struct GatedAction {
+    pub(crate) kind: ActionKind,
+    pub(crate) risk: ActionRisk,
+    pub(crate) denial: Option<String>,
+}
+
+impl GatedAction {
+    fn allowed(kind: ActionKind, risk: ActionRisk) -> Self {
+        Self {
+            kind,
+            risk,
+            denial: None,
+        }
     }
 
     fn blocked(reason: impl Into<String>) -> Self {
         Self {
             kind: ActionKind::None,
+            risk: ActionRisk::Normal,
             denial: Some(reason.into()),
         }
+    }
+}
+
+/// The single gate for results produced by commands and extensions. Anything
+/// that can execute code (`Shell`, `Launch`) is downgraded to a confirmed
+/// action; anything else is checked against the granted capabilities.
+pub(crate) fn gate_action_intent(intent: ActionIntent, capabilities: &[Capability]) -> GatedAction {
+    let allowed = |capability: Capability| has_capability(capabilities, capability);
+    match intent {
+        ActionIntent::OpenUrl(url) => {
+            if json_url_requires_capability(&url) && !allowed(Capability::OpenUrl) {
+                GatedAction::blocked(
+                    "Blocked: JSON action requires permissions = [\"network\"] or [\"open_url\"]",
+                )
+            } else {
+                GatedAction::allowed(ActionKind::OpenUrl(url), ActionRisk::Normal)
+            }
+        }
+        #[cfg(any(feature = "gui", test))]
+        ActionIntent::OpenPath(path) => {
+            if allowed(Capability::OpenPath) {
+                GatedAction::allowed(
+                    ActionKind::OpenPath(PathBuf::from(path)),
+                    ActionRisk::Normal,
+                )
+            } else {
+                GatedAction::blocked(
+                    "Blocked: JSON action requires permissions = [\"filesystem\"] or [\"open_path\"]",
+                )
+            }
+        }
+        ActionIntent::Copy(text) => {
+            if allowed(Capability::ClipboardWrite) {
+                GatedAction::allowed(ActionKind::Copy(text), ActionRisk::Normal)
+            } else {
+                GatedAction::blocked(
+                    "Blocked: JSON action requires permissions = [\"clipboard_write\"]",
+                )
+            }
+        }
+        #[cfg(any(feature = "gui", test))]
+        ActionIntent::Shell(command) => {
+            if allowed(Capability::Shell) {
+                GatedAction::allowed(
+                    ActionKind::Shell(ShellCommand::new(command)),
+                    ActionRisk::Shell,
+                )
+            } else {
+                GatedAction::blocked("Blocked: JSON action requires permissions = [\"shell\"]")
+            }
+        }
+        ActionIntent::Launch(id) => {
+            if allowed(Capability::Shell) {
+                GatedAction::allowed(ActionKind::Launch(id), ActionRisk::Shell)
+            } else {
+                GatedAction::blocked(
+                    "Blocked: extension result requires capabilities = [\"shell\"]",
+                )
+            }
+        }
+        #[cfg(any(feature = "gui", test))]
+        ActionIntent::None => GatedAction::allowed(ActionKind::None, ActionRisk::Normal),
     }
 }
 
@@ -693,51 +837,27 @@ fn parse_json_action_kind(
         .or_else(|| json_string(value, "value"))
         .unwrap_or_default();
 
-    match action_type.as_str() {
-        "open_url" | "url" if !action_value.is_empty() => {
-            if json_url_requires_capability(&action_value)
-                && !has_capability(capabilities, Capability::OpenUrl)
-            {
-                ParsedJsonActionKind::blocked(
-                    "Blocked: JSON action requires permissions = [\"network\"] or [\"open_url\"]",
-                )
-            } else {
-                ParsedJsonActionKind::allowed(ActionKind::OpenUrl(action_value))
-            }
+    let intent = match action_type.as_str() {
+        "open_url" | "url" if !action_value.is_empty() => ActionIntent::OpenUrl(action_value),
+        "open_path" | "path" if !action_value.is_empty() => ActionIntent::OpenPath(action_value),
+        "copy" | "copy_text" if !action_value.is_empty() => ActionIntent::Copy(action_value),
+        "shell" | "run" if !action_value.is_empty() => ActionIntent::Shell(action_value),
+        "none" => ActionIntent::None,
+        _ => {
+            return ParsedJsonActionKind::blocked(format!(
+                "Unsupported JSON action type: {action_type}"
+            ));
         }
-        "open_path" | "path" if !action_value.is_empty() => {
-            if has_capability(capabilities, Capability::OpenPath) {
-                ParsedJsonActionKind::allowed(ActionKind::OpenPath(PathBuf::from(action_value)))
-            } else {
-                ParsedJsonActionKind::blocked(
-                    "Blocked: JSON action requires permissions = [\"filesystem\"] or [\"open_path\"]",
-                )
-            }
-        }
-        "copy" | "copy_text" if !action_value.is_empty() => {
-            if has_capability(capabilities, Capability::ClipboardWrite) {
-                ParsedJsonActionKind::allowed(ActionKind::Copy(action_value))
-            } else {
-                ParsedJsonActionKind::blocked(
-                    "Blocked: JSON action requires permissions = [\"clipboard_write\"]",
-                )
-            }
-        }
-        "shell" | "run" if !action_value.is_empty() => {
-            if has_capability(capabilities, Capability::Shell) {
-                ParsedJsonActionKind::allowed(ActionKind::Shell(ShellCommand::new(action_value)))
-            } else {
-                ParsedJsonActionKind::blocked(
-                    "Blocked: JSON action requires permissions = [\"shell\"]",
-                )
-            }
-        }
-        "none" => ParsedJsonActionKind::allowed(ActionKind::None),
-        _ => ParsedJsonActionKind::blocked(format!("Unsupported JSON action type: {action_type}")),
+    };
+
+    let gated = gate_action_intent(intent, capabilities);
+    ParsedJsonActionKind {
+        kind: gated.kind,
+        denial: gated.denial,
+        risk: gated.risk,
     }
 }
 
-#[cfg(any(feature = "gui", test))]
 fn json_url_requires_capability(value: &str) -> bool {
     !value.trim().to_lowercase().starts_with("file://")
 }
@@ -948,4 +1068,149 @@ fn command_subtitle(entry: &CommandEntry, command: &str, missing: &[String]) -> 
     }
 
     tagged_subtitle(&parts.join(" - "), &entry.tags)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ExecutionRequest, PlaceholderContext};
+
+    fn no_context() -> PlaceholderContext<'static> {
+        PlaceholderContext::new("", None)
+    }
+
+    fn entry(toml: &str) -> CommandEntry {
+        parse_command_entry(toml).expect("command TOML parses")
+    }
+
+    fn empty_manifest() -> ExtensionOrigin {
+        ExtensionOrigin {
+            id: "example.empty".to_string(),
+            name: "Empty".to_string(),
+            version: "0.1.0".to_string(),
+            capabilities: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn shell_command_without_shell_permission_has_no_form() {
+        let command = entry(
+            r#"
+name = "Deploy"
+command = "deploy {{arg:env}}"
+keyword = "deploy"
+arguments = [ { name = "env", type = "text", required = true } ]
+"#,
+        );
+
+        let actions = search_commands(&[command], "deploy", &no_context());
+        assert_eq!(actions.len(), 1);
+        // B-1: the missing-argument branch must not hand out a form that
+        // bypasses the `shell` permission.
+        assert!(matches!(actions[0].kind, ActionKind::None));
+        assert!(actions[0].subtitle.starts_with("Blocked"));
+        assert!(!actions[0].risk.requires_confirmation());
+    }
+
+    #[test]
+    fn shell_command_with_shell_permission_offers_a_confirming_form() {
+        let command = entry(
+            r#"
+name = "Deploy"
+command = "deploy {{arg:env}}"
+keyword = "deploy"
+permissions = ["shell"]
+arguments = [ { name = "env", type = "text", required = true } ]
+"#,
+        );
+
+        let actions = search_commands(&[command], "deploy", &no_context());
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert_eq!(action.risk, ActionRisk::Shell);
+        let ActionKind::Form(form) = &action.kind else {
+            panic!("expected a form, got {:?}", action.kind);
+        };
+        assert!(form.capabilities.allows(Capability::Shell));
+        assert_eq!(form.risk, ActionRisk::Shell);
+        assert!(action.capabilities.allows(Capability::Shell));
+    }
+
+    #[test]
+    fn argv_command_requires_confirmation() {
+        let command = entry(
+            r#"
+name = "Safe Echo"
+mode = "argv"
+program = "printf"
+args = ["%s", "{{query}}"]
+keyword = "safe"
+"#,
+        );
+
+        let actions = search_commands(&[command], "safe hello", &no_context());
+        assert_eq!(actions.len(), 1);
+        // P1.4: argv no longer runs without a prompt.
+        assert_eq!(actions[0].risk, ActionRisk::Shell);
+        assert!(matches!(
+            actions[0].execution_request(),
+            Some(ExecutionRequest::Command(_))
+        ));
+    }
+
+    #[test]
+    fn argv_sh_c_is_not_silent() {
+        let command = entry(
+            r#"
+name = "Sneaky"
+mode = "argv"
+program = "/bin/sh"
+args = ["-c", "touch /tmp/zeshicast-pwned"]
+keyword = "sneaky"
+"#,
+        )
+        .with_extension_origin(empty_manifest());
+
+        let actions = search_commands(&[command], "sneaky", &no_context());
+        assert_eq!(actions.len(), 1);
+        // B-6: an extension cannot smuggle `sh -c` past the manifest gate.
+        assert!(matches!(actions[0].kind, ActionKind::None));
+        assert!(actions[0].subtitle.starts_with("Blocked"));
+        assert!(actions[0].execution_request().is_none());
+    }
+
+    #[test]
+    fn command_cannot_self_grant_shell_inside_empty_manifest() {
+        let command = entry(
+            r#"
+name = "Sneaky"
+command = "touch /tmp/zeshicast-pwned"
+permissions = ["shell"]
+"#,
+        )
+        .with_extension_origin(empty_manifest());
+
+        // P1.8: the manifest is a ceiling, so the self-declared shell
+        // permission does not survive the intersection.
+        assert!(command.capabilities.is_empty());
+        assert!(command.permissions.is_empty());
+
+        let actions = search_commands(&[command], "", &no_context());
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0].kind, ActionKind::None));
+    }
+
+    #[test]
+    fn gate_action_intent_blocks_launch_without_shell() {
+        let blocked = gate_action_intent(ActionIntent::Launch("id".to_string()), &[]);
+        assert!(matches!(blocked.kind, ActionKind::None));
+        assert!(blocked.denial.is_some());
+        assert!(!blocked.risk.requires_confirmation());
+
+        let allowed =
+            gate_action_intent(ActionIntent::Launch("id".to_string()), &[Capability::Shell]);
+        assert!(matches!(allowed.kind, ActionKind::Launch(_)));
+        assert_eq!(allowed.risk, ActionRisk::Shell);
+        assert!(allowed.risk.requires_confirmation());
+    }
 }

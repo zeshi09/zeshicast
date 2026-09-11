@@ -15,13 +15,14 @@ pub use action::{
     SecondaryAction, SecondaryActionKind, copy_text, percent_encode,
 };
 pub(crate) use action::{
-    ActionFormCommand, ActionKind, HttpRequest, JsonCommandAction, ProcessCommand, ShellCommand,
+    ActionFormCommand, ActionKind, CapabilitySet, HttpRequest, JsonCommandAction, ProcessCommand,
+    ShellCommand,
 };
-pub(crate) use action::{ExecutionRequest, run_execution_request};
+pub(crate) use action::{ExecutionRequest, ExecutionTicket, execute, secondary_action_risk};
 pub use app::{
     CLIPBOARD_IMAGE_PREFIX, CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary,
     SnippetSummary, Zeshicast, clipboard_cache_dir, clipboard_image_path, copy_clipboard_image,
-    save_clipboard_image,
+    save_clipboard_image, validated_clipboard_image,
 };
 pub(crate) use config::{
     append_alias, home_dir, load_aliases, load_frequencies, load_lines, load_preferences,
@@ -31,7 +32,6 @@ pub(crate) use config::{
 pub use config::{
     export_config_with_options, import_config, load_global_preferences, resolve_include_secrets,
 };
-pub use services::extension_protocol;
 pub(crate) use extensions::{ExtensionManifest, ExtensionOrigin, load_extension_manifests};
 #[cfg(test)]
 pub(crate) use placeholders::format_local_time;
@@ -75,19 +75,22 @@ pub(crate) use search::windows::{
     search_hyprland_actions, search_niri_actions, search_sway_actions, search_windows,
 };
 pub(crate) use search::{
-    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider, EmojiProvider, ExtensionsProvider, FilesProvider,
-    HyprlandProvider, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
-    NotificationsProvider, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
-    SearchProvider, SwayProvider, SystemProvider, WebProvider, WindowsProvider, fuzzy_score,
-    load_extension_script_entries, load_script_entries,
+    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider,
+    EmojiProvider, ExtensionsProvider, FilesProvider, HyprlandProvider, MediaProvider,
+    NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, ProcessesProvider,
+    ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SwayProvider, SystemProvider,
+    WebProvider, WindowsProvider, fuzzy_score, load_extension_script_entries, load_script_entries,
 };
 pub use services::audio::{
     AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
 };
 pub use services::battery::{BatteryDeviceSnapshot, BatterySnapshot, battery_snapshot};
+#[cfg(test)]
+pub(crate) use services::clipboard_store::with_clipboard_cache_dir;
 pub use services::compositor::{
     WorkspaceSnapshot, keyboard_layout, layout_change_receiver, workspace_snapshot,
 };
+pub use services::extension_protocol;
 pub use services::local_ai::{
     ChatMessage, LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming,
     chat_local_ai_streaming, list_models,
@@ -189,16 +192,63 @@ mod tests {
 
     #[test]
     fn clipboard_search_formats_image_actions_cleanly() {
-        let image_entry = format!("{}~/.cache/zeshicast/clipboard/test.png", CLIPBOARD_IMAGE_PREFIX);
-        let results = search_clipboard(std::slice::from_ref(&image_entry), "", true);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].title, "Image");
-        assert_eq!(results[0].icon_name, "image-x-generic-symbolic");
-        assert_eq!(results[0].value(), image_entry);
+        // M-15: an image entry only counts when it points at a real PNG inside
+        // the clipboard cache, so the test uses its own cache directory.
+        let dir =
+            std::env::temp_dir().join(format!("zeshicast-clipboard-image-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.png");
+        std::fs::write(&path, b"png").unwrap();
+        let image_entry = format!("{}{}", CLIPBOARD_IMAGE_PREFIX, path.display());
 
-        let query_results = search_clipboard(&[image_entry], "png", true);
-        assert_eq!(query_results.len(), 1);
-        assert_eq!(query_results[0].title, "Image");
+        with_clipboard_cache_dir(&dir, || {
+            let results = search_clipboard(std::slice::from_ref(&image_entry), "", true);
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].title, "Image");
+            assert_eq!(results[0].icon_name, "image-x-generic-symbolic");
+            assert_eq!(results[0].value(), image_entry);
+
+            let query_results = search_clipboard(&[image_entry], "png", true);
+            assert_eq!(query_results.len(), 1);
+            assert_eq!(query_results[0].title, "Image");
+        });
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn spoofed_image_entry_is_rejected_and_stored_as_text() {
+        // A forged sentinel prefix pointing outside the cache must stay text:
+        // no file read, no image classification (M-15).
+        let spoof = format!("{CLIPBOARD_IMAGE_PREFIX}/etc/passwd");
+        assert_eq!(app::clipboard_image_path(&spoof), None);
+        assert_eq!(app::validated_clipboard_image(&spoof), None);
+        assert_eq!(app::classify_clipboard_text(&spoof), ClipboardKind::Text);
+        // The sentinel control character is stripped, so the forged value lands
+        // in the history as ordinary text.
+        assert_eq!(
+            normalize_clipboard_text(&spoof),
+            "zeshicast-image:/etc/passwd"
+        );
+    }
+
+    #[test]
+    fn image_path_outside_cache_is_rejected() {
+        let dir = std::env::temp_dir().join(format!(
+            "zeshicast-clipboard-outside-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("real.png");
+        std::fs::write(&path, b"png").unwrap();
+        let entry = format!("{}{}", CLIPBOARD_IMAGE_PREFIX, path.display());
+
+        // No cache override: the file exists and is a PNG, but it is not in the
+        // clipboard cache, so it is rejected.
+        assert_eq!(app::clipboard_image_path(&entry), None);
+        assert_eq!(app::classify_clipboard_text(&entry), ClipboardKind::Text);
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -280,7 +330,10 @@ mod tests {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: Cow::Owned(HashMap::from([("workspace".to_string(), "zeshicast".to_string())])),
+            preferences: Cow::Owned(HashMap::from([(
+                "workspace".to_string(),
+                "zeshicast".to_string(),
+            )])),
             now: UNIX_EPOCH,
         };
 
@@ -443,7 +496,7 @@ NOTES_ROOT = "{{pref:notes_root}}"
     }
 
     #[test]
-    fn extension_origin_adds_manifest_capabilities_to_command() {
+    fn extension_manifest_caps_command_capabilities() {
         let origin = ExtensionOrigin {
             id: "example.git-tools".to_string(),
             name: "Git Tools".to_string(),
@@ -454,17 +507,32 @@ NOTES_ROOT = "{{pref:notes_root}}"
             r#"
 name = "Git Log"
 command = "git log --oneline"
+permissions = ["shell", "filesystem"]
 "#,
         )
         .unwrap()
         .with_extension_origin(origin.clone());
 
         assert_eq!(command.origin.as_ref(), Some(&origin));
+        // P1.8: the manifest is a ceiling, the command narrows it further.
         assert_eq!(
             command.capabilities,
             vec![Capability::Shell, Capability::Filesystem]
         );
         assert_eq!(command.permissions, vec!["shell", "filesystem"]);
+
+        // A command that declares nothing gets nothing, no matter what the
+        // manifest grants (it cannot self-grant).
+        let silent = parse_command_entry(
+            r#"
+name = "Sneaky"
+command = "rm -rf ~"
+"#,
+        )
+        .unwrap()
+        .with_extension_origin(origin);
+        assert!(silent.capabilities.is_empty());
+        assert!(silent.permissions.is_empty());
     }
 
     #[test]
@@ -513,14 +581,20 @@ arguments = [
             query: String::new(),
             clipboard: "$(wl-paste); reboot".to_string(),
             args: HashMap::new(),
-            preferences: Cow::Owned(HashMap::from([("workspace".to_string(), "$(echo owned)".to_string())])),
+            preferences: Cow::Owned(HashMap::from([(
+                "workspace".to_string(),
+                "$(echo owned)".to_string(),
+            )])),
             now: UNIX_EPOCH,
         };
 
         let payload = "$(rm -rf ~); reboot";
         let results = search_commands(&entries, &format!("safe {payload}"), &context);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].risk, ActionRisk::Normal);
+        // P1.4: argv execution is not a confirmation-free loophole — a user
+        // argv command runs directly (no `sh -c`) but still asks first.
+        assert_eq!(results[0].risk, ActionRisk::Shell);
+        assert!(results[0].risk.requires_confirmation());
         let ActionKind::Command(command) = &results[0].kind else {
             panic!("expected argv command");
         };
@@ -843,7 +917,10 @@ workspace = "~/Code"
             query: "ws zeshicast".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
-            preferences: Cow::Owned(HashMap::from([("workspace".to_string(), "/src".to_string())])),
+            preferences: Cow::Owned(HashMap::from([(
+                "workspace".to_string(),
+                "/src".to_string(),
+            )])),
             now: UNIX_EPOCH,
         };
 

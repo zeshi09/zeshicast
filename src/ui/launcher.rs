@@ -1,10 +1,10 @@
 #![allow(clippy::too_many_arguments)]
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use super::action_panel_controller::*;
 use super::clipboard_capture::*;
 use super::keybindings::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::ui::launcher_helpers::{
     ai_snippet_name, ask_ai_from_view, preference_duration_ms, preference_enabled, preference_list,
@@ -16,7 +16,7 @@ use crate::ui::launcher_views::{
 };
 use crate::{
     Action, ActionFormCommand, ActionKind, ActionRisk, ClipboardKind, ClipboardSummary,
-    SecondaryActionKind, SnippetSummary, Zeshicast,
+    SecondaryActionKind, SnippetSummary, Zeshicast, secondary_action_risk,
 };
 use gtk::gio;
 use gtk::glib;
@@ -27,7 +27,6 @@ use gtk::{
 };
 
 pub type WindowConfigurator = fn(&ApplicationWindow);
-
 
 #[derive(Clone, Copy)]
 enum NetworkCopyValue {
@@ -212,10 +211,7 @@ fn build_ui(
         crate::ui::LauncherView::SystemMonitor,
         &system_monitor_view.root,
     );
-    navigation.add_page(
-        crate::ui::LauncherView::WindowGrid,
-        &window_grid_view.root,
-    );
+    navigation.add_page(crate::ui::LauncherView::WindowGrid, &window_grid_view.root);
 
     let (action_bar, result_counter) = action_bar(
         &window,
@@ -1118,7 +1114,9 @@ fn build_ui(
                 }
                 "emoji" => show_emoji_view(&navigation, &entry, &action_bar, &emoji_view),
                 "fonts" => show_font_browser_view(&navigation, &entry, &action_bar, &font_view),
-                "grid" | "window-grid" => show_window_grid_view(&navigation, &entry, &action_bar, &window_grid_view),
+                "grid" | "window-grid" => {
+                    show_window_grid_view(&navigation, &entry, &action_bar, &window_grid_view)
+                }
                 _ => return false,
             }
             true
@@ -1556,7 +1554,6 @@ fn root_action_section(
     }
 }
 
-
 pub(crate) fn show_clipboard_view(
     navigation: &crate::ui::NavigationStack,
     entry: &Entry,
@@ -1695,13 +1692,10 @@ fn run_selected_network_command(list: &ListBox, value: NetworkCommandValue) {
                 return;
             };
             // "--" so an SSID like "-w" is not parsed as an nmcli option.
-            run_command_request("nmcli", [
-                "dev",
-                "wifi",
-                "connect",
-                "--",
-                network.ssid.as_str(),
-            ]);
+            run_command_request(
+                "nmcli",
+                ["dev", "wifi", "connect", "--", network.ssid.as_str()],
+            );
         }
     }
 }
@@ -1716,8 +1710,10 @@ pub(crate) fn copy_clipboard_row(
     };
     let index = row.index() as usize;
     if let Some(item) = clipboard_items.borrow().get(index) {
-        if let Some(path) = crate::clipboard_image_path(&item.value) {
-            crate::copy_clipboard_image(path);
+        // M-15: only a validated cache path may be read as an image; anything
+        // else (including forged `\x01zeshicast-image:` text) is plain text.
+        if let Some(path) = crate::validated_clipboard_image(&item.value) {
+            crate::copy_clipboard_image(&path.to_string_lossy());
         } else {
             crate::copy_text(&item.value);
         }
@@ -1783,7 +1779,11 @@ pub(crate) fn show_extension_view(
     extension_list.grab_focus();
 }
 
-pub(crate) fn show_root_view(navigation: &crate::ui::NavigationStack, entry: &Entry, action_bar: &GtkBox) {
+pub(crate) fn show_root_view(
+    navigation: &crate::ui::NavigationStack,
+    entry: &Entry,
+    action_bar: &GtkBox,
+) {
     navigation.reset();
     entry.set_visible(true);
     action_bar.set_visible(true);
@@ -1996,6 +1996,63 @@ fn show_form_for_action(
     script_output_view: &crate::ui::ScriptOutputView,
     action: Action,
 ) {
+    // P1.2: confirm *before* showing the form, so the user does not fill in
+    // arguments only to have the submission refused afterwards.
+    if action.risk.requires_confirmation() {
+        let title = action.risk.label().to_string();
+        let detail = action_confirmation_detail(&action);
+        let window = window.clone();
+        let launcher = Rc::clone(launcher);
+        let hold = Rc::clone(hold);
+        let entry = entry.clone();
+        let list = list.clone();
+        let results = Rc::clone(results);
+        let navigation = navigation.clone();
+        let action_bar = action_bar.clone();
+        let script_output_view = script_output_view.clone();
+        crate::ui::show_confirmation_panel(&window, &title, &detail, "Confirm", move || {
+            present_form_panel(
+                &window,
+                &launcher,
+                &hold,
+                &entry,
+                &list,
+                &results,
+                &navigation,
+                &action_bar,
+                &script_output_view,
+                action.clone(),
+            );
+        });
+        return;
+    }
+
+    present_form_panel(
+        window,
+        launcher,
+        hold,
+        entry,
+        list,
+        results,
+        navigation,
+        action_bar,
+        script_output_view,
+        action,
+    );
+}
+
+fn present_form_panel(
+    window: &ApplicationWindow,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    entry: &Entry,
+    list: &ListBox,
+    results: &Rc<RefCell<Vec<Action>>>,
+    navigation: &crate::ui::NavigationStack,
+    action_bar: &GtkBox,
+    script_output_view: &crate::ui::ScriptOutputView,
+    action: Action,
+) {
     let parent_window = window.clone();
     let finish_window = window.clone();
     let launcher = Rc::clone(launcher);
@@ -2036,7 +2093,12 @@ fn show_form_for_action(
                 args,
             );
         } else {
-            launcher.borrow_mut().run_form_action(&action, values);
+            let decision = launcher
+                .borrow_mut()
+                .run_form_action_confirmed(&action, values);
+            if let crate::ExecutionDecision::Denied(reason) = decision {
+                eprintln!("form action denied: {reason}");
+            }
             update_results(
                 &launcher.borrow(),
                 &results,
@@ -2257,7 +2319,9 @@ fn run_action_or_confirm(
             let action_clone = action.clone();
             let launcher_clone = Rc::clone(&launcher);
             gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
-                launcher_clone.borrow_mut().run_action_confirmed(&action_clone);
+                launcher_clone
+                    .borrow_mut()
+                    .run_action_confirmed(&action_clone);
             });
         } else {
             launcher.borrow_mut().run_action_confirmed(&action);
@@ -2279,20 +2343,24 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    crate::run_execution_request(crate::ExecutionRequest::Command(
-        crate::ProcessCommand::new(
+    let _ = crate::execute(
+        crate::ExecutionRequest::Command(crate::ProcessCommand::new(
             program,
             args.into_iter()
                 .map(|arg| arg.as_ref().to_string())
                 .collect(),
-        ),
-    ));
+        )),
+        &crate::ExecutionTicket::confirmed(),
+    );
 }
 
 fn run_shell_request(command: &str) {
-    crate::run_execution_request(crate::ExecutionRequest::Shell {
-        command: crate::ShellCommand::new(command),
-    });
+    let _ = crate::execute(
+        crate::ExecutionRequest::Shell {
+            command: crate::ShellCommand::new(command),
+        },
+        &crate::ExecutionTicket::confirmed(),
+    );
 }
 
 pub(crate) fn run_secondary_action_or_confirm<F>(
@@ -2340,15 +2408,6 @@ fn run_secondary_action_confirmed(
         .run_secondary_action_confirmed(action, kind)
     {
         eprintln!("failed to run secondary action: {error}");
-    }
-}
-
-fn secondary_action_risk(action: &Action, kind: SecondaryActionKind) -> ActionRisk {
-    match kind {
-        SecondaryActionKind::Run | SecondaryActionKind::RunInTerminal => action.risk,
-        SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
-        SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
-        _ => ActionRisk::Normal,
     }
 }
 
@@ -2430,7 +2489,10 @@ fn run_secondary_for_selected(
     }
 }
 
-pub(crate) fn selected_action(list: &ListBox, results: &Rc<RefCell<Vec<Action>>>) -> Option<Action> {
+pub(crate) fn selected_action(
+    list: &ListBox,
+    results: &Rc<RefCell<Vec<Action>>>,
+) -> Option<Action> {
     let row = list.selected_row()?;
     let index = action_index_for_row(list, &row)?;
     results.borrow().get(index).cloned()
@@ -2544,7 +2606,9 @@ fn execute_script_action(
     action: Action,
     args: Vec<String>,
 ) {
-    let mode = action.script_mode().unwrap_or(crate::ScriptMode::FullOutput);
+    let mode = action
+        .script_mode()
+        .unwrap_or(crate::ScriptMode::FullOutput);
 
     if args.is_empty() && action.risk.requires_confirmation() {
         let title = action.risk.label().to_string();
@@ -2658,24 +2722,23 @@ fn dispatch_script_run(
             let launcher = Rc::clone(launcher);
             let window = window.clone();
             let hold = Rc::clone(hold);
-            glib::timeout_add_local(
-                std::time::Duration::from_millis(30),
-                move || match receiver.try_recv() {
-                    Ok(outcome) => {
-                        finish_script_run(
-                            outcome,
-                            &script_output_view,
-                            &action,
-                            &launcher,
-                            &window,
-                            &hold,
-                        );
-                        glib::ControlFlow::Break
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-                },
-            );
+            glib::timeout_add_local(std::time::Duration::from_millis(30), move || match receiver
+                .try_recv()
+            {
+                Ok(outcome) => {
+                    finish_script_run(
+                        outcome,
+                        &script_output_view,
+                        &action,
+                        &launcher,
+                        &window,
+                        &hold,
+                    );
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            });
         }
     }
 }
@@ -2872,8 +2935,10 @@ mod tests {
         // Minimal valid 1x1 RGBA PNG (67 bytes)
         let png_1x1: &[u8] = &[
             137, 80, 78, 71, 13, 10, 26, 10, // signature
-            0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 99, 52, // IHDR
-            0, 0, 0, 10, 73, 68, 65, 84, 120, 156, 99, 0, 1, 0, 0, 5, 0, 1, 13, 10, 45, 180, // IDAT
+            0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 99,
+            52, // IHDR
+            0, 0, 0, 10, 73, 68, 65, 84, 120, 156, 99, 0, 1, 0, 0, 5, 0, 1, 13, 10, 45,
+            180, // IDAT
             0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130, // IEND
         ];
 
@@ -3084,27 +3149,36 @@ mod tests {
         assert_eq!(actions[0].title, "Ask AI: \"rust borrow checker\"");
         assert_eq!(
             actions[0].launcher_command(),
-            Some(crate::LauncherCommand::AiChatWithPrompt("rust borrow checker".to_string()))
+            Some(crate::LauncherCommand::AiChatWithPrompt(
+                "rust borrow checker".to_string()
+            ))
         );
         assert_eq!(actions[1].title, "Search Web for \"rust borrow checker\"");
         assert!(matches!(
             actions[1].kind,
             ActionKind::OpenUrl(ref url) if url.contains("rust") && url.contains("google.com")
         ));
-        assert_eq!(actions[2].title, "Create Snippet with \"rust borrow checker\"");
+        assert_eq!(
+            actions[2].title,
+            "Create Snippet with \"rust borrow checker\""
+        );
         assert_eq!(
             actions[2].launcher_command(),
-            Some(crate::LauncherCommand::CreateSnippet("rust borrow checker".to_string()))
+            Some(crate::LauncherCommand::CreateSnippet(
+                "rust borrow checker".to_string()
+            ))
         );
 
-        let long_query = "this is a very long query that definitely exceeds 36 characters in total length";
+        let long_query =
+            "this is a very long query that definitely exceeds 36 characters in total length";
         let long_actions = empty_state_fallback_actions(long_query);
         assert_eq!(long_actions.len(), 3);
         assert!(long_actions[0].title.contains('…'));
         assert_eq!(
             long_actions[0].launcher_command(),
-            Some(crate::LauncherCommand::AiChatWithPrompt(long_query.to_string()))
+            Some(crate::LauncherCommand::AiChatWithPrompt(
+                long_query.to_string()
+            ))
         );
     }
 }
-

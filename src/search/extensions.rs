@@ -1,11 +1,23 @@
 use std::path::Path;
 
-use crate::{Action, ActionKind, ActionRisk};
+use super::commands::{ActionIntent, gate_action_intent};
+use crate::{Action, Capability, CapabilitySet};
 
 pub use crate::services::extension_protocol::*;
 
 /// Searches an extension via its `search` method over JSON-RPC 2.0.
-pub fn search_extension(binary_path: &Path, extension_name: &str, query: &str) -> Vec<Action> {
+///
+/// `capabilities` are the permissions the manifest granted. Every item is
+/// mapped through [`gate_action_intent`] — the same gate JSON-command output
+/// uses — so a search result cannot escalate into an unsanctioned
+/// launch/open_url/copy. Code-executing results are always downgraded to a
+/// confirmed (Shell-risk) action.
+pub fn search_extension(
+    binary_path: &Path,
+    extension_name: &str,
+    query: &str,
+    capabilities: &[Capability],
+) -> Vec<Action> {
     let Ok(items) = search(binary_path, query, 400) else {
         return Vec::new();
     };
@@ -13,29 +25,42 @@ pub fn search_extension(binary_path: &Path, extension_name: &str, query: &str) -
     let mut actions = Vec::new();
     for (i, item) in items.into_iter().enumerate() {
         let title = item.title;
-        let subtitle = item.subtitle.unwrap_or_else(|| extension_name.to_string());
-        let icon = item.icon.unwrap_or_else(|| "system-run-symbolic".to_string());
+        let mut subtitle = item.subtitle.unwrap_or_else(|| extension_name.to_string());
+        let icon = item
+            .icon
+            .unwrap_or_else(|| "system-run-symbolic".to_string());
         let cmd_id = item.id;
+        let score = item.score.unwrap_or(80 - (i as i32 * 2));
 
-        let kind = if let Some(url) = item.open_url {
-            ActionKind::OpenUrl(url)
+        let intent = if let Some(url) = item.open_url {
+            ActionIntent::OpenUrl(url)
         } else if let Some(text) = item.copy_text {
-            ActionKind::Copy(text)
+            ActionIntent::Copy(text)
         } else {
-            ActionKind::Launch(cmd_id)
+            ActionIntent::Launch(cmd_id)
         };
+        let gated = gate_action_intent(intent, capabilities);
+        if let Some(denial) = &gated.denial {
+            subtitle = if subtitle.is_empty() {
+                denial.clone()
+            } else {
+                format!("{denial} - {subtitle}")
+            };
+        }
 
         if !title.is_empty() {
-            actions.push(Action {
-                category: format!("Extension: {extension_name}"),
-                title,
-                subtitle,
-                icon_name: icon,
-                risk: ActionRisk::Normal,
-                kind,
-                script_mode: None,
-                score: item.score.unwrap_or(80 - (i as i32 * 2)),
-            });
+            actions.push(
+                Action::new(
+                    format!("Extension: {extension_name}"),
+                    title,
+                    gated.kind,
+                    score,
+                )
+                .with_subtitle(subtitle)
+                .with_icon(icon)
+                .with_risk(gated.risk)
+                .with_capabilities(CapabilitySet::new(capabilities.to_vec())),
+            );
         }
     }
 
@@ -67,7 +92,8 @@ mod tests {
 
     #[test]
     fn json_rpc_response_deserialization_error() {
-        let raw = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}"#;
+        let raw =
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}"#;
         let resp: JsonRpcResponse = serde_json::from_str(raw).unwrap();
         assert_eq!(resp.id, 1);
         assert!(resp.result.is_none());
@@ -93,4 +119,3 @@ mod tests {
         assert_eq!(deserialized.mode.as_deref(), Some("view"));
     }
 }
-
