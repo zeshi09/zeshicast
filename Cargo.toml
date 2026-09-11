@@ -2,6 +2,10 @@
 name = "zeshicast"
 version = "0.1.0"
 edition = "2024"
+# MSRV of the default (CLI) build: edition 2024 needs >= 1.85, the dependency
+# floor is 1.86 (icu_* via idna/url). Measured with `cargo metadata`.
+# NOTE: the optional `gui` feature raises the requirement to 1.92 (gtk4 0.11).
+rust-version = "1.86"
 publish = false
 
 [features]
