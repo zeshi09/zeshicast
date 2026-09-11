@@ -5,9 +5,9 @@
 use std::cell::RefCell;
 use std::time::Duration;
 
-use gtk::{gio, glib};
 use gtk::prelude::*;
 use gtk::{Align, Application, Box as GtkBox, Button, Label, Orientation, Revealer, Window};
+use gtk::{gio, glib};
 
 /// How long the pill stays fully shown before it fades out.
 const VISIBLE_MS: u64 = 850;
@@ -238,6 +238,54 @@ fn schedule_dismiss(generation: u64, delay_ms: u64) {
     });
 }
 
+/// Icon directories an `app_icon` *path* may live in (M-14).
+fn icon_search_dirs() -> Vec<std::path::PathBuf> {
+    let home = crate::home_dir();
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"));
+    let mut dirs = vec![data_home.join("icons"), home.join(".icons")];
+    if let Some(data_dirs) = std::env::var_os("XDG_DATA_DIRS") {
+        for dir in data_dirs.to_string_lossy().split(':') {
+            if !dir.is_empty() {
+                dirs.push(std::path::PathBuf::from(dir).join("icons"));
+            }
+        }
+    }
+    dirs
+}
+
+/// Validate an `app_icon` value that names a *file* (M-14).
+///
+/// An untrusted notification is free to send any `app_icon`: a path outside the
+/// icon directories (or a symlink, directory or FIFO) must not make the main
+/// loop read an arbitrary file — a FIFO would block it forever.
+fn safe_icon_path(app_icon: &str) -> Option<std::path::PathBuf> {
+    safe_icon_path_in(&icon_search_dirs(), app_icon)
+}
+
+/// The testable core of [`safe_icon_path`]: `icon_dirs` replaces the search path.
+fn safe_icon_path_in(
+    icon_dirs: &[std::path::PathBuf],
+    app_icon: &str,
+) -> Option<std::path::PathBuf> {
+    let trimmed = app_icon.trim();
+    let raw = trimmed.strip_prefix("file://").unwrap_or(trimmed);
+    if !raw.starts_with('/') {
+        return None;
+    }
+    // `canonicalize` resolves symlinks, so the check below is about the real
+    // target, not the link the sender provided.
+    let canonical = std::path::Path::new(raw).canonicalize().ok()?;
+    if !std::fs::metadata(&canonical).ok()?.is_file() {
+        return None;
+    }
+    icon_dirs
+        .iter()
+        .any(|dir| canonical.starts_with(dir))
+        .then_some(canonical)
+}
+
 fn update_icon(icon_box: &GtkBox, app_name: &str, app_icon: &str) {
     while let Some(child) = icon_box.first_child() {
         icon_box.remove(&child);
@@ -245,15 +293,11 @@ fn update_icon(icon_box: &GtkBox, app_name: &str, app_icon: &str) {
 
     let icon_trimmed = app_icon.trim();
     if !icon_trimmed.is_empty() {
-        if icon_trimmed.starts_with('/') || icon_trimmed.starts_with("file://") {
-            let path_str = icon_trimmed.strip_prefix("file://").unwrap_or(icon_trimmed);
-            let path = std::path::Path::new(path_str);
-            if path.exists() {
-                let img = gtk::Image::from_file(path);
-                img.set_pixel_size(32);
-                icon_box.append(&img);
-                return;
-            }
+        if let Some(path) = safe_icon_path(icon_trimmed) {
+            let img = gtk::Image::from_file(path);
+            img.set_pixel_size(32);
+            icon_box.append(&img);
+            return;
         }
         let display = gtk::gdk::Display::default();
         let has_theme_icon = display
@@ -278,9 +322,7 @@ fn update_icon(icon_box: &GtkBox, app_name: &str, app_icon: &str) {
 }
 
 fn build_notification_osd(app: Option<&Application>) -> NotificationOsd {
-    let mut builder = Window::builder()
-        .decorated(false)
-        .resizable(false);
+    let mut builder = Window::builder().decorated(false).resizable(false);
     if let Some(app) = app {
         builder = builder.application(app);
     }
@@ -363,9 +405,8 @@ fn build_notification_osd(app: Option<&Application>) -> NotificationOsd {
         let is_hovered = is_hovered.clone();
         motion.connect_leave(move |_| {
             is_hovered.set(false);
-            let current_generation = NOTIFICATION_OSD.with(|cell| {
-                cell.borrow().as_ref().map(|o| o.generation).unwrap_or(0)
-            });
+            let current_generation = NOTIFICATION_OSD
+                .with(|cell| cell.borrow().as_ref().map(|o| o.generation).unwrap_or(0));
             if current_generation > 0 {
                 schedule_dismiss(current_generation, 1800);
             }
@@ -457,3 +498,56 @@ fn configure_notification_layer_shell(window: &Window) {
 
 #[cfg(not(feature = "layer-shell"))]
 fn configure_notification_layer_shell(_window: &Window) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn icon_fixture_dir(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "zeshicast-icons-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn app_icon_outside_icon_dirs_is_ignored() {
+        let root = icon_fixture_dir("outside");
+        let icons = root.join("icons");
+        std::fs::create_dir_all(&icons).unwrap();
+        let inside = icons.join("app.png");
+        std::fs::write(&inside, b"not really a png").unwrap();
+        let outside = root.join("secret.png");
+        std::fs::write(&outside, b"secret").unwrap();
+        let link = icons.join("link.png");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let a_directory = icons.join("a-directory");
+        std::fs::create_dir_all(&a_directory).unwrap();
+
+        let dirs = vec![icons];
+        assert_eq!(
+            safe_icon_path_in(&dirs, &inside.to_string_lossy()),
+            Some(inside.canonicalize().unwrap()),
+            "a regular file inside the icon dirs is accepted"
+        );
+        assert!(
+            safe_icon_path_in(&dirs, &format!("file://{}", inside.display())).is_some(),
+            "the file:// form works too"
+        );
+
+        // Theme names fall through to the icon theme, everything else is ignored.
+        assert!(safe_icon_path_in(&dirs, "firefox").is_none());
+        assert!(safe_icon_path_in(&dirs, &outside.to_string_lossy()).is_none());
+        assert!(
+            safe_icon_path_in(&dirs, &link.to_string_lossy()).is_none(),
+            "a symlink is resolved and then rejected"
+        );
+        assert!(safe_icon_path_in(&dirs, &a_directory.to_string_lossy()).is_none());
+        assert!(safe_icon_path_in(&dirs, "/etc/hostname").is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

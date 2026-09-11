@@ -64,6 +64,24 @@ thread_local! {
 
 const MAX_HISTORY: usize = 100;
 
+/// Caps for untrusted notification text (M-14): any client on the session bus
+/// could otherwise make the daemon hold (and render) megabytes per notification.
+const MAX_APP_NAME_BYTES: usize = 1024;
+const MAX_SUMMARY_BYTES: usize = 4 * 1024;
+const MAX_BODY_BYTES: usize = 64 * 1024;
+
+/// Truncate `text` to at most `max_bytes`, never splitting a UTF-8 character.
+fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 /// DND is the one piece of notification state that must survive daemon restarts,
 /// so we persist it to a tiny file next to the rest of the config.
 fn dnd_state_path() -> std::path::PathBuf {
@@ -108,9 +126,9 @@ pub fn push_notification(app_name: &str, summary: &str, body: &str, replaces_id:
             0,
             StoredNotification {
                 id,
-                app_name: app_name.to_string(),
-                summary: summary.to_string(),
-                body: body.to_string(),
+                app_name: truncate_utf8(app_name, MAX_APP_NAME_BYTES).to_string(),
+                summary: truncate_utf8(summary, MAX_SUMMARY_BYTES).to_string(),
+                body: truncate_utf8(body, MAX_BODY_BYTES).to_string(),
                 received_at: now_secs(),
             },
         );
@@ -201,6 +219,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn notify_with_huge_body_is_capped() {
+        mark_server_active();
+        let app_name = "n".repeat(MAX_APP_NAME_BYTES + 10);
+        let summary = "s".repeat(MAX_SUMMARY_BYTES + 10);
+        let body = "b".repeat(MAX_BODY_BYTES + 10);
+
+        push_notification(&app_name, &summary, &body, 0);
+        let snapshot = notification_snapshot();
+        let entry = &snapshot.history[0];
+
+        assert_eq!(
+            entry.app_name.as_deref().map(str::len),
+            Some(MAX_APP_NAME_BYTES)
+        );
+        assert_eq!(entry.summary.len(), MAX_SUMMARY_BYTES);
+        assert_eq!(
+            entry.body.as_deref().map(str::len),
+            Some(MAX_BODY_BYTES),
+            "an untrusted client must not store unbounded text (M-14)"
+        );
+    }
+
+    #[test]
+    fn truncation_never_splits_a_utf8_character() {
+        mark_server_active();
+        // Every 'ё' is two bytes, so the byte cap lands inside a character.
+        let summary = "ё".repeat(MAX_SUMMARY_BYTES);
+        let body = "🙂".repeat(MAX_BODY_BYTES);
+
+        push_notification("app", &summary, &body, 0);
+        let snapshot = notification_snapshot();
+        let entry = &snapshot.history[0];
+
+        assert!(entry.summary.len() <= MAX_SUMMARY_BYTES);
+        assert!(entry.summary.chars().all(|c| c == 'ё'), "split character");
+        let body = entry.body.as_deref().unwrap_or_default();
+        assert!(body.len() <= MAX_BODY_BYTES);
+        assert!(body.chars().all(|c| c == '🙂'), "split character");
+    }
+
+    #[test]
     fn store_records_newest_first_and_closes() {
         mark_server_active();
         let _first = push_notification("Mail", "New message", "Project update", 0);
@@ -233,7 +292,10 @@ mod tests {
     fn mark_server_inactive_clears_backend_indicator() {
         mark_server_active();
         push_notification("Mail", "New message", "Project update", 0);
-        assert_eq!(notification_snapshot().backend.as_deref(), Some("zeshicast"));
+        assert_eq!(
+            notification_snapshot().backend.as_deref(),
+            Some("zeshicast")
+        );
 
         mark_server_inactive();
 
