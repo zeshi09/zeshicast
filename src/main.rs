@@ -156,6 +156,8 @@ fn run_action_menu(app: &mut Zeshicast, action: &Action) {
                     }
                 }
             }
+            // M-9: the CLI also launches processes it never waits for.
+            zeshicast::reap_finished_children();
         }
         Ok(number) if number == secondary_actions.len() + 1 => prompt_alias(app, action),
         _ => println!("Invalid action."),

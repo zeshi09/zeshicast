@@ -166,7 +166,7 @@ pub fn layout_change_receiver() -> Receiver<String> {
 
 fn watch_layout_niri(tx: Sender<String>) {
     loop {
-        let mut child = match Command::new("niri")
+        let child = match Command::new("niri")
             .args(["msg", "--json", "event-stream"])
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -175,7 +175,10 @@ fn watch_layout_niri(tx: Sender<String>) {
             // niri isn't running (or isn't the compositor) — nothing to watch.
             Err(_) => return,
         };
-        let Some(stdout) = child.stdout.take() else {
+        // The guard kills the stream when this thread stops watching, so a
+        // daemon restart cannot leave an orphaned `niri msg` behind (M-9).
+        let mut child = crate::process::ChildGuard::new(child);
+        let Some(stdout) = child.child_mut().stdout.take() else {
             return;
         };
 
@@ -205,7 +208,7 @@ fn watch_layout_niri(tx: Sender<String>) {
             }
         }
 
-        let _ = child.wait();
+        let _ = child.child_mut().wait();
         // Stream ended (niri restarted / reloaded); reconnect after a beat. The
         // empty probe is ignored by the consumer but tells us whether anyone is
         // still listening — if not, stop the thread.
@@ -305,12 +308,12 @@ fn snap_niri(pos: WindowSnapPosition) -> Option<bool> {
 
 fn snap_hyprland(pos: WindowSnapPosition) -> Option<bool> {
     let args: &[&str] = match pos {
-        WindowSnapPosition::LeftHalf | WindowSnapPosition::TopLeftQuarter | WindowSnapPosition::BottomLeftQuarter => {
-            &["dispatch", "movewindow", "l"]
-        }
-        WindowSnapPosition::RightHalf | WindowSnapPosition::TopRightQuarter | WindowSnapPosition::BottomRightQuarter => {
-            &["dispatch", "movewindow", "r"]
-        }
+        WindowSnapPosition::LeftHalf
+        | WindowSnapPosition::TopLeftQuarter
+        | WindowSnapPosition::BottomLeftQuarter => &["dispatch", "movewindow", "l"],
+        WindowSnapPosition::RightHalf
+        | WindowSnapPosition::TopRightQuarter
+        | WindowSnapPosition::BottomRightQuarter => &["dispatch", "movewindow", "r"],
         WindowSnapPosition::TopHalf => &["dispatch", "movewindow", "u"],
         WindowSnapPosition::BottomHalf => &["dispatch", "movewindow", "d"],
         WindowSnapPosition::Fullscreen => &["dispatch", "fullscreen", "0"],

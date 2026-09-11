@@ -929,15 +929,12 @@ impl ShellCommand {
 }
 
 fn spawn_shell(command: &ShellCommand) {
-    match Command::new("sh")
-        .arg("-c")
-        .arg(&command.command)
-        .envs(&command.env)
-        .spawn()
-    {
+    let mut process = Command::new("sh");
+    process.arg("-c").arg(&command.command).envs(&command.env);
+    match crate::process::spawn_detached(&mut process) {
         // Deliberately no command text: the daemon's stdout may be read by
         // other processes and shell commands can embed secrets.
-        Ok(_) => println!("started: sh -c <command>"),
+        Ok(child) => println!("started: sh -c <command> (pid {})", child.pid()),
         // No command text here either: placeholder-expanded commands can
         // carry secrets and stderr ends up in journald.
         Err(error) => eprintln!("failed to start shell command: {error}"),
@@ -945,12 +942,10 @@ fn spawn_shell(command: &ShellCommand) {
 }
 
 fn spawn_command(command: &ProcessCommand) {
-    match Command::new(&command.program)
-        .args(&command.args)
-        .envs(&command.env)
-        .spawn()
-    {
-        Ok(_) => println!("started: {}", command.program),
+    let mut process = Command::new(&command.program);
+    process.args(&command.args).envs(&command.env);
+    match crate::process::spawn_detached(&mut process) {
+        Ok(child) => println!("started: {} (pid {})", command.program, child.pid()),
         Err(error) => eprintln!("failed to start {}: {error}", command.program),
     }
 }
@@ -982,22 +977,29 @@ pub fn copy_text(text: &str) {
 }
 
 fn copy_with(program: &str, args: &[&str], text: &str) -> bool {
-    let Ok(mut child) = Command::new(program)
+    let Ok(child) = Command::new(program)
         .args(args)
         .stdin(Stdio::piped())
         .spawn()
     else {
         return false;
     };
+    // M-9: every early return below used to leave the writer running (and
+    // unreaped). The guard kills and waits for it on all paths.
+    let mut child = crate::process::ChildGuard::new(child);
 
-    if let Some(mut stdin) = child.stdin.take() {
-        if stdin.write_all(text.as_bytes()).is_err() {
-            return false;
-        }
-        drop(stdin);
-    } else {
+    let Some(mut stdin) = child.child_mut().stdin.take() else {
+        return false;
+    };
+
+    if stdin.write_all(text.as_bytes()).is_err() {
         return false;
     }
+    drop(stdin);
 
-    child.wait().map(|status| status.success()).unwrap_or(false)
+    child
+        .child_mut()
+        .wait()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }

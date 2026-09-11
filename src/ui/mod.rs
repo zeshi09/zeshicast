@@ -28,20 +28,32 @@ pub use panels::{
 };
 pub use status_strip::StatusStrip;
 pub use style::install_css;
+
+/// Periodic housekeeping for the GTK main loop.
+///
+/// The launcher spawns applications and shell commands fire-and-forget; this
+/// sweep reaps the ones that have exited so they do not stay `<defunct>` in the
+/// process table for the lifetime of the daemon (M-9).
+pub fn install_child_reaper() {
+    gtk::glib::timeout_add_seconds_local(1, || {
+        crate::reap_finished_children();
+        gtk::glib::ControlFlow::Continue
+    });
+}
 pub use views::{
     ActionPanelDisplayItem, ActionPanelView, AiChatView, AudioView, ClipboardHistoryView,
     DashboardView, EmojiPickerView, ExtensionBrowserView, FontBrowserView, MediaView, NetworkView,
     NotificationsView, PreferencesView, ScriptOutputView, SnippetManagerView, SystemMonitorView,
-    action_panel_view, ai_chat_view, audio_view, clipboard_history_view, dashboard_view,
-    emoji_picker_view, extension_browser_view, font_browser_view, media_view, network_view,
-    notifications_view, preferences_view, script_output_view, set_action_panel_items,
+    WindowGridView, action_panel_view, ai_chat_view, audio_view, clipboard_history_view,
+    dashboard_view, emoji_picker_view, extension_browser_view, font_browser_view, media_view,
+    network_view, notifications_view, preferences_view, script_output_view, set_action_panel_items,
     set_action_panel_list, set_audio_snapshot, set_clipboard_detail, set_clipboard_history_items,
     set_dashboard_audio_snapshot, set_dashboard_battery_snapshot, set_dashboard_media_snapshot,
     set_dashboard_network_snapshot, set_dashboard_notification_snapshot, set_dashboard_snapshot,
     set_dashboard_thermal, set_media_snapshot, set_network_snapshot, set_notification_snapshot,
     set_script_output, set_snippet_items, set_system_monitor_snapshot,
     set_system_monitor_thermal_snapshot, snippet_manager_view, system_monitor_view,
-    WindowGridView, window_grid_view,
+    window_grid_view,
 };
 pub use widgets::{
     action_panel, control_card, letter_icon, metric_card, move_selection, panel_root, panel_title,

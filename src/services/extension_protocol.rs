@@ -1,11 +1,13 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::process::{CHILD_EXIT_GRACE, ChildGuard};
 
 #[allow(dead_code)]
 pub const PARSE_ERROR: i64 = -32700;
@@ -134,40 +136,6 @@ pub fn call_json_rpc(
 /// Upper bound on a single JSON-RPC response line (B-3: an extension must not be
 /// able to exhaust our memory with one "line").
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
-/// How long a child may take to exit on its own after it has answered.
-const CHILD_EXIT_GRACE: Duration = Duration::from_millis(500);
-
-/// Owns the extension process and guarantees it is gone when the call returns.
-///
-/// Every early return (`?`, a failed stdin write, a timeout, …) runs `Drop`, so
-/// no call path can leave a live child behind (B-3); a child that refuses to
-/// exit is killed instead of being awaited forever.
-struct ChildGuard(Child);
-
-impl ChildGuard {
-    /// Wait up to `grace` for the child to exit, then kill and reap it.
-    fn reap(&mut self, grace: Duration) {
-        let deadline = Instant::now() + grace;
-        loop {
-            match self.0.try_wait() {
-                Ok(Some(_)) => return,
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Ok(None) => break,
-                Err(_) => break,
-            }
-        }
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        self.reap(CHILD_EXIT_GRACE);
-    }
-}
 
 /// Executes a JSON-RPC 2.0 request against an external command with arguments,
 /// stdin/stdout pipes, and a timeout guard that terminates the child process on
@@ -190,20 +158,20 @@ pub fn call_json_rpc_with_args(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to spawn {}: {}", executable.display(), e))?;
-    // From here on every exit path goes through the guard.
-    let mut child = ChildGuard(child);
+    // From here on every exit path goes through the guard (see `crate::process`).
+    let mut child = ChildGuard::new(child);
 
     let request = JsonRpcRequest::new(1, method, params);
     let request_json =
         serde_json::to_string(&request).map_err(|e| format!("Failed to serialize request: {e}"))?;
 
-    if let Some(mut stdin) = child.0.stdin.take() {
+    if let Some(mut stdin) = child.child_mut().stdin.take() {
         writeln!(stdin, "{request_json}").map_err(|e| format!("Failed to write to stdin: {e}"))?;
         let _ = stdin.flush();
     }
 
     let stdout = child
-        .0
+        .child_mut()
         .stdout
         .take()
         .ok_or_else(|| "Failed to capture stdout".to_string())?;
@@ -337,6 +305,7 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn test_check_capabilities_success() {

@@ -129,7 +129,12 @@ fn main() -> glib::ExitCode {
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
 
-    app.connect_startup(|_| zeshicast::ui::install_css());
+    app.connect_startup(|_| {
+        zeshicast::ui::install_css();
+        // M-9: reap finished fire-and-forget children (launched apps, shell
+        // commands, wtype) instead of letting them pile up as <defunct>.
+        zeshicast::ui::install_child_reaper();
+    });
     {
         let state = Rc::clone(&state);
         let hold = Rc::clone(&hold);
@@ -168,7 +173,6 @@ fn main() -> glib::ExitCode {
 
     app.run()
 }
-
 
 /// Resolve a requested start-up view from the command line.
 ///

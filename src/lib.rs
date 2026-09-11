@@ -4,6 +4,7 @@ pub mod cli;
 mod config;
 mod extensions;
 mod placeholders;
+mod process;
 mod search;
 mod services;
 #[cfg(feature = "gui")]
@@ -37,6 +38,10 @@ pub use config::{
 pub(crate) use extensions::{ExtensionManifest, ExtensionOrigin, load_extension_manifests};
 #[cfg(test)]
 pub(crate) use placeholders::format_local_time;
+/// Sweep finished fire-and-forget children (M-9). Safe to call from any loop.
+pub fn reap_finished_children() -> usize {
+    process::reap_finished()
+}
 pub(crate) use placeholders::{PlaceholderContext, expand_placeholders, expand_placeholders_shell};
 #[cfg(test)]
 pub(crate) use search::apps::clean_desktop_exec;
