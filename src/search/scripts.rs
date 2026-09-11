@@ -434,8 +434,9 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ActionRisk, ExecutionRequest, ExtensionManifest};
+    use crate::{ActionRisk, ExecutionRequest, ExecutionTicket, ExtensionManifest, execute};
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const SCRIPT_BODY: &str = "#!/bin/sh\n\
@@ -557,22 +558,54 @@ mod tests {
     #[test]
     fn script_path_with_semicolon_is_not_shell_interpreted() {
         let root = test_dir("metachars");
-        let path = write_script(&root, "echo;touch pwned.sh");
+        fs::create_dir_all(&root).unwrap();
+        let ran_marker = root.join("ran");
+        let path = root.join("echo;touch pwned.sh");
+        fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\n\
+                 # @raycast.schemaVersion 1\n\
+                 # @raycast.title Echo Metachars\n\
+                 # @raycast.packageName test.scripts\n\
+                 touch {}\n",
+                ran_marker.display()
+            ),
+        )
+        .unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
 
         let entries = load_script_entries(std::slice::from_ref(&root));
         let actions = search_scripts(&entries, "script echo");
         assert_eq!(actions.len(), 1);
 
-        match actions[0].execution_request() {
-            Some(ExecutionRequest::Command(command)) => {
+        let request = actions[0]
+            .execution_request()
+            .expect("script action is executable");
+        match &request {
+            ExecutionRequest::Command(command) => {
                 assert_eq!(command.program, path.to_string_lossy());
                 assert!(command.args.is_empty());
             }
             other => panic!("expected argv execution request, got {other:?}"),
         }
-        // No shell ever saw the `;`, so nothing was injected (M-16).
-        assert!(!root.join("pwned.sh").exists());
+
+        // Run it for real: the file itself executes (its own marker appears),
+        // while the `;` in its name is never seen by a shell (M-16). The
+        // gateway spawns asynchronously, so wait briefly for the child.
+        assert_eq!(
+            execute(request, &ExecutionTicket::confirmed()),
+            crate::ExecutionDecision::RunNow
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !ran_marker.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(ran_marker.exists(), "script did not run as a file");
         assert!(!Path::new("pwned.sh").exists());
+        assert!(!root.join("pwned.sh").exists());
 
         fs::remove_dir_all(&root).ok();
     }

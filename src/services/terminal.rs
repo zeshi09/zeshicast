@@ -1,6 +1,5 @@
 use std::env;
 use std::path::Path;
-use std::process::Command;
 
 pub const SUPPORTED_TERMINALS: &[&str] = &[
     "ghostty",
@@ -84,7 +83,13 @@ pub fn build_terminal_command(
         "foot" => vec!["-e".into(), "bash".into(), "-c".into(), script],
         "kitty" => vec!["--".into(), "bash".into(), "-c".into(), script],
         "alacritty" => vec!["-e".into(), "bash".into(), "-c".into(), script],
-        "wezterm" => vec!["start".into(), "--".into(), "bash".into(), "-c".into(), script],
+        "wezterm" => vec![
+            "start".into(),
+            "--".into(),
+            "bash".into(),
+            "-c".into(),
+            script,
+        ],
         "gnome-terminal" => vec!["--".into(), "bash".into(), "-c".into(), script],
         "konsole" => vec!["-e".into(), "bash".into(), "-c".into(), script],
         _ => vec!["-e".into(), "bash".into(), "-c".into(), script],
@@ -93,18 +98,19 @@ pub fn build_terminal_command(
     (terminal.to_string(), args)
 }
 
-/// Spawns a command inside a terminal window asynchronously.
-pub fn launch_in_terminal(
+/// Builds the terminal spawn for `shell_command` as a typed process command.
+///
+/// Deliberately does **not** spawn: the caller must route the command through
+/// the execution gateway (`crate::execute`) so the capability ceiling and the
+/// confirmation policy are enforced before anything starts.
+pub fn terminal_process_command(
     shell_command: &str,
     terminal_override: Option<&str>,
     hold_open: bool,
-) -> std::io::Result<()> {
-    let term = detect_terminal(terminal_override)
-        .unwrap_or_else(|| "xterm".to_string());
-
+) -> crate::ProcessCommand {
+    let term = detect_terminal(terminal_override).unwrap_or_else(|| "xterm".to_string());
     let (bin, args) = build_terminal_command(&term, shell_command, hold_open);
-    Command::new(bin).args(args).spawn()?;
-    Ok(())
+    crate::ProcessCommand::new(bin, args)
 }
 
 #[cfg(test)]

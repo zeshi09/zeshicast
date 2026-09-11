@@ -73,9 +73,9 @@ fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) 
         let (placeholder, after_end) = after_start.split_at(end);
 
         // Where the substituted value lands decides how it must be escaped. A
-        // template author may wrap a placeholder in their own quotes; all three
-        // contexts (unquoted, inside `'…'`, inside `"…"`) are safe because the
-        // value is escaped for the context it is inserted into.
+        // template author may wrap a placeholder in their own quotes; the three
+        // quoting contexts (unquoted, inside `'…'`, inside `"…"`) are safe
+        // because the value is escaped for the context it is inserted into.
         let shell_context = if shell_escape {
             shell_context(&output)
         } else {
@@ -98,8 +98,26 @@ fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) 
             is_wrapped_in_single_quotes = true;
         }
 
+        // A placeholder inside a shell comment is never code: no escaping can
+        // make a substituted value safe there (a newline in the value ends the
+        // comment and whatever follows becomes a command), so it is emitted
+        // literally instead.
+        if shell_context == ShellContext::Comment {
+            output.push_str(&format!("{{{{{}}}}}", placeholder.trim()));
+            rest = &after_end[2 + trailing_quote_to_skip..];
+            continue;
+        }
+
         match render_placeholder(placeholder.trim(), context) {
             Some(value) if shell_escape => {
+                // An odd run of trailing backslashes means the author's last
+                // backslash escapes whatever comes next — which is now the
+                // first byte of our escape sequence, not the value. Emit one
+                // more backslash so the author's stays self-contained.
+                if shell_context != ShellContext::Single && trailing_backslash_run(&output) % 2 == 1
+                {
+                    output.push('\\');
+                }
                 output.push_str(&escape_for_context(&value, shell_context));
             }
             Some(value) => {
@@ -151,13 +169,38 @@ enum ShellContext {
     Single,
     /// Inside an open `"…"` run: `$`, backtick, `\` and `"` stay special.
     Double,
+    /// Inside a `#` comment: the rest of the line is not shell code at all.
+    Comment,
+}
+
+/// Count the run of backslashes at the very end of `text`.
+fn trailing_backslash_run(text: &str) -> usize {
+    text.chars().rev().take_while(|ch| *ch == '\\').count()
+}
+
+/// `#` starts a comment only at the start of a word (POSIX). Being precise here
+/// matters: an over-eager match would silently skip legitimate substitutions.
+fn starts_comment(previous: Option<char>) -> bool {
+    match previous {
+        None => true,
+        Some(ch) => ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')' | '<' | '>'),
+    }
 }
 
 fn shell_context(text: &str) -> ShellContext {
     let mut single = false;
     let mut double = false;
+    let mut comment = false;
+    let mut previous: Option<char> = None;
     let mut chars = text.chars();
     while let Some(ch) = chars.next() {
+        if comment {
+            if ch == '\n' {
+                comment = false;
+                previous = Some(ch);
+            }
+            continue;
+        }
         if single {
             if ch == '\'' {
                 single = false;
@@ -165,14 +208,20 @@ fn shell_context(text: &str) -> ShellContext {
         } else if ch == '\\' {
             // Backslash escapes the next character (unquoted and inside double
             // quotes), so neither character affects quoting state.
-            chars.next();
+            previous = Some(chars.next().unwrap_or('\\'));
+            continue;
         } else if ch == '\'' && !double {
             single = true;
         } else if ch == '"' {
             double = !double;
+        } else if ch == '#' && !double && starts_comment(previous) {
+            comment = true;
         }
+        previous = Some(ch);
     }
-    if single {
+    if comment {
+        ShellContext::Comment
+    } else if single {
         ShellContext::Single
     } else if double {
         ShellContext::Double
@@ -190,6 +239,9 @@ fn escape_for_context(value: &str, context: ShellContext) -> String {
         // needs the POSIX `'\''` dance. Wrapping the value in quotes here would
         // close the author's run early.
         ShellContext::Single => value.replace('\'', "'\\''"),
+        // Never reached: `expand` emits the placeholder literally when it sits
+        // inside a comment instead of substituting a value there.
+        ShellContext::Comment => value.to_string(),
     }
 }
 
@@ -313,6 +365,66 @@ mod tests {
         assert_eq!(shell_context("echo 'it\"s open"), ShellContext::Single);
         assert_eq!(shell_context("echo \"open"), ShellContext::Double);
         assert_eq!(shell_context("echo \"it's open"), ShellContext::Double);
+        assert_eq!(shell_context("echo ok # note "), ShellContext::Comment);
+        assert_eq!(
+            shell_context("echo ok # note\necho "),
+            ShellContext::Unquoted
+        );
+        // `#` is only a comment at the start of a word.
+        assert_eq!(shell_context("echo a#b "), ShellContext::Unquoted);
+        assert_eq!(
+            shell_context("echo \"#not a comment\" "),
+            ShellContext::Unquoted
+        );
+    }
+
+    /// A template that puts a placeholder inside a `#` comment cannot be made
+    /// safe by escaping (a newline in the value ends the comment), so the
+    /// placeholder is emitted literally and the value is never substituted.
+    #[test]
+    fn placeholder_inside_shell_comment_is_not_substituted() {
+        let marker = std::env::temp_dir().join(format!("zeshicast-comment-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let ctx = PlaceholderContext::new("", Some(&format!("\ntouch {}\n#", marker.display())));
+
+        let expanded = expand_placeholders_shell("echo ok # {{clipboard}}", &ctx);
+        assert_eq!(expanded, "echo ok # {{clipboard}}");
+
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&expanded)
+            .output()
+            .expect("sh is available");
+        assert!(!marker.exists(), "value escaped the comment: {expanded:?}");
+    }
+
+    /// An author-written backslash right before a placeholder must not eat the
+    /// first byte of our escape sequence: otherwise `"C:\{{x}}"` becomes
+    /// `"C:\\$(...)"` where `\\` is a literal backslash and `$(` is live
+    /// command substitution again.
+    #[test]
+    fn shell_expansion_is_safe_after_a_dangling_author_backslash() {
+        let marker =
+            std::env::temp_dir().join(format!("zeshicast-backslash-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let payload = format!("$(touch {})", marker.display());
+        let ctx = PlaceholderContext::new("", Some(&payload));
+
+        let in_double_quotes =
+            expand_placeholders_shell("printf '%s\\n' \"C:\\{{clipboard}}\"", &ctx);
+        let unquoted = expand_placeholders_shell("printf '%s\\n' \\{{clipboard}}", &ctx);
+
+        for expanded in [&in_double_quotes, &unquoted] {
+            let _ = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(expanded)
+                .output()
+                .expect("sh is available");
+        }
+        assert!(
+            !marker.exists(),
+            "author backslash escaped the value's quoting: {in_double_quotes:?} / {unquoted:?}"
+        );
     }
 
     /// Round-trip guard for B-2: whatever the template context, the expanded
@@ -403,14 +515,8 @@ mod tests {
     #[test]
     fn test_apostrophe_in_double_quoted_value_does_not_poison_later_placeholders() {
         let context = PlaceholderContext::new("it's", Some(&"hello; touch /tmp/pwned".to_string()));
-        let result = expand_placeholders_shell(
-            "notify-send \"{{query}}\" {{clipboard}}",
-            &context,
-        );
-        assert_eq!(
-            result,
-            "notify-send \"it's\" 'hello; touch /tmp/pwned'"
-        );
+        let result = expand_placeholders_shell("notify-send \"{{query}}\" {{clipboard}}", &context);
+        assert_eq!(result, "notify-send \"it's\" 'hello; touch /tmp/pwned'");
     }
 
     /// Regression (validator FINDING 2): a nested `'{{query}}'` wrapper inside
@@ -459,9 +565,7 @@ mod tests {
         assert!(!is_inside_unclosed_double_quotes("echo \\\" foo"));
         // Regression (FINDING 1): an apostrophe inside double quotes does not
         // open a single-quoted segment, so a following `"` really closes it.
-        assert!(!is_inside_unclosed_double_quotes(
-            "notify-send \"it's\" "
-        ));
+        assert!(!is_inside_unclosed_double_quotes("notify-send \"it's\" "));
     }
 
     #[test]

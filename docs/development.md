@@ -102,9 +102,11 @@ Prefer typed actions over shell strings:
 - Use `ActionKind::OpenUrl`, `OpenPath`, `Copy`, `Media`, `Notification`, or
   `Command(ProcessCommand)` when possible.
 - Use `ActionKind::Shell` only for commands that truly need shell syntax.
-- Route execution through `Action::run_with_policy` or `run_execution_request`;
-  do not spawn processes directly from UI callbacks unless the callback is only
-  building an `ExecutionRequest`.
+- Route execution through `Action::run_with_policy` or the gateway
+  (`execute(request, &ExecutionTicket { .. })` in `src/action.rs`); do not spawn
+  processes directly from UI callbacks unless the callback is only building an
+  `ExecutionRequest`. The gateway checks the request's required capabilities and
+  the confirmation policy before anything is spawned.
 - Mark risky actions with `ActionRisk` so confirmation policy can intercept
   them.
 

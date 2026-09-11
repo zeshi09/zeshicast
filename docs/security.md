@@ -100,6 +100,12 @@ This protects against user input like `$(...)` or `; reboot` being interpreted
 as extra shell syntax. In argv mode, placeholders are expanded as literal
 argument strings and are never passed through a shell.
 
+Not covered by the escaping (documented gap, tracked in the plan): a placeholder
+inside a **here-document body** (`cat <<EOF`), where the shell keeps expanding
+`$()` while treating quotes literally. A placeholder sitting inside a `#` comment
+is emitted literally instead of being substituted, since no escaping can make a
+multi-line value safe there.
+
 The command template itself is still executable shell code. Review the whole
 template before installing a command, especially when it uses `{{clipboard}}` or
 preferences containing secrets.
@@ -112,11 +118,25 @@ the GTK UI. The action executor also refuses to run risky actions without a
 confirmed policy path.
 
 Dashboard and view-level command buttons route through typed execution requests;
-the UI should not call raw process-spawn helpers directly. Every executable path
-now goes through a single gateway (`execute` in `src/action.rs`), which checks
-the request's required capabilities against the action's `ExecutionTicket` and
-then applies the confirmation policy. A request that fails either gate is
-returned as `Denied`/`NeedsConfirmation` and never reaches the spawn helpers.
+the UI should not call raw process-spawn helpers directly. Every launcher and
+CLI *action* now goes through a single gateway (`execute` in `src/action.rs`),
+which checks the request's required capabilities against the action's
+`ExecutionTicket` and then applies the confirmation policy. A request that fails
+either gate is returned as `Denied`/`NeedsConfirmation` and never reaches the
+spawn helpers.
+
+Two deliberate exceptions remain, both reachable only *after* the gateway
+confirmed the action and both spawning argv rather than shell text:
+
+- script output capture (`search/scripts.rs::run_script_stdout_with_args`) runs
+the already-confirmed script to collect stdout for the result view;
+- the JSON command producer (`search/commands.rs::run_json_command`) runs the
+command's own `sh -c` template (already gated by the JSON action's confirmation
+and its `shell` capability).
+
+Known residual (see the plan's P2/P5): an extension search result without
+`open_url`/`copy_text` is executed as `sh -c <id>` (confirmed, `shell`-gated)
+instead of through the extension's JSON-RPC `execute` method.
 
 ## Known Gaps (as of 2026-08)
 

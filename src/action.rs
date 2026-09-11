@@ -527,7 +527,11 @@ pub enum SecondaryActionKind {
 /// never drift apart (P1.1).
 pub(crate) fn secondary_action_risk(action: &Action, kind: SecondaryActionKind) -> ActionRisk {
     match kind {
-        SecondaryActionKind::Run | SecondaryActionKind::RunInTerminal => action.risk,
+        SecondaryActionKind::Run => action.risk,
+        // Running an action in a terminal hands its text to a shell, so it is
+        // always at least Shell risk — even for an action that is otherwise
+        // blocked (whose `value()` falls back to manifest-controlled text).
+        SecondaryActionKind::RunInTerminal => ActionRisk::Shell,
         SecondaryActionKind::DeleteClipboardItem => ActionRisk::Destructive,
         SecondaryActionKind::ClearClipboardHistory => ActionRisk::ClipboardClear,
         _ => ActionRisk::Normal,
@@ -776,8 +780,8 @@ impl Action {
 /// through here: [`ExecutionTicket::preflight`] enforces the capability ceiling
 /// and the confirmation gate before anything is spawned (fail-closed).
 ///
-/// `grep -rn "run_verified_request" src/` is expected to show exactly two
-/// hits: this definition and the call below.
+/// `run_verified_request` below is private and has exactly one caller — this
+/// function; `grep -rn "run_execution_request" src/` is expected to stay empty.
 pub(crate) fn execute(request: ExecutionRequest, ticket: &ExecutionTicket) -> ExecutionDecision {
     match ticket.preflight(Some(&request)) {
         ExecutionDecision::RunNow => {

@@ -694,7 +694,10 @@ fn parse_json_action(
         )
         .with_subtitle(subtitle)
         .with_icon(icon_name)
-        .with_risk(risk),
+        .with_risk(risk)
+        // The producer's own manifest is the ceiling for whatever it returns;
+        // the gateway re-checks it before anything runs.
+        .with_capabilities(CapabilitySet::new(capabilities.to_vec())),
     )
 }
 
@@ -769,12 +772,24 @@ pub(crate) fn gate_action_intent(intent: ActionIntent, capabilities: &[Capabilit
     let allowed = |capability: Capability| has_capability(capabilities, capability);
     match intent {
         ActionIntent::OpenUrl(url) => {
-            if json_url_requires_capability(&url) && !allowed(Capability::OpenUrl) {
+            // A `file://` URL opens a local path, so it is gated like
+            // `open_path`: a plain `open_url`/`network` grant must not be able
+            // to read the filesystem through the browser/`xdg-open`.
+            let required = if json_url_requires_capability(&url) {
+                Capability::OpenUrl
+            } else {
+                Capability::OpenPath
+            };
+            if allowed(required) {
+                GatedAction::allowed(ActionKind::OpenUrl(url), ActionRisk::Normal)
+            } else if required == Capability::OpenPath {
+                GatedAction::blocked(
+                    "Blocked: file:// URL requires permissions = [\"filesystem\"] or [\"open_path\"]",
+                )
+            } else {
                 GatedAction::blocked(
                     "Blocked: JSON action requires permissions = [\"network\"] or [\"open_url\"]",
                 )
-            } else {
-                GatedAction::allowed(ActionKind::OpenUrl(url), ActionRisk::Normal)
             }
         }
         #[cfg(any(feature = "gui", test))]
@@ -1198,6 +1213,39 @@ permissions = ["shell"]
         let actions = search_commands(&[command], "", &no_context());
         assert_eq!(actions.len(), 1);
         assert!(matches!(actions[0].kind, ActionKind::None));
+    }
+
+    #[test]
+    fn json_file_url_requires_open_path_capability() {
+        let file_url = ActionIntent::OpenUrl("file:///etc/passwd".to_string());
+
+        // `open_url` alone must not be enough to read a local path.
+        let with_url = gate_action_intent(file_url.clone(), &[Capability::OpenUrl]);
+        assert!(matches!(with_url.kind, ActionKind::None));
+        assert!(with_url.denial.is_some());
+
+        let with_network = gate_action_intent(file_url.clone(), &[Capability::Network]);
+        assert!(matches!(with_network.kind, ActionKind::None));
+
+        let with_filesystem = gate_action_intent(file_url, &[Capability::Filesystem]);
+        assert!(matches!(with_filesystem.kind, ActionKind::OpenUrl(_)));
+    }
+
+    #[test]
+    fn json_result_inherits_producer_capabilities() {
+        let output =
+            r#"[{"title":"Open","action":{"type":"open_url","value":"https://example.com"}}]"#;
+
+        let allowed = parse_json_actions(output, "Docs", 10, &[Capability::OpenUrl]);
+        assert_eq!(allowed.len(), 1);
+        assert!(allowed[0].capabilities.allows(Capability::OpenUrl));
+
+        // A producer without the capability still yields a row (with a denial
+        // note), and the action must not carry the daemon's trusted ceiling.
+        let denied = parse_json_actions(output, "Docs", 10, &[]);
+        assert_eq!(denied.len(), 1);
+        assert!(matches!(denied[0].kind, ActionKind::None));
+        assert!(!denied[0].capabilities.allows(Capability::OpenUrl));
     }
 
     #[test]

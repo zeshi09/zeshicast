@@ -9,6 +9,8 @@ mod services;
 #[cfg(feature = "gui")]
 pub mod ui;
 
+#[cfg(test)]
+pub(crate) use action::take_exec_count;
 pub use action::{
     Action, ActionForm, ActionFormField, ActionPanelSection, ActionRisk, Capability,
     CommandArgumentKind, ExecutionDecision, ExecutionPolicy, LauncherCommand, ScriptMode,
