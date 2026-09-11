@@ -1,10 +1,12 @@
 use gtk::{CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION, gdk};
 
-use crate::{home_dir, load_preferences};
+use crate::{home_dir, load_preferences_or_default};
 
 pub fn install_css() {
     super::fonts::ensure_fonts();
-    let preferences = load_preferences(&home_dir().join(".config/zeshicast/preferences.toml"));
+    // Fonts are cosmetic: a corrupt preferences.toml must not stop the UI.
+    let preferences =
+        load_preferences_or_default(&home_dir().join(".config/zeshicast/preferences.toml"));
     let font_family = css_font_family(
         preferences
             .get("ui_font_family")

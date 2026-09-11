@@ -2012,20 +2012,26 @@ fn show_form_for_action(
         let script_output_view = script_output_view.clone();
         // The panel borrows a clone: `window` itself is moved into the closure.
         let confirm_window = window.clone();
-        crate::ui::show_confirmation_panel(&confirm_window, &title, &detail, "Confirm", move || {
-            present_form_panel(
-                &window,
-                &launcher,
-                &hold,
-                &entry,
-                &list,
-                &results,
-                &navigation,
-                &action_bar,
-                &script_output_view,
-                action.clone(),
-            );
-        });
+        crate::ui::show_confirmation_panel(
+            &confirm_window,
+            &title,
+            &detail,
+            "Confirm",
+            move || {
+                present_form_panel(
+                    &window,
+                    &launcher,
+                    &hold,
+                    &entry,
+                    &list,
+                    &results,
+                    &navigation,
+                    &action_bar,
+                    &script_output_view,
+                    action.clone(),
+                );
+            },
+        );
         return;
     }
 
@@ -3088,6 +3094,7 @@ mod tests {
             clipboard_timestamps: std::collections::HashMap::new(),
             calc_history: Vec::new(),
             preferences: std::collections::HashMap::new(),
+            preferences_writable: true,
             aliases: std::collections::HashMap::new(),
             pins: std::collections::HashSet::new(),
             recent: Vec::new(),

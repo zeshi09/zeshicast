@@ -13,13 +13,12 @@ pub fn resolve_include_secrets(
     cli_flag: Option<bool>,
     preferences: &HashMap<String, String>,
 ) -> bool {
-    cli_flag
-        .unwrap_or_else(|| preference_bool(preferences, EXPORT_SECRETS_PREFERENCE_KEY, false))
+    cli_flag.unwrap_or_else(|| preference_bool(preferences, EXPORT_SECRETS_PREFERENCE_KEY, false))
 }
 
 /// Load the global preferences.toml used by CLI export resolution.
 pub fn load_global_preferences(config_dir: &Path) -> HashMap<String, String> {
-    load_preferences(&config_dir.join("preferences.toml"))
+    load_preferences_or_default(&config_dir.join("preferences.toml"))
 }
 
 pub fn export_config_with_options(
@@ -86,7 +85,9 @@ fn copy_config_sanitized(src: &Path, dest: &Path) -> io::Result<()> {
 }
 
 fn sanitize_export_preferences(path: &Path) -> io::Result<()> {
-    let mut preferences = load_preferences(path);
+    // Strict on purpose: a file we cannot parse must not be rewritten as an
+    // empty one (the exported copy would silently lose every preference).
+    let mut preferences = load_preferences(path)?;
     preferences.retain(|key, _| !is_secret_preference_key(key));
     preferences.remove(EXPORT_SECRETS_PREFERENCE_KEY);
     write_preferences(path, &preferences)
@@ -282,25 +283,124 @@ pub(crate) fn write_preferences(
     keys.sort();
     for key in keys {
         let value = &preferences[key];
-        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        let escaped = escape_toml_string(value);
         content.push_str(&format!("{key} = \"{escaped}\"\n"));
     }
     write_file_atomic(path, content.as_bytes(), 0o600)
 }
 
-pub(crate) fn load_preferences(path: &Path) -> HashMap<String, String> {
-    let Ok(content) = fs::read_to_string(path) else {
-        return HashMap::new();
-    };
-    let Ok(table) = content.parse::<toml::Table>() else {
-        eprintln!("failed to parse preferences: {}", path.display());
-        return HashMap::new();
-    };
+/// Escape a value for a TOML basic string (M-10).
+///
+/// Writing a bare newline, carriage return or control byte used to produce an
+/// invalid file, and the next load then saw *no* preferences at all.
+fn escape_toml_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            control if (control as u32) < 0x20 || control == '\u{7f}' => {
+                escaped.push_str(&format!("\\u{:04X}", control as u32));
+            }
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
 
-    table
+/// Load `preferences.toml`, reporting corruption instead of silently ignoring it.
+///
+/// A missing file is not an error (first run). Anything else — unreadable or
+/// unparseable — is returned to the caller so it can refuse to overwrite a file
+/// it could not read (M-10).
+pub(crate) fn load_preferences(path: &Path) -> io::Result<HashMap<String, String>> {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(error) => return Err(error),
+    };
+    let table = content.parse::<toml::Table>().map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{}: {error}", path.display()),
+        )
+    })?;
+
+    Ok(table
         .iter()
         .filter_map(|(key, value)| toml_value_string(value).map(|value| (key.clone(), value)))
-        .collect()
+        .collect())
+}
+
+/// Best-effort variant for callers that only want a view of the preferences
+/// (fonts, CLI defaults): log and fall back to the defaults.
+pub(crate) fn load_preferences_or_default(path: &Path) -> HashMap<String, String> {
+    match load_preferences(path) {
+        Ok(preferences) => preferences,
+        Err(error) => {
+            eprintln!("failed to read preferences: {error}");
+            HashMap::new()
+        }
+    }
+}
+
+/// Load preferences and, when the file is corrupt, keep a timestamped copy
+/// before returning the defaults.
+///
+/// The bool is `false` when the file was corrupt: the caller must then refuse to
+/// write, so a single bad edit cannot erase every preference (M-10).
+pub(crate) fn load_preferences_with_backup(path: &Path) -> (HashMap<String, String>, bool) {
+    match load_preferences(path) {
+        Ok(preferences) => (preferences, true),
+        Err(error) => {
+            let backup = back_up_corrupt_file(path);
+            match backup {
+                Ok(Some(backup)) => eprintln!(
+                    "failed to read preferences: {error}; using defaults and refusing to write (backup: {})",
+                    backup.display()
+                ),
+                Ok(None) => eprintln!(
+                    "failed to read preferences: {error}; using defaults and refusing to write (backup not needed)"
+                ),
+                Err(backup_error) => eprintln!(
+                    "failed to read preferences: {error}; using defaults and refusing to write (backup failed: {backup_error})"
+                ),
+            }
+            (HashMap::new(), false)
+        }
+    }
+}
+
+/// Copy a corrupt file aside as `<name>.bad-<ts>`, leaving the original in place
+/// so the user can repair it. Returns `None` when the file is already gone, and
+/// keeps only the first backup per file to avoid piling up snapshots.
+pub(crate) fn back_up_corrupt_file(path: &Path) -> io::Result<Option<PathBuf>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "preferences.toml".to_string());
+    let prefix = format!("{name}.bad-");
+    if let Ok(entries) = fs::read_dir(parent)
+        && entries.flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(prefix.as_str())
+        })
+    {
+        return Ok(None);
+    }
+
+    let backup = path.with_file_name(format!("{name}.bad-{}", unix_now()));
+    fs::copy(path, &backup)?;
+    Ok(Some(backup))
 }
 
 pub(crate) fn load_frequencies(path: &Path) -> HashMap<String, u32> {
@@ -428,7 +528,7 @@ mod tests {
         .unwrap();
 
         sanitize_export_preferences(&path).unwrap();
-        let preferences = load_preferences(&path);
+        let preferences = load_preferences(&path).expect("exported preferences parse");
 
         assert_eq!(
             preferences.get("ai_model").map(String::as_str),
@@ -487,6 +587,78 @@ mod tests {
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn preference_value_with_newline_round_trips() {
+        let dir = test_dir("preferences-escape");
+        let path = dir.join("preferences.toml");
+        let value = "one\ntwo\ttabbed\rreturn \"quoted\" \\ backslash \u{7}\u{8}".to_string();
+        write_preferences(
+            &path,
+            &HashMap::from([("ai_prompt".to_string(), value.clone())]),
+        )
+        .unwrap();
+
+        // The raw file must stay single-line: a literal newline used to make the
+        // whole file invalid TOML, and the next load then saw no preferences at
+        // all (M-10).
+        let raw = fs::read_to_string(&path).unwrap();
+        assert_eq!(raw.lines().count(), 1, "raw file: {raw:?}");
+        assert!(raw.contains("\\n") && raw.contains("\\t") && raw.contains("\\r"));
+        assert!(raw.contains("\\u0007") && raw.contains("\\u0008"));
+
+        let loaded = load_preferences(&path).expect("escaped file must parse");
+        assert_eq!(loaded.get("ai_prompt"), Some(&value));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn corrupt_preferences_are_backed_up_not_overwritten() {
+        let dir = test_dir("preferences-corrupt");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("preferences.toml");
+        let corrupt = "ai_model = \"llama\nbroken";
+        fs::write(&path, corrupt).unwrap();
+
+        let (preferences, writable) = load_preferences_with_backup(&path);
+        assert!(preferences.is_empty(), "corrupt values must not be used");
+        assert!(!writable, "a corrupt file must not be writable");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            corrupt,
+            "the original file must stay in place so the user can fix it"
+        );
+
+        let backups: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("preferences.toml.bad-"))
+            .collect();
+        assert_eq!(backups.len(), 1, "expected one backup, got {backups:?}");
+        assert_eq!(fs::read_to_string(dir.join(&backups[0])).unwrap(), corrupt);
+
+        // Reading again must neither add backups nor start writing again.
+        let (_, writable_again) = load_preferences_with_backup(&path);
+        assert!(!writable_again);
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().count(),
+            2,
+            "original + one backup"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn missing_preferences_file_is_not_an_error() {
+        let dir = test_dir("preferences-missing");
+        let path = dir.join("preferences.toml");
+
+        let (preferences, writable) = load_preferences_with_backup(&path);
+        assert!(preferences.is_empty());
+        assert!(writable, "a first run may write preferences");
+        assert!(!path.exists(), "nothing to back up yet");
     }
 
     #[test]

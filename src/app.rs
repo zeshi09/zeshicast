@@ -19,7 +19,7 @@ use crate::{
     app_action, append_alias, execute, expand_placeholders, expand_placeholders_shell, fuzzy_score,
     home_dir, load_aliases, load_apps, load_clipboard_history, load_command_entries,
     load_extension_command_entries, load_extension_manifests, load_extension_script_entries,
-    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences,
+    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences_with_backup,
     load_script_entries, normalize_alias, search_audio_actions, search_media_actions,
     search_network_actions, search_notification_actions, search_system_actions, write_lines,
     write_preferences,
@@ -42,6 +42,9 @@ pub struct Zeshicast {
     pub(crate) clipboard_timestamps: HashMap<String, i64>,
     pub(crate) calc_history: Vec<CalcHistoryEntry>,
     pub(crate) preferences: HashMap<String, String>,
+    /// `false` when `preferences.toml` could not be parsed at startup: the file
+    /// is never overwritten until the user fixes it (M-10).
+    pub(crate) preferences_writable: bool,
     pub(crate) aliases: HashMap<String, String>,
     pub(crate) pins: HashSet<String>,
     pub(crate) recent: Vec<String>,
@@ -170,7 +173,8 @@ impl Zeshicast {
     fn load_inner(index_files: bool) -> Self {
         let home = home_dir();
         let config_dir = home.join(".config/zeshicast");
-        let preferences = load_preferences(&config_dir.join("preferences.toml"));
+        let preferences_path = config_dir.join("preferences.toml");
+        let (preferences, preferences_writable) = load_preferences_with_backup(&preferences_path);
         let script_dirs = preference_script_dirs(&preferences, &config_dir);
         let extensions = load_extension_manifests(&config_dir);
 
@@ -202,6 +206,7 @@ impl Zeshicast {
             clipboard_timestamps: storage_data.timestamps,
             calc_history,
             preferences,
+            preferences_writable,
             aliases: load_aliases(&config_dir.join("aliases.txt")),
             pins: load_lines(&config_dir.join("pins.txt"))
                 .into_iter()
@@ -1120,6 +1125,16 @@ impl Zeshicast {
     }
 
     pub fn set_preference(&mut self, key: String, value: String) -> io::Result<()> {
+        if !self.preferences_writable {
+            // M-10: the file on disk is corrupt; writing now would erase it.
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "{} is not valid TOML; fix or remove it before changing preferences",
+                    self.config_dir.join("preferences.toml").display()
+                ),
+            ));
+        }
         let should_prune_clipboard = key == "clipboard_retention";
         if value.is_empty() {
             self.preferences.remove(&key);
@@ -1384,6 +1399,7 @@ mod tests {
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences,
+            preferences_writable: true,
             aliases: HashMap::new(),
             pins: HashSet::new(),
             recent: Vec::new(),
@@ -1529,6 +1545,25 @@ mod tests {
             "expected denial, got {decision:?}"
         );
         assert_eq!(crate::take_exec_count(), 0);
+    }
+
+    #[test]
+    fn set_preference_refuses_when_load_failed() {
+        // M-10: after a corrupt preferences.toml the UI must not write, or it
+        // would replace the file it could not read.
+        let mut app = test_app(test_cache_dir("prefs-readonly"), HashMap::new());
+        app.preferences_writable = false;
+
+        let error = app
+            .set_preference("ai_model".to_string(), "llama".to_string())
+            .expect_err("writing must be refused");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().contains("not valid TOML"), "{error}");
+        assert!(
+            !app.preferences.contains_key("ai_model"),
+            "the in-memory map must not change either"
+        );
+        assert!(app.get_preferences().is_empty());
     }
 
     #[test]

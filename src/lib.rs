@@ -27,10 +27,12 @@ pub use app::{
     SnippetSummary, Zeshicast, clipboard_cache_dir, clipboard_image_path, copy_clipboard_image,
     save_clipboard_image, validated_clipboard_image,
 };
+#[cfg(feature = "gui")]
+pub(crate) use config::load_preferences_or_default;
 pub(crate) use config::{
-    append_alias, home_dir, load_aliases, load_frequencies, load_lines, load_preferences,
-    normalize_alias, toml_value_string, unix_now, write_file_atomic, write_lines,
-    write_preferences,
+    append_alias, home_dir, load_aliases, load_frequencies, load_lines,
+    load_preferences_with_backup, normalize_alias, toml_value_string, unix_now, write_file_atomic,
+    write_lines, write_preferences,
 };
 pub use config::{
     export_config_with_options, import_config, load_global_preferences, resolve_include_secrets,
@@ -362,6 +364,7 @@ mod tests {
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences: HashMap::new(),
+            preferences_writable: true,
             aliases: HashMap::new(),
             pins: HashSet::new(),
             recent: Vec::new(),
@@ -396,6 +399,7 @@ mod tests {
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences: HashMap::new(),
+            preferences_writable: true,
             aliases: HashMap::new(),
             pins: HashSet::new(),
             recent: Vec::new(),
@@ -1139,6 +1143,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences: HashMap::new(),
+            preferences_writable: true,
             aliases: HashMap::new(),
             pins: HashSet::new(),
             recent: Vec::new(),
@@ -1202,6 +1207,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             clipboard_timestamps: HashMap::new(),
             calc_history: Vec::new(),
             preferences,
+            preferences_writable: true,
             aliases: HashMap::new(),
             pins: HashSet::new(),
             recent: Vec::new(),
