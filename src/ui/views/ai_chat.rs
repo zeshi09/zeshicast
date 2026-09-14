@@ -24,7 +24,6 @@ pub struct AiChatView {
     pub history: Rc<RefCell<Vec<crate::ChatMessage>>>,
 }
 
-
 pub fn ai_chat_view() -> AiChatView {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
@@ -152,4 +151,3 @@ pub fn ai_chat_view() -> AiChatView {
         history,
     }
 }
-

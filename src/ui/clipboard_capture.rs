@@ -1,10 +1,10 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use crate::Zeshicast;
 use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use crate::Zeshicast;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub(crate) fn install_clipboard_monitor(launcher: &Rc<RefCell<Zeshicast>>) {
     if !launcher.borrow().clipboard_history_enabled() {
@@ -229,9 +229,7 @@ pub(crate) fn watch_clipboard_text_with(
         } // reader dropped here: our pipe end closes before we reap the child
         if record_truncated {
             // Log the event only; never echo clipboard content here.
-            eprintln!(
-                "clipboard record exceeded {CLIPBOARD_RECORD_READ_LIMIT} bytes; truncated"
-            );
+            eprintln!("clipboard record exceeded {CLIPBOARD_RECORD_READ_LIMIT} bytes; truncated");
         }
         // Kill before reaping: an oversized record leaves the producer blocked
         // writing into a pipe nobody drains any more, so a plain wait() would

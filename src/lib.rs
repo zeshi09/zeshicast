@@ -46,7 +46,6 @@ pub fn reap_finished_children() -> usize {
     process::reap_finished()
 }
 pub(crate) use placeholders::{PlaceholderContext, expand_placeholders, expand_placeholders_shell};
-pub(crate) use search::snapshot::SearchData;
 #[cfg(test)]
 pub(crate) use search::apps::clean_desktop_exec;
 pub(crate) use search::apps::{AppEntry, app_action, load_apps, search_apps};
@@ -78,6 +77,7 @@ pub(crate) use search::notifications::search_notification_actions;
 pub(crate) use search::processes::search_processes;
 #[cfg(test)]
 pub(crate) use search::processes::{ProcessEntry, decode_cmdline, search_process_entries};
+pub(crate) use search::snapshot::SearchData;
 pub(crate) use search::system::{
     SystemActionEntry, search_audio_actions, search_network_actions, search_system_actions,
 };
@@ -109,7 +109,7 @@ pub use services::local_ai::{
 pub use services::media::{MediaControl, MediaSnapshot, media_control, media_snapshot};
 pub use services::network::{
     NetworkInterfaceSnapshot, NetworkSnapshot, VpnConnectionSnapshot, WifiNetworkSnapshot,
-    net_speed_mbps, network_snapshot,
+    net_speed_mbps, network_snapshot, primary_interface_name,
 };
 pub use services::notifications::{
     NotificationAction, NotificationEntrySnapshot, NotificationSnapshot, clear_notifications,
@@ -119,8 +119,8 @@ pub use services::notifications::{
 #[cfg(feature = "gui")]
 pub use services::poll_cache::{
     cached_audio_snapshot, cached_battery_snapshot, cached_keyboard_layout, cached_media_snapshot,
-    cached_network_snapshot, cached_system_snapshot, cached_thermal_snapshot,
-    cached_top_processes, cached_workspace_snapshot, start as start_poll_cache,
+    cached_network_snapshot, cached_system_snapshot, cached_thermal_snapshot, cached_top_processes,
+    cached_workspace_snapshot, start as start_poll_cache,
 };
 pub use services::storage as storage_service;
 pub use services::system_stats::{
@@ -176,7 +176,11 @@ mod tests {
 
     #[test]
     fn file_search_uses_index_without_explicit_prefix() {
-        let files = vec![FileEntry::new("notes.txt", PathBuf::from("/home/user/notes.txt"), false)];
+        let files = vec![FileEntry::new(
+            "notes.txt",
+            PathBuf::from("/home/user/notes.txt"),
+            false,
+        )];
 
         let results = search_files(&files, "notes", false);
         assert_eq!(results.len(), 1);

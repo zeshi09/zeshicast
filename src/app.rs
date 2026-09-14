@@ -8,21 +8,15 @@ pub use crate::services::clipboard_store::*;
 use crate::services::storage;
 use crate::services::text_input::{is_wtype_available, type_text_via_wtype};
 use crate::{
-    Action, ActionFormCommand, ActionKind, ActionRisk, AppEntry,
-    CommandEntry,
-    ExecutionDecision, ExecutionPolicy, ExecutionRequest, ExecutionTicket,
-    ExtensionManifest, FileEntry,
-    NamedValue,
-    PlaceholderContext, ProcessCommand,
-    ScriptEntry, SearchData, SecondaryAction,
-    SecondaryActionKind, ShellCommand,
-    append_alias, execute, expand_placeholders, expand_placeholders_shell,
-    home_dir, load_aliases, load_apps, load_clipboard_history, load_command_entries,
-    load_extension_command_entries, load_extension_manifests, load_extension_script_entries,
-    load_file_index, load_frequencies, load_lines, load_named_values, load_preferences_with_backup,
-    load_script_entries, normalize_alias,
-    write_lines,
-    write_preferences,
+    Action, ActionFormCommand, ActionKind, ActionRisk, AppEntry, CommandEntry, ExecutionDecision,
+    ExecutionPolicy, ExecutionRequest, ExecutionTicket, ExtensionManifest, FileEntry, NamedValue,
+    PlaceholderContext, ProcessCommand, ScriptEntry, SearchData, SecondaryAction,
+    SecondaryActionKind, ShellCommand, append_alias, execute, expand_placeholders,
+    expand_placeholders_shell, home_dir, load_aliases, load_apps, load_clipboard_history,
+    load_command_entries, load_extension_command_entries, load_extension_manifests,
+    load_extension_script_entries, load_file_index, load_frequencies, load_lines,
+    load_named_values, load_preferences_with_backup, load_script_entries, normalize_alias,
+    write_lines, write_preferences,
 };
 
 #[derive(Debug, Clone)]
@@ -227,7 +221,6 @@ impl Zeshicast {
     pub fn reload(&mut self) {
         *self = Self::load();
     }
-
 
     /// Snapshot of the inputs `search` reads (M-1).
     ///
@@ -731,8 +724,6 @@ impl Zeshicast {
         self.write_pins()
     }
 
-
-
     fn preference_enabled(&self, key: &str, default_value: bool) -> bool {
         preference_enabled_value(&self.preferences, key, default_value)
     }
@@ -939,7 +930,6 @@ impl Zeshicast {
         pins.sort();
         write_lines(&self.config_dir.join("pins.txt"), &pins)
     }
-
 }
 
 fn parse_bool_preference(value: &str) -> Option<bool> {

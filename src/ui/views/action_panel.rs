@@ -1,6 +1,6 @@
+use crate::Action;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Entry, Label, ListBox, Orientation};
-use crate::Action;
 
 #[derive(Clone)]
 pub struct ActionPanelDisplayItem {
@@ -18,7 +18,6 @@ pub struct ActionPanelView {
     pub search: Entry,
     pub list: ListBox,
 }
-
 
 pub fn action_panel_view() -> ActionPanelView {
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -69,7 +68,6 @@ pub fn action_panel_view() -> ActionPanelView {
         list,
     }
 }
-
 
 pub fn set_action_panel_items(
     view: &ActionPanelView,
@@ -123,4 +121,3 @@ fn action_section_header_row(title: &str) -> gtk::ListBoxRow {
     row.set_child(Some(&label));
     row
 }
-

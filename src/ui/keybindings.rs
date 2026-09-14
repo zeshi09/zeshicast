@@ -1,30 +1,28 @@
 #![allow(clippy::too_many_arguments)]
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use gtk::gdk;
-use gtk::gio;
-use gtk::glib;
-use gtk::prelude::*;
-use gtk::{ApplicationWindow, Box as GtkBox, Entry, ListBox};
-use crate::{
-    Action, ClipboardSummary, SecondaryActionKind, SnippetSummary, Zeshicast,
+use super::action_panel_controller::{
+    ActionPanelItem, DisplayedActionPanelRow, run_action_panel_row, show_action_panel_view,
+};
+use super::launcher::{
+    clear_clipboard_history_or_confirm, clipboard_item_action, copy_clipboard_row, copy_selected,
+    copy_snippet_row, finish_interaction, refresh_clipboard_view, refresh_snippet_view,
+    run_secondary_action_or_confirm, run_selected_with_views, show_clipboard_view,
+    show_extension_view, show_preferences_view, show_root_view, show_snippet_view,
+    terminate_selected_system_process_or_confirm,
 };
 use crate::ui::launcher_views::{
     show_ai_chat_view, show_audio_view, show_dashboard_view, show_emoji_view,
     show_font_browser_view, show_media_view, show_network_view, show_notifications_view,
     show_system_monitor_view,
 };
-use super::action_panel_controller::{
-    ActionPanelItem, DisplayedActionPanelRow, run_action_panel_row, show_action_panel_view,
-};
-use super::launcher::{
-    clear_clipboard_history_or_confirm, clipboard_item_action, copy_clipboard_row,
-    copy_selected, copy_snippet_row, finish_interaction, refresh_clipboard_view,
-    refresh_snippet_view, run_secondary_action_or_confirm, run_selected_with_views,
-    show_clipboard_view, show_extension_view, show_preferences_view, show_root_view,
-    show_snippet_view, terminate_selected_system_process_or_confirm,
-};
+use crate::{Action, ClipboardSummary, SecondaryActionKind, SnippetSummary, Zeshicast};
+use gtk::gdk;
+use gtk::gio;
+use gtk::glib;
+use gtk::prelude::*;
+use gtk::{ApplicationWindow, Box as GtkBox, Entry, ListBox};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Resolve a hardware keycode to its keyval in the primary (Latin) layout group,
 /// independent of the currently active keyboard layout. Lets Ctrl-shortcuts
@@ -387,7 +385,9 @@ fn handle_view_key(
                 *window_grid_view.current_position.borrow_mut() = target_pos;
                 window_grid_view.drawing_area.queue_draw();
                 snap_window(target_pos);
-                window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
+                window_grid_view
+                    .status_label
+                    .set_text(&format!("Applied: {:?}", target_pos));
                 glib::Propagation::Stop
             }
             _ => glib::Propagation::Proceed,
@@ -442,7 +442,9 @@ fn handle_view_key(
                 *window_grid_view.current_position.borrow_mut() = target_pos;
                 window_grid_view.drawing_area.queue_draw();
                 snap_window(target_pos);
-                window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
+                window_grid_view
+                    .status_label
+                    .set_text(&format!("Applied: {:?}", target_pos));
                 glib::Propagation::Stop
             }
             _ => glib::Propagation::Proceed,
@@ -513,11 +515,7 @@ fn handle_view_key(
                     &item.prefix,
                     &item.value,
                     move || {
-                        refresh_snippet_view(
-                            &launcher_for_done,
-                            &snippet_list,
-                            &snippet_items,
-                        );
+                        refresh_snippet_view(&launcher_for_done, &snippet_list, &snippet_items);
                     },
                 );
             }
@@ -542,10 +540,16 @@ fn handle_view_key(
             if navigation.current() == crate::ui::LauncherView::WindowGrid {
                 use crate::services::compositor::{WindowSnapPosition, snap_window};
                 let pos = match key {
-                    gdk::Key::h | gdk::Key::H | gdk::Key::Left => Some(WindowSnapPosition::LeftHalf),
-                    gdk::Key::l | gdk::Key::L | gdk::Key::Right => Some(WindowSnapPosition::RightHalf),
+                    gdk::Key::h | gdk::Key::H | gdk::Key::Left => {
+                        Some(WindowSnapPosition::LeftHalf)
+                    }
+                    gdk::Key::l | gdk::Key::L | gdk::Key::Right => {
+                        Some(WindowSnapPosition::RightHalf)
+                    }
                     gdk::Key::k | gdk::Key::K | gdk::Key::Up => Some(WindowSnapPosition::TopHalf),
-                    gdk::Key::j | gdk::Key::J | gdk::Key::Down => Some(WindowSnapPosition::BottomHalf),
+                    gdk::Key::j | gdk::Key::J | gdk::Key::Down => {
+                        Some(WindowSnapPosition::BottomHalf)
+                    }
                     gdk::Key::f | gdk::Key::F => Some(WindowSnapPosition::Fullscreen),
                     gdk::Key::c | gdk::Key::C => Some(WindowSnapPosition::Center),
                     gdk::Key::_1 => Some(WindowSnapPosition::FirstThird),
@@ -563,7 +567,9 @@ fn handle_view_key(
                     *window_grid_view.current_position.borrow_mut() = target_pos;
                     window_grid_view.drawing_area.queue_draw();
                     snap_window(target_pos);
-                    window_grid_view.status_label.set_text(&format!("Applied: {:?}", target_pos));
+                    window_grid_view
+                        .status_label
+                        .set_text(&format!("Applied: {:?}", target_pos));
                     return glib::Propagation::Stop;
                 }
             }

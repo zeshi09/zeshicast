@@ -352,7 +352,10 @@ mod tests {
         }
         match rx.recv_timeout(Duration::from_secs(5)) {
             Ok(StreamChunk::Error(message)) => {
-                assert!(message.contains("interrupted"), "unexpected message: {message}");
+                assert!(
+                    message.contains("interrupted"),
+                    "unexpected message: {message}"
+                );
             }
             other => panic!("expected Error chunk after read timeout, got {other:?}"),
         }
@@ -377,12 +380,14 @@ mod tests {
             )
             .expect("write headers");
 
-            let frame1 = b"{\"message\":{\"role\":\"assistant\",\"content\":\"hello \"},\"done\":false}\n";
+            let frame1 =
+                b"{\"message\":{\"role\":\"assistant\",\"content\":\"hello \"},\"done\":false}\n";
             write!(sock, "{:x}\r\n", frame1.len()).expect("write chunk header");
             sock.write_all(frame1).expect("write frame1");
             sock.write_all(b"\r\n").expect("terminate frame1");
 
-            let frame2 = b"{\"message\":{\"role\":\"assistant\",\"content\":\"world\"},\"done\":true}\n";
+            let frame2 =
+                b"{\"message\":{\"role\":\"assistant\",\"content\":\"world\"},\"done\":true}\n";
             write!(sock, "{:x}\r\n", frame2.len()).expect("write chunk header");
             sock.write_all(frame2).expect("write frame2");
             sock.write_all(b"\r\n").expect("terminate frame2");
@@ -398,16 +403,10 @@ mod tests {
             endpoint: format!("http://{addr}"),
             model: "chat-model".to_string(),
         };
-        let messages = vec![
-            ChatMessage::user("hi"),
-        ];
+        let messages = vec![ChatMessage::user("hi")];
         let (tx, rx) = std::sync::mpsc::sync_channel(64);
-        let cancel = chat_local_ai_streaming_with_timeout(
-            config,
-            messages,
-            tx,
-            Duration::from_secs(5),
-        );
+        let cancel =
+            chat_local_ai_streaming_with_timeout(config, messages, tx, Duration::from_secs(5));
 
         match rx.recv_timeout(Duration::from_secs(5)) {
             Ok(StreamChunk::Token(token)) => assert_eq!(token, "hello "),

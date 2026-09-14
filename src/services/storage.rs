@@ -250,9 +250,9 @@ pub fn snippets_load(config_dir: &Path) -> Vec<SnippetRecord> {
     let Ok(conn) = open(config_dir) else {
         return Vec::new();
     };
-    let mut stmt = match conn.prepare(
-        "SELECT id, title, prefix, content, tags FROM snippets ORDER BY id ASC",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT id, title, prefix, content, tags FROM snippets ORDER BY id ASC")
+    {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
@@ -532,11 +532,7 @@ mod tests {
     #[test]
     fn migrate_clipboard_deduplicates_duplicate_entries() {
         let dir = test_dir("migrate-clipboard-dedup");
-        migrate_clipboard(
-            &dir,
-            &["a".to_string(), "a".to_string(), "b".to_string()],
-        )
-        .unwrap();
+        migrate_clipboard(&dir, &["a".to_string(), "a".to_string(), "b".to_string()]).unwrap();
 
         let conn = open(&dir).unwrap();
         assert_eq!(clipboard_count(&conn), 2);
@@ -619,7 +615,11 @@ mod tests {
     fn migrate_snippets_creates_valid_rows() {
         let dir = test_dir("snippets-migrate");
         let entries = vec![
-            ("Snippet 1".to_string(), "echo 1".to_string(), vec!["tag1".to_string()]),
+            (
+                "Snippet 1".to_string(),
+                "echo 1".to_string(),
+                vec!["tag1".to_string()],
+            ),
             ("Snippet 2".to_string(), "echo 2".to_string(), vec![]),
         ];
 

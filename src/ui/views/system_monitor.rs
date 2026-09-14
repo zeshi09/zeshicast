@@ -22,7 +22,6 @@ pub struct SystemMonitorView {
     pub load_graph: MetricGraph,
     pub memory_graph: MetricGraph,
     pub disk_graph: MetricGraph,
-    pub net_iface: String,
     pub net_rx: Label,
     pub net_tx: Label,
     pub list: ListBox,
@@ -244,9 +243,6 @@ pub fn system_monitor_view(
     let processes_label = Label::new(None);
     processes_label.set_visible(false);
 
-    // Resolved lazily by refreshes; keep startup free of network subprocesses.
-    let net_iface = "eth0".to_string();
-
     // ── Process table ────────────────────────────────────────────────────────
     // Table header: filter + sort buttons
     let table_header = GtkBox::new(Orientation::Horizontal, 8);
@@ -299,7 +295,6 @@ pub fn system_monitor_view(
         load_graph,
         memory_graph,
         disk_graph,
-        net_iface,
         net_rx,
         net_tx,
         list,
@@ -356,7 +351,14 @@ pub fn set_system_monitor_snapshot(
     push_metric_graph(&view.memory_graph, memory_fraction);
 
     // NET row speeds
-    let (rx_mbps, tx_mbps) = crate::net_speed_mbps(&view.net_iface);
+    // NET row speeds for the interface that is actually carrying traffic (M-8).
+    // This reads the poll cache, not the network: a hardcoded "eth0" reported
+    // 0 B/s on a Wi-Fi-only machine, and shelling out here would fork per refresh.
+    let net = crate::cached_network_snapshot();
+    let (rx_mbps, tx_mbps) = crate::primary_interface_name(&net)
+        .as_deref()
+        .map(crate::net_speed_mbps)
+        .unwrap_or((0.0, 0.0));
     let fmt_speed = |v: f64| -> String {
         if v < 0.001 {
             "0 B/s".to_string()

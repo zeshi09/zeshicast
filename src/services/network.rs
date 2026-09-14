@@ -47,6 +47,21 @@ pub fn network_snapshot() -> NetworkSnapshot {
     }
 }
 
+/// The interface whose counters the UI should show: the first one that is up,
+/// falling back to the first non-loopback interface (M-8).
+///
+/// The system-monitor NET row used to pass a hardcoded `eth0` to
+/// [`net_speed_mbps`], so on a Wi-Fi-only machine the counters were read from a
+/// path that does not exist and the row reported 0 B/s forever.
+pub fn primary_interface_name(snapshot: &NetworkSnapshot) -> Option<String> {
+    snapshot
+        .interfaces
+        .iter()
+        .find(|iface| iface.name != "lo" && iface.state == "up")
+        .or_else(|| snapshot.interfaces.iter().find(|iface| iface.name != "lo"))
+        .map(|iface| iface.name.clone())
+}
+
 type NetByteCounters = HashMap<String, (u64, u64)>;
 type NetSpeedState = Option<(NetByteCounters, Instant)>;
 
@@ -483,9 +498,14 @@ mod nm_dbus {
                 continue;
             }
 
-            let active_ap_path =
-                get_prop(&conn, NM_DEST, dev_path, WIRELESS_IFACE, "ActiveAccessPoint")
-                    .and_then(|v| v.str().map(str::to_string));
+            let active_ap_path = get_prop(
+                &conn,
+                NM_DEST,
+                dev_path,
+                WIRELESS_IFACE,
+                "ActiveAccessPoint",
+            )
+            .and_then(|v| v.str().map(str::to_string));
 
             let ap_list_var = conn
                 .call_sync(
@@ -542,7 +562,10 @@ mod nm_dbus {
                 let security = parse_security_flags(flags, wpa_flags, rsn_flags);
                 let active = active_ap_path.as_deref() == Some(ap_path);
 
-                if let Some(existing) = networks.iter_mut().find(|n: &&mut WifiNetworkSnapshot| n.ssid == ssid) {
+                if let Some(existing) = networks
+                    .iter_mut()
+                    .find(|n: &&mut WifiNetworkSnapshot| n.ssid == ssid)
+                {
                     existing.active |= active;
                     if signal_percent.unwrap_or(0) > existing.signal_percent.unwrap_or(0) {
                         existing.signal_percent = signal_percent;
@@ -688,5 +711,44 @@ nameserver 2001:4860:4860::8888
     fn nm_dbus_queries_without_panic() {
         let _ = nm_dbus::read_vpn_connections();
         let _ = nm_dbus::read_wifi_networks();
+    }
+    #[test]
+    fn primary_interface_prefers_the_one_that_is_up() {
+        let iface = |name: &str, state: &str| NetworkInterfaceSnapshot {
+            name: name.to_string(),
+            state: state.to_string(),
+            is_wireless: false,
+            mac_address: None,
+            ipv4_addresses: Vec::new(),
+            ipv6_addresses: Vec::new(),
+        };
+        let snapshot = |interfaces: Vec<NetworkInterfaceSnapshot>| NetworkSnapshot {
+            interfaces,
+            ..NetworkSnapshot::default()
+        };
+
+        assert_eq!(
+            primary_interface_name(&snapshot(vec![
+                iface("lo", "unknown"),
+                iface("wlan0", "down"),
+                iface("enp3s0", "up"),
+            ]))
+            .as_deref(),
+            Some("enp3s0")
+        );
+        assert_eq!(
+            primary_interface_name(&snapshot(vec![
+                iface("lo", "unknown"),
+                iface("wlan0", "down")
+            ]))
+            .as_deref(),
+            Some("wlan0"),
+            "a link that is down still beats no interface at all"
+        );
+        assert_eq!(
+            primary_interface_name(&snapshot(vec![iface("lo", "unknown")])),
+            None,
+            "loopback alone is not an interface to report"
+        );
     }
 }

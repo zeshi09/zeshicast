@@ -163,10 +163,9 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
     },
 ];
 
-
-use std::collections::HashMap;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Entry, Label, Orientation, Paned, Stack};
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct PreferencesView {

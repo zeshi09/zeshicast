@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use crate::{home_dir, MAX_CLIPBOARD_ENTRIES};
+use crate::{MAX_CLIPBOARD_ENTRIES, home_dir};
 
 /// Sentinel prefix marking a clipboard history entry as an image. The rest of
 /// the stored value is the path to the cached PNG. The leading SOH control char

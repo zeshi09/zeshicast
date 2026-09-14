@@ -1,9 +1,9 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use crate::MediaSnapshot;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Image, Label, Orientation};
-use crate::MediaSnapshot;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct MediaView {
@@ -22,7 +22,6 @@ pub struct MediaView {
     /// Last art URL we loaded, so we don't refetch on every refresh tick.
     art_url: Rc<RefCell<Option<String>>>,
 }
-
 
 pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -334,4 +333,3 @@ pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
         view.time_total.set_text("0:00");
     }
 }
-

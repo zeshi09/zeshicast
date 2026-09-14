@@ -5,7 +5,6 @@
 
 use std::cell::RefCell;
 
-
 use gtk::gio;
 use gtk::glib::{self, variant::ToVariant};
 

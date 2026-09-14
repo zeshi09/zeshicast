@@ -1,12 +1,15 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use super::metric_graph::{MetricGraph, metric_graph, push_metric_graph};
+use super::system_monitor::load_fraction;
+use crate::{
+    AudioSnapshot, BatterySnapshot, MediaSnapshot, NetworkSnapshot, NotificationSnapshot,
+    SystemSnapshot,
+};
 use chrono::Local;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Grid, Label, Orientation, ProgressBar};
-use crate::{AudioSnapshot, BatterySnapshot, MediaSnapshot, NetworkSnapshot, NotificationSnapshot, SystemSnapshot};
-use super::metric_graph::{metric_graph, push_metric_graph, MetricGraph};
-use super::system_monitor::load_fraction;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct DashboardView {
@@ -51,7 +54,6 @@ pub struct DashboardView {
     pub lock: Button,
     pub suspend: Button,
 }
-
 
 pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     // Scrollable outer wrapper
@@ -328,7 +330,6 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     view
 }
 
-
 pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     let now = Local::now();
     // Clock is updated by a per-second blinking timer; just set date here if not ticking yet
@@ -507,7 +508,6 @@ pub fn set_dashboard_audio_snapshot(view: &DashboardView, snapshot: &AudioSnapsh
     }
 }
 
-
 pub fn set_dashboard_media_snapshot(view: &DashboardView, snapshot: &MediaSnapshot) {
     if !snapshot.is_active() {
         view.media.set_text("No player");
@@ -545,7 +545,6 @@ pub fn set_dashboard_notification_snapshot(view: &DashboardView, snapshot: &Noti
         .set_text(&format!("{backend}  {count}  {dnd}"));
 }
 
-
 fn dashboard_stat_chip() -> Label {
     let label = Label::new(None);
     label.add_css_class("stat-chip");
@@ -554,14 +553,12 @@ fn dashboard_stat_chip() -> Label {
     label
 }
 
-
 fn dashboard_button(label: &str) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("dashboard-button");
     button.add_css_class("widget-btn");
     button
 }
-
 
 pub(crate) fn format_duration(seconds: u64) -> String {
     let days = seconds / 86_400;
@@ -576,4 +573,3 @@ pub(crate) fn format_duration(seconds: u64) -> String {
         format!("{minutes}m")
     }
 }
-

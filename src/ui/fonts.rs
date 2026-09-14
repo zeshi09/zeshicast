@@ -61,13 +61,11 @@ pub fn ensure_fonts() {
     }
 }
 
-
-
-use std::cell::RefCell;
-use std::rc::Rc;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Entry, Label, ListBox, Orientation};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct FontBrowserView {
@@ -152,7 +150,12 @@ pub fn font_browser_view() -> FontBrowserView {
             move || match receiver.try_recv() {
                 Ok(loaded) => {
                     *fonts.borrow_mut() = loaded;
-                    populate_font_list(&list_c, &fonts.borrow(), &search_c.text(), &preview_c.text());
+                    populate_font_list(
+                        &list_c,
+                        &fonts.borrow(),
+                        &search_c.text(),
+                        &preview_c.text(),
+                    );
                     glib::ControlFlow::Break
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -246,7 +249,6 @@ fn font_row(font_name: &str, preview: &str) -> gtk::ListBoxRow {
     row.set_child(Some(&layout));
     row
 }
-
 
 #[cfg(test)]
 mod tests {

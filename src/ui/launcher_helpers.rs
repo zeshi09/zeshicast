@@ -129,7 +129,6 @@ pub(super) fn ask_ai_from_view(
     });
 }
 
-
 fn finish_ai_view(view: &crate::ui::AiChatView) {
     view.status.set_visible(false);
     view.ask.set_visible(true);

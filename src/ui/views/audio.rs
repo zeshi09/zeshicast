@@ -1,9 +1,9 @@
-use std::cell::Cell;
-use std::rc::Rc;
+use crate::{AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Image, Label, ListBox, Orientation, ProgressBar};
-use crate::{AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot};
+use std::cell::Cell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct AudioView {
@@ -25,7 +25,6 @@ pub struct AudioView {
     /// handlers don't fire `wpctl set-volume` back at the device.
     suppress_volume_cb: Rc<Cell<bool>>,
 }
-
 
 pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -162,7 +161,6 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     view
 }
 
-
 pub fn set_audio_snapshot(view: &AudioView, snapshot: &AudioSnapshot) {
     set_audio_device(
         &view.output_name,
@@ -246,7 +244,9 @@ fn populate_audio_device_list(view: &AudioView, list: &ListBox, devices: &[Audio
                             glib::ControlFlow::Break
                         }
                         Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            glib::ControlFlow::Break
+                        }
                     },
                 );
             });
@@ -255,7 +255,6 @@ fn populate_audio_device_list(view: &AudioView, list: &ListBox, devices: &[Audio
         list.append(&row);
     }
 }
-
 
 fn audio_device_row(name: &str, active: bool) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
@@ -297,7 +296,6 @@ fn audio_device_row(name: &str, active: bool) -> gtk::ListBoxRow {
     row.set_child(Some(&layout));
     row
 }
-
 
 fn set_audio_device(
     name: &Label,
@@ -394,4 +392,3 @@ fn audio_stream_row(stream: &AudioStreamSnapshot) -> gtk::ListBoxRow {
     row.set_child(Some(&layout));
     row
 }
-

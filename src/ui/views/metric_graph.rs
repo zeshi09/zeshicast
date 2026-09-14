@@ -1,8 +1,8 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use gtk::DrawingArea;
 use gtk::cairo;
 use gtk::prelude::*;
-use gtk::DrawingArea;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub const MAX_METRIC_SAMPLES: usize = 60;
 
@@ -128,22 +128,14 @@ fn get_control_points(
         0.0
     } else {
         let d = (p2.1 - p0.1) * 0.25;
-        if d * slope < 0.0 {
-            0.0
-        } else {
-            d
-        }
+        if d * slope < 0.0 { 0.0 } else { d }
     };
 
     let dy2 = if slope.abs() < 1e-6 {
         0.0
     } else {
         let d = (p3.1 - p1.1) * 0.25;
-        if d * slope < 0.0 {
-            0.0
-        } else {
-            d
-        }
+        if d * slope < 0.0 { 0.0 } else { d }
     };
 
     let cp1_x = (p1.0 + dx / 3.0).clamp(p1.0, p2.0);
@@ -204,4 +196,3 @@ mod tests {
         assert_eq!(*vals.last().unwrap(), 1.0);
     }
 }
-

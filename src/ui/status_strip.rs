@@ -2,7 +2,9 @@ use chrono::Local;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Label, Orientation};
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use crate::{AudioSnapshot, BatterySnapshot, MediaSnapshot, NetworkSnapshot};
 
@@ -16,6 +18,15 @@ pub struct StatusStrip {
     audio: Label,
     media: Label,
     layout: Label,
+    /// The chips enabled through the `status_items` preference.
+    items: Rc<RefCell<HashSet<String>>>,
+}
+
+/// Whether a chip should be on screen. `has_data` is what the latest snapshot
+/// says; the preference wins, so a snapshot can never resurrect a chip the user
+/// turned off (M-8).
+fn chip_visible(enabled: &HashSet<String>, name: &str, has_data: bool) -> bool {
+    has_data && enabled.contains(name)
 }
 
 impl StatusStrip {
@@ -73,6 +84,7 @@ impl StatusStrip {
             audio,
             media,
             layout,
+            items: Rc::new(RefCell::new(default_items())),
         };
         strip.refresh();
         strip.start_clock();
@@ -84,14 +96,22 @@ impl StatusStrip {
     }
 
     pub fn set_items(&self, items: &[String]) {
-        let enabled = items.iter().map(String::as_str).collect::<HashSet<_>>();
-        self.clock.set_visible(enabled.contains("clock"));
-        self.date.set_visible(enabled.contains("date"));
-        self.network.set_visible(enabled.contains("network"));
-        self.battery.set_visible(enabled.contains("battery"));
-        self.audio.set_visible(enabled.contains("audio"));
-        self.media.set_visible(enabled.contains("media"));
-        self.layout.set_visible(enabled.contains("layout"));
+        self.items.replace(items.iter().cloned().collect());
+        for (chip, name) in [
+            (&self.clock, "clock"),
+            (&self.date, "date"),
+            (&self.network, "network"),
+            (&self.battery, "battery"),
+            (&self.audio, "audio"),
+            (&self.media, "media"),
+            (&self.layout, "layout"),
+        ] {
+            chip.set_visible(self.items.borrow().contains(name));
+        }
+    }
+
+    fn show_chip(&self, chip: &Label, name: &str, has_data: bool) {
+        chip.set_visible(chip_visible(&self.items.borrow(), name, has_data));
     }
 
     fn refresh(&self) {
@@ -118,7 +138,7 @@ impl StatusStrip {
             .find(|i| i.name != "lo" && i.state == "up")
             .or_else(|| snapshot.interfaces.iter().find(|i| i.name != "lo"));
         let Some(iface) = iface else {
-            self.network.set_visible(false);
+            self.show_chip(&self.network, "network", false);
             return;
         };
         let connected = iface.state == "up";
@@ -129,7 +149,7 @@ impl StatusStrip {
         };
         let text = format!("✻  {label}");
         self.network.set_text(&text);
-        self.network.set_visible(true);
+        self.show_chip(&self.network, "network", true);
         if connected {
             self.network.add_css_class("active");
         } else {
@@ -139,7 +159,7 @@ impl StatusStrip {
 
     pub fn set_battery_snapshot(&self, snapshot: &BatterySnapshot) {
         let Some(battery) = snapshot.primary() else {
-            self.battery.set_visible(false);
+            self.show_chip(&self.battery, "battery", false);
             return;
         };
         let capacity = battery
@@ -149,7 +169,7 @@ impl StatusStrip {
         let charging = battery.status.as_deref() == Some("Charging");
         let icon = if charging { "⚡" } else { "♦" };
         self.battery.set_text(&format!("{icon}  {capacity}"));
-        self.battery.set_visible(true);
+        self.show_chip(&self.battery, "battery", true);
         if charging {
             self.battery.add_css_class("active");
         } else {
@@ -159,7 +179,7 @@ impl StatusStrip {
 
     pub fn set_audio_snapshot(&self, snapshot: &AudioSnapshot) {
         let Some(output) = &snapshot.output else {
-            self.audio.set_visible(false);
+            self.show_chip(&self.audio, "audio", false);
             return;
         };
         let text = if output.muted {
@@ -168,7 +188,7 @@ impl StatusStrip {
             format!("♩  {}%", output.volume_percent)
         };
         self.audio.set_text(&text);
-        self.audio.set_visible(true);
+        self.show_chip(&self.audio, "audio", true);
         if !output.muted {
             self.audio.add_css_class("active");
         } else {
@@ -194,24 +214,24 @@ impl StatusStrip {
                 title.to_string()
             };
             self.media.set_text(&format!("{icon}  {short_title}"));
-            self.media.set_visible(true);
+            self.show_chip(&self.media, "media", true);
             if playing {
                 self.media.add_css_class("active");
             } else {
                 self.media.remove_css_class("active");
             }
         } else {
-            self.media.set_visible(false);
+            self.show_chip(&self.media, "media", false);
         }
     }
 
     pub fn set_keyboard_layout(&self, code: Option<&str>) {
         let Some(code) = code.filter(|c| !c.is_empty()) else {
-            self.layout.set_visible(false);
+            self.show_chip(&self.layout, "layout", false);
             return;
         };
         self.layout.set_text(&format!("⌨  {}", code.to_uppercase()));
-        self.layout.set_visible(true);
+        self.show_chip(&self.layout, "layout", true);
         self.layout.add_css_class("active");
     }
 }
@@ -222,10 +242,52 @@ impl Default for StatusStrip {
     }
 }
 
+fn default_items() -> HashSet<String> {
+    [
+        "clock", "date", "network", "battery", "audio", "media", "layout",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
+}
+
 fn status_chip() -> Label {
     let label = Label::new(None);
     label.add_css_class("status-chip");
     label.set_valign(gtk::Align::Center);
     label.set_visible(false);
     label
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_disabled_chip_stays_hidden_when_a_snapshot_arrives() {
+        let enabled = ["clock", "date"]
+            .into_iter()
+            .map(String::from)
+            .collect::<HashSet<_>>();
+
+        assert!(chip_visible(&enabled, "clock", true));
+        assert!(!chip_visible(&enabled, "clock", false), "no data, no chip");
+        assert!(
+            !chip_visible(&enabled, "network", true),
+            "arriving data must not override the status_items preference"
+        );
+    }
+
+    #[test]
+    fn default_items_show_every_chip() {
+        let enabled = default_items();
+        for name in [
+            "clock", "date", "network", "battery", "audio", "media", "layout",
+        ] {
+            assert!(
+                chip_visible(&enabled, name, true),
+                "{name} is on by default"
+            );
+        }
+    }
 }

@@ -1,7 +1,7 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Entry, Label, Orientation};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct EmojiPickerView {
@@ -178,4 +178,3 @@ fn populate_emoji_flow(flow: &gtk::FlowBox, category: &str, query: &str, confirm
         flow.insert(&btn, -1);
     }
 }
-

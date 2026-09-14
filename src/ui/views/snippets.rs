@@ -1,13 +1,12 @@
+use crate::SnippetSummary;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Label, ListBox, Orientation};
-use crate::SnippetSummary;
 
 #[derive(Clone)]
 pub struct SnippetManagerView {
     pub root: GtkBox,
     pub list: ListBox,
 }
-
 
 pub fn snippet_manager_view(items: &[SnippetSummary]) -> SnippetManagerView {
     let root = super::panel_root(8, 12);
@@ -24,7 +23,6 @@ pub fn snippet_manager_view(items: &[SnippetSummary]) -> SnippetManagerView {
     SnippetManagerView { root, list }
 }
 
-
 pub fn set_snippet_items(list: &ListBox, items: &[SnippetSummary]) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -38,7 +36,6 @@ pub fn set_snippet_items(list: &ListBox, items: &[SnippetSummary]) {
         list.select_row(Some(&row));
     }
 }
-
 
 fn snippet_row(item: &SnippetSummary) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
@@ -77,4 +74,3 @@ fn snippet_row(item: &SnippetSummary) -> gtk::ListBoxRow {
     row.set_child(Some(&layout));
     row
 }
-

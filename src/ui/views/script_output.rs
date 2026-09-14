@@ -8,7 +8,6 @@ pub struct ScriptOutputView {
     pub output: gtk::Label,
 }
 
-
 pub fn script_output_view() -> ScriptOutputView {
     let root = super::panel_root(10, 12);
     root.set_vexpand(true);
@@ -44,4 +43,3 @@ pub fn set_script_output(view: &ScriptOutputView, script_title: &str, stdout: &s
     view.title.set_text(&format!("Script: {script_title}"));
     view.output.set_text(stdout.trim());
 }
-

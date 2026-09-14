@@ -1,6 +1,6 @@
+use crate::NotificationSnapshot;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, ListBox, ListBoxRow, Orientation};
-use crate::NotificationSnapshot;
 
 #[derive(Clone)]
 pub struct NotificationsView {
@@ -14,7 +14,6 @@ pub struct NotificationsView {
     pub close_all: Button,
     pub open_panel: Button,
 }
-
 
 pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView {
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -87,7 +86,6 @@ pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView 
     set_notification_snapshot(&view, snapshot);
     view
 }
-
 
 pub fn set_notification_snapshot(view: &NotificationsView, snapshot: &NotificationSnapshot) {
     let backend_text = snapshot.backend.as_deref().unwrap_or("No backend");
@@ -201,4 +199,3 @@ fn notification_history_row(
     row.set_child(Some(&layout));
     row
 }
-

@@ -1,4 +1,4 @@
-use gtk::{gdk, CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION};
+use gtk::{CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION, gdk};
 
 use crate::{home_dir, load_preferences_or_default};
 

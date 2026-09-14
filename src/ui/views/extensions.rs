@@ -1,13 +1,12 @@
+use crate::CommandSummary;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Label, ListBox, Orientation};
-use crate::CommandSummary;
 
 #[derive(Clone)]
 pub struct ExtensionBrowserView {
     pub root: GtkBox,
     pub list: ListBox,
 }
-
 
 pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserView {
     let root = super::panel_root(8, 12);
@@ -45,7 +44,6 @@ pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserVi
     root.append(&scroller);
     ExtensionBrowserView { root, list }
 }
-
 
 fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
@@ -167,4 +165,3 @@ fn extension_section_header(title: &str, detail: &str) -> gtk::ListBoxRow {
     row.set_child(Some(&layout));
     row
 }
-

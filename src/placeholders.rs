@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Local};
 
-use crate::{format_number, Calculator};
+use crate::{Calculator, format_number};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PlaceholderContext<'a> {

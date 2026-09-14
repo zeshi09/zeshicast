@@ -60,25 +60,130 @@ pub fn window_grid_view() -> WindowGridView {
     hints_box.add_css_class("grid-hints-box");
 
     let row1 = GtkBox::new(Orientation::Horizontal, 8);
-    row1.append(&grid_hint_btn("H", "Left Half", WindowSnapPosition::LeftHalf, &current_position, &drawing_area, &status_label));
-    row1.append(&grid_hint_btn("L", "Right Half", WindowSnapPosition::RightHalf, &current_position, &drawing_area, &status_label));
-    row1.append(&grid_hint_btn("K", "Top Half", WindowSnapPosition::TopHalf, &current_position, &drawing_area, &status_label));
-    row1.append(&grid_hint_btn("J", "Bottom Half", WindowSnapPosition::BottomHalf, &current_position, &drawing_area, &status_label));
-    row1.append(&grid_hint_btn("F", "Fullscreen", WindowSnapPosition::Fullscreen, &current_position, &drawing_area, &status_label));
-    row1.append(&grid_hint_btn("C", "Center", WindowSnapPosition::Center, &current_position, &drawing_area, &status_label));
+    row1.append(&grid_hint_btn(
+        "H",
+        "Left Half",
+        WindowSnapPosition::LeftHalf,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row1.append(&grid_hint_btn(
+        "L",
+        "Right Half",
+        WindowSnapPosition::RightHalf,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row1.append(&grid_hint_btn(
+        "K",
+        "Top Half",
+        WindowSnapPosition::TopHalf,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row1.append(&grid_hint_btn(
+        "J",
+        "Bottom Half",
+        WindowSnapPosition::BottomHalf,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row1.append(&grid_hint_btn(
+        "F",
+        "Fullscreen",
+        WindowSnapPosition::Fullscreen,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row1.append(&grid_hint_btn(
+        "C",
+        "Center",
+        WindowSnapPosition::Center,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
 
     let row2 = GtkBox::new(Orientation::Horizontal, 8);
-    row2.append(&grid_hint_btn("1", "Left ⅓", WindowSnapPosition::FirstThird, &current_position, &drawing_area, &status_label));
-    row2.append(&grid_hint_btn("2", "Mid ⅓", WindowSnapPosition::CenterThird, &current_position, &drawing_area, &status_label));
-    row2.append(&grid_hint_btn("3", "Right ⅓", WindowSnapPosition::RightThird, &current_position, &drawing_area, &status_label));
-    row2.append(&grid_hint_btn("4", "Left ⅔", WindowSnapPosition::LeftTwoThirds, &current_position, &drawing_area, &status_label));
-    row2.append(&grid_hint_btn("5", "Right ⅔", WindowSnapPosition::RightTwoThirds, &current_position, &drawing_area, &status_label));
+    row2.append(&grid_hint_btn(
+        "1",
+        "Left ⅓",
+        WindowSnapPosition::FirstThird,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row2.append(&grid_hint_btn(
+        "2",
+        "Mid ⅓",
+        WindowSnapPosition::CenterThird,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row2.append(&grid_hint_btn(
+        "3",
+        "Right ⅓",
+        WindowSnapPosition::RightThird,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row2.append(&grid_hint_btn(
+        "4",
+        "Left ⅔",
+        WindowSnapPosition::LeftTwoThirds,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row2.append(&grid_hint_btn(
+        "5",
+        "Right ⅔",
+        WindowSnapPosition::RightTwoThirds,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
 
     let row3 = GtkBox::new(Orientation::Horizontal, 8);
-    row3.append(&grid_hint_btn("U", "Top-Left ¼", WindowSnapPosition::TopLeftQuarter, &current_position, &drawing_area, &status_label));
-    row3.append(&grid_hint_btn("I", "Top-Right ¼", WindowSnapPosition::TopRightQuarter, &current_position, &drawing_area, &status_label));
-    row3.append(&grid_hint_btn("N", "Bottom-Left ¼", WindowSnapPosition::BottomLeftQuarter, &current_position, &drawing_area, &status_label));
-    row3.append(&grid_hint_btn("M", "Bottom-Right ¼", WindowSnapPosition::BottomRightQuarter, &current_position, &drawing_area, &status_label));
+    row3.append(&grid_hint_btn(
+        "U",
+        "Top-Left ¼",
+        WindowSnapPosition::TopLeftQuarter,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row3.append(&grid_hint_btn(
+        "I",
+        "Top-Right ¼",
+        WindowSnapPosition::TopRightQuarter,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row3.append(&grid_hint_btn(
+        "N",
+        "Bottom-Left ¼",
+        WindowSnapPosition::BottomLeftQuarter,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
+    row3.append(&grid_hint_btn(
+        "M",
+        "Bottom-Right ¼",
+        WindowSnapPosition::BottomRightQuarter,
+        &current_position,
+        &drawing_area,
+        &status_label,
+    ));
 
     hints_box.append(&row1);
     hints_box.append(&row2);
@@ -142,10 +247,34 @@ fn draw_grid(cr: &cairo::Context, w: f64, h: f64, pos: WindowSnapPosition) {
     // Outer screen frame (dark bezel)
     cr.save().ok();
     cr.new_sub_path();
-    cr.arc(x0 + mon_w - radius, y0 + radius, radius, -std::f64::consts::FRAC_PI_2, 0.0);
-    cr.arc(x0 + mon_w - radius, y0 + mon_h - radius, radius, 0.0, std::f64::consts::FRAC_PI_2);
-    cr.arc(x0 + radius, y0 + mon_h - radius, radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-    cr.arc(x0 + radius, y0 + radius, radius, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
+    cr.arc(
+        x0 + mon_w - radius,
+        y0 + radius,
+        radius,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    );
+    cr.arc(
+        x0 + mon_w - radius,
+        y0 + mon_h - radius,
+        radius,
+        0.0,
+        std::f64::consts::FRAC_PI_2,
+    );
+    cr.arc(
+        x0 + radius,
+        y0 + mon_h - radius,
+        radius,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    cr.arc(
+        x0 + radius,
+        y0 + radius,
+        radius,
+        std::f64::consts::PI,
+        3.0 * std::f64::consts::FRAC_PI_2,
+    );
     cr.close_path();
 
     cr.set_source_rgba(0.10, 0.11, 0.14, 0.95);
@@ -184,16 +313,25 @@ fn draw_grid(cr: &cairo::Context, w: f64, h: f64, pos: WindowSnapPosition) {
         WindowSnapPosition::TopHalf => (x0, y0, mon_w, mon_h * 0.5),
         WindowSnapPosition::BottomHalf => (x0, y0 + mon_h * 0.5, mon_w, mon_h * 0.5),
         WindowSnapPosition::Fullscreen => (x0, y0, mon_w, mon_h),
-        WindowSnapPosition::Center => (x0 + mon_w * 0.15, y0 + mon_h * 0.1, mon_w * 0.7, mon_h * 0.8),
+        WindowSnapPosition::Center => (
+            x0 + mon_w * 0.15,
+            y0 + mon_h * 0.1,
+            mon_w * 0.7,
+            mon_h * 0.8,
+        ),
         WindowSnapPosition::TopLeftQuarter => (x0, y0, mon_w * 0.5, mon_h * 0.5),
         WindowSnapPosition::TopRightQuarter => (x0 + mon_w * 0.5, y0, mon_w * 0.5, mon_h * 0.5),
         WindowSnapPosition::BottomLeftQuarter => (x0, y0 + mon_h * 0.5, mon_w * 0.5, mon_h * 0.5),
-        WindowSnapPosition::BottomRightQuarter => (x0 + mon_w * 0.5, y0 + mon_h * 0.5, mon_w * 0.5, mon_h * 0.5),
+        WindowSnapPosition::BottomRightQuarter => {
+            (x0 + mon_w * 0.5, y0 + mon_h * 0.5, mon_w * 0.5, mon_h * 0.5)
+        }
         WindowSnapPosition::FirstThird => (x0, y0, mon_w / 3.0, mon_h),
         WindowSnapPosition::CenterThird => (x0 + mon_w / 3.0, y0, mon_w / 3.0, mon_h),
         WindowSnapPosition::RightThird => (x0 + mon_w * (2.0 / 3.0), y0, mon_w / 3.0, mon_h),
         WindowSnapPosition::LeftTwoThirds => (x0, y0, mon_w * (2.0 / 3.0), mon_h),
-        WindowSnapPosition::RightTwoThirds => (x0 + mon_w * (1.0 / 3.0), y0, mon_w * (2.0 / 3.0), mon_h),
+        WindowSnapPosition::RightTwoThirds => {
+            (x0 + mon_w * (1.0 / 3.0), y0, mon_w * (2.0 / 3.0), mon_h)
+        }
     };
 
     let inner_pad = 4.0;
@@ -205,10 +343,34 @@ fn draw_grid(cr: &cairo::Context, w: f64, h: f64, pos: WindowSnapPosition) {
 
     cr.save().ok();
     cr.new_sub_path();
-    cr.arc(hx + hw - snap_radius, hy + snap_radius, snap_radius, -std::f64::consts::FRAC_PI_2, 0.0);
-    cr.arc(hx + hw - snap_radius, hy + hh - snap_radius, snap_radius, 0.0, std::f64::consts::FRAC_PI_2);
-    cr.arc(hx + snap_radius, hy + hh - snap_radius, snap_radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-    cr.arc(hx + snap_radius, hy + snap_radius, snap_radius, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
+    cr.arc(
+        hx + hw - snap_radius,
+        hy + snap_radius,
+        snap_radius,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    );
+    cr.arc(
+        hx + hw - snap_radius,
+        hy + hh - snap_radius,
+        snap_radius,
+        0.0,
+        std::f64::consts::FRAC_PI_2,
+    );
+    cr.arc(
+        hx + snap_radius,
+        hy + hh - snap_radius,
+        snap_radius,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    cr.arc(
+        hx + snap_radius,
+        hy + snap_radius,
+        snap_radius,
+        std::f64::consts::PI,
+        3.0 * std::f64::consts::FRAC_PI_2,
+    );
     cr.close_path();
 
     // Accent fill (#8ab4f8 with 35% alpha)

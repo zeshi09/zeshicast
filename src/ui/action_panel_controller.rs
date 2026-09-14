@@ -1,16 +1,15 @@
 #![allow(clippy::too_many_arguments)]
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use gtk::prelude::*;
-use gtk::{ApplicationWindow, Box as GtkBox, Entry, ListBox};
-use crate::{
-    Action, ActionPanelSection, SecondaryActionKind, Zeshicast,
-    ui::ActionPanelDisplayItem,
-};
 use super::launcher::{
     run_secondary_action_or_confirm, selected_action, show_root_view, update_results,
 };
+use crate::{
+    Action, ActionPanelSection, SecondaryActionKind, Zeshicast, ui::ActionPanelDisplayItem,
+};
+use gtk::prelude::*;
+use gtk::{ApplicationWindow, Box as GtkBox, Entry, ListBox};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub(crate) struct ActionPanelItem {
@@ -148,7 +147,9 @@ pub(crate) fn action_panel_display_rows(items: &[ActionPanelItem]) -> Vec<Displa
     result
 }
 
-pub(crate) fn action_panel_display_items(rows: &[DisplayedActionPanelRow]) -> Vec<ActionPanelDisplayItem> {
+pub(crate) fn action_panel_display_items(
+    rows: &[DisplayedActionPanelRow],
+) -> Vec<ActionPanelDisplayItem> {
     rows.iter()
         .map(|row| match row {
             DisplayedActionPanelRow::Header(section) => ActionPanelDisplayItem {
