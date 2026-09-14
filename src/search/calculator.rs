@@ -19,6 +19,26 @@ pub(crate) fn format_number(value: f64) -> String {
     }
 }
 
+/// The result of `expr` as a first-class action: `=2+2` and `calc 2+2` both run
+/// this, so the calculator row behaves like any other row (B-4).
+///
+/// Returns `None` when the expression does not parse, so callers can decide how
+/// loud to be about it.
+pub(crate) fn calc_action(expr: &str) -> Option<crate::Action> {
+    let value = Calculator::new(expr).parse().ok()?;
+    let result = format_number(value);
+    Some(
+        crate::Action::new(
+            "Calculator",
+            format!("{expr} = {result}"),
+            crate::ActionKind::Copy(result),
+            1000,
+        )
+        .with_subtitle("Copy result to clipboard")
+        .with_icon("accessories-calculator-symbolic"),
+    )
+}
+
 pub(crate) struct Calculator<'a> {
     input: &'a [u8],
     pos: usize,

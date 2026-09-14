@@ -82,16 +82,7 @@ impl SearchData {
         if lower.starts_with("calc ") || crate::looks_like_expression(trimmed) {
             let expr = trimmed.strip_prefix("calc ").unwrap_or(trimmed).trim();
             match crate::Calculator::new(expr).parse() {
-                Ok(value) => actions.push(
-                    Action::new(
-                        "Calculator",
-                        format!("{expr} = {}", crate::format_number(value)),
-                        ActionKind::Copy(crate::format_number(value)),
-                        1000,
-                    )
-                    .with_subtitle("Copy result to clipboard")
-                    .with_icon("accessories-calculator-symbolic"),
-                ),
+                Ok(_) => actions.extend(crate::calc_action(expr)),
                 Err(error) if lower.starts_with("calc ") => actions.push(
                     Action::new(
                         "Calculator",

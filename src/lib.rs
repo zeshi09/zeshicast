@@ -49,7 +49,7 @@ pub(crate) use placeholders::{PlaceholderContext, expand_placeholders, expand_pl
 #[cfg(test)]
 pub(crate) use search::apps::clean_desktop_exec;
 pub(crate) use search::apps::{AppEntry, app_action, load_apps, search_apps};
-pub(crate) use search::calculator::{Calculator, format_number, looks_like_expression};
+pub(crate) use search::calculator::{Calculator, calc_action, format_number, looks_like_expression};
 pub(crate) use search::clipboard::{
     MAX_CLIPBOARD_ENTRIES, clipboard_preview, load_clipboard_history, normalize_clipboard_text,
     search_clipboard,

@@ -1388,10 +1388,12 @@ pub(crate) fn render_results(
         list.remove(&child);
     }
 
-    // Calculator inline result
-    if query.starts_with('=') {
-        let expr = query.trim_start_matches('=').trim();
-        list.append(&calc_result_row(expr));
+    // Calculator inline result. It is appended here (so it is the first row) and
+    // prepended to `displayed_actions` below, which is what keeps `results[i]`
+    // aligned with the row the user highlighted.
+    let calc = calc_row_action(query);
+    if let Some(action) = &calc {
+        list.append(&crate::ui::result_row(action));
     }
 
     let displayed_actions = if query.trim().is_empty() {
@@ -1439,6 +1441,8 @@ pub(crate) fn render_results(
     } else {
         Vec::new()
     };
+
+    let displayed_actions = with_calc_row_first(calc, displayed_actions);
 
     let total = displayed_actions.len();
     *results.borrow_mut() = displayed_actions;
@@ -1489,71 +1493,25 @@ fn set_raw_result_actions(
     select_first_action_row(list);
 }
 
-fn calc_result_row(expr: &str) -> gtk::ListBoxRow {
-    use gtk::prelude::*;
-    let row = gtk::ListBoxRow::new();
-    row.add_css_class("result-row");
-    row.set_selectable(true);
-
-    let layout = GtkBox::new(Orientation::Horizontal, 12);
-    layout.set_margin_start(14);
-    layout.set_margin_end(14);
-    layout.set_valign(gtk::Align::Center);
-
-    // Calculator icon badge
-    let badge = Label::new(Some("="));
-    badge.add_css_class("mode-badge");
-    badge.set_valign(gtk::Align::Center);
-    layout.append(&badge);
-
-    let text_col = GtkBox::new(Orientation::Vertical, 2);
-    text_col.set_hexpand(true);
-    text_col.set_valign(gtk::Align::Center);
-
-    let expr_lbl = Label::new(Some(if expr.is_empty() {
-        "Enter expression…"
-    } else {
-        expr
-    }));
-    expr_lbl.add_css_class("result-subtitle");
-    expr_lbl.set_xalign(0.0);
-    text_col.append(&expr_lbl);
-
-    // Evaluate
-    let result_text = if expr.is_empty() {
-        "0".to_string()
-    } else {
-        evaluate_expr(expr)
-    };
-
-    let result_lbl = Label::new(Some(&result_text));
-    result_lbl.add_css_class("metric-value");
-    result_lbl.set_xalign(0.0);
-    text_col.append(&result_lbl);
-
-    layout.append(&text_col);
-
-    let hint = Label::new(Some("⌃C"));
-    hint.add_css_class("ctrl-k-hint");
-    hint.set_valign(gtk::Align::Center);
-    layout.append(&hint);
-
-    row.set_child(Some(&layout));
-    row
+/// The actions the list will show, calculator row first (B-4). It has to match
+/// the order in which the rows are appended above.
+fn with_calc_row_first(calc: Option<Action>, actions: Vec<Action>) -> Vec<Action> {
+    match calc {
+        Some(action) => std::iter::once(action).chain(actions).collect(),
+        None => actions,
+    }
 }
 
-fn evaluate_expr(expr: &str) -> String {
-    // Simple safe evaluator: only digits, operators, parens, spaces, dots
-    let safe: String = expr
-        .chars()
-        .filter(|c| c.is_ascii_digit() || "+-*/()%. \t.".contains(*c))
-        .collect();
-    if safe.is_empty() {
-        return "—".to_string();
-    }
-    // Use the existing calculator from the search module if available
-    // Fallback: return expression as-is (the search module handles evaluation)
-    safe
+/// The calculator row for a `=…` query, as a real action (B-4).
+///
+/// The row used to be a hand-built widget that was *not* part of
+/// `results`, while `action_index_for_row` counts selectable rows: every action
+/// below it was reachable one row too high, and highlighting the calculator row
+/// ran somebody else's action. The old fake "evaluator" also just echoed the
+/// expression back, so `=2+2` displayed `2+2` instead of `4`.
+fn calc_row_action(query: &str) -> Option<Action> {
+    let expr = query.strip_prefix('=')?.trim();
+    crate::calc_action(expr)
 }
 
 fn append_grouped_root_actions(
@@ -2589,24 +2547,26 @@ fn action_for_row(
 }
 
 fn action_index_for_row(list: &ListBox, row: &gtk::ListBoxRow) -> Option<usize> {
-    if !row.is_selectable() {
+    let mut selectable = Vec::new();
+    let mut index = 0;
+    while let Some(candidate) = list.row_at_index(index) {
+        selectable.push(candidate.is_selectable());
+        index += 1;
+    }
+    action_index_for_rows(&selectable, row.index() as usize)
+}
+
+/// Which action a highlighted row displays (B-4).
+///
+/// `selectable[i]` says whether row `i` can be highlighted. Non-selectable rows
+/// (section headers, the empty-state label) hold no action, so they are skipped
+/// rather than counted -- but a *selectable* row with no action behind it shifts
+/// every row below it, which is what the calculator row used to do.
+fn action_index_for_rows(selectable: &[bool], row_index: usize) -> Option<usize> {
+    if !selectable.get(row_index).copied().unwrap_or(false) {
         return None;
     }
-
-    let mut action_index = 0usize;
-    for index in 0..=row.index() {
-        let Some(candidate) = list.row_at_index(index) else {
-            continue;
-        };
-        if !candidate.is_selectable() {
-            continue;
-        }
-        if candidate == *row {
-            return Some(action_index);
-        }
-        action_index += 1;
-    }
-    None
+    Some(selectable[..=row_index].iter().filter(|on| **on).count() - 1)
 }
 
 /// Outcome of the capture path for a Script action. Distinguishes "the script
@@ -2839,9 +2799,9 @@ fn select_first_action_row(list: &ListBox) {
 mod tests {
     use super::{
         ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, ScriptCaptureOutcome,
-        action_panel_display_items, action_panel_display_rows, decode_clipboard_text,
-        empty_state_fallback_actions, read_png_from_stream, run_script_capture,
-        secondary_action_risk, watch_clipboard_text_with,
+        action_index_for_rows, action_panel_display_items, action_panel_display_rows,
+        calc_row_action, decode_clipboard_text, empty_state_fallback_actions, read_png_from_stream,
+        run_script_capture, secondary_action_risk, watch_clipboard_text_with, with_calc_row_first,
     };
     use crate::{
         Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
@@ -3262,5 +3222,59 @@ mod tests {
                 long_query.to_string()
             ))
         );
+    }
+    #[test]
+    fn calc_row_is_the_first_action() {
+        let calc = calc_row_action("=2+2").expect("2+2 is a valid expression");
+        let rows = with_calc_row_first(
+            Some(calc),
+            vec![Action::new("Other", "other", ActionKind::None, 1)],
+        );
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].category, "Calculator");
+        assert_eq!(rows[0].title, "2+2 = 4");
+        assert_eq!(rows[1].title, "other");
+    }
+
+    #[test]
+    fn calc_row_copies_the_result() {
+        let action = calc_row_action("=2+2").expect("2+2 is a valid expression");
+        assert!(
+            matches!(&action.kind, ActionKind::Copy(value) if value == "4"),
+            "the row must copy the result, got {:?}",
+            action.kind
+        );
+    }
+
+    #[test]
+    fn a_query_without_a_calculator_row_is_left_alone() {
+        assert!(
+            calc_row_action("2+2").is_none(),
+            "only `=` asks for the row"
+        );
+        let rows = with_calc_row_first(
+            None,
+            vec![Action::new("Other", "other", ActionKind::None, 1)],
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "other");
+    }
+
+    #[test]
+    fn row_index_maps_to_the_same_action() {
+        // [calculator, section header, action, action] -- the header is not
+        // selectable and must not shift the actions after it.
+        let selectable = [true, false, true, true];
+
+        assert_eq!(action_index_for_rows(&selectable, 0), Some(0));
+        assert_eq!(
+            action_index_for_rows(&selectable, 1),
+            None,
+            "a header displays no action"
+        );
+        assert_eq!(action_index_for_rows(&selectable, 2), Some(1));
+        assert_eq!(action_index_for_rows(&selectable, 3), Some(2));
+        assert_eq!(action_index_for_rows(&selectable, 4), None);
     }
 }
