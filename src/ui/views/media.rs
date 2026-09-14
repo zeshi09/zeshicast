@@ -4,6 +4,53 @@ use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Image, Label, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+/// How long a seek may take to show up in the player's position before the
+/// scrubber gives up on it (M-8).
+const SEEK_SETTLE: Duration = Duration::from_millis(1_500);
+/// A position this close to the requested one counts as "the seek landed".
+const SEEK_TOLERANCE_SECS: f64 = 0.5;
+
+/// Keeps the player's position from fighting the user's finger.
+///
+/// The refresh tick writes `snapshot.position_secs` into the scrubber, but a
+/// seek takes up to a second to be reflected by the player -- and until then the
+/// snapshot still holds the *old* position. So every seek was immediately undone
+/// on screen: the knob snapped back under the finger and only jumped forward once
+/// the player caught up.
+#[derive(Default)]
+struct ScrubState {
+    /// Position the user asked for, and when the request went out.
+    pending: RefCell<Option<(f64, Instant)>>,
+}
+
+impl ScrubState {
+    fn requested(&self, now: Instant, target: f64) {
+        *self.pending.borrow_mut() = Some((target, now));
+    }
+
+    /// Whether a snapshot position should be written into the slider.
+    fn accepts_snapshot(&self, now: Instant, position: f64) -> bool {
+        let mut pending = self.pending.borrow_mut();
+        let Some((target, requested_at)) = *pending else {
+            return true;
+        };
+
+        if (position - target).abs() <= SEEK_TOLERANCE_SECS {
+            // The player caught up; from here its position is the truth again.
+            *pending = None;
+            return true;
+        }
+        if now.duration_since(requested_at) >= SEEK_SETTLE {
+            // The seek never landed (unsupported by the player, or it failed).
+            // Freezing the scrubber forever would be worse than a wrong position.
+            *pending = None;
+            return true;
+        }
+        false
+    }
+}
 
 #[derive(Clone)]
 pub struct MediaView {
@@ -21,6 +68,7 @@ pub struct MediaView {
     pub art_icon: Label,
     /// Last art URL we loaded, so we don't refetch on every refresh tick.
     art_url: Rc<RefCell<Option<String>>>,
+    scrub: Rc<ScrubState>,
 }
 
 pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
@@ -136,11 +184,19 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     play_pause.connect_clicked(|_| crate::media_control(crate::MediaControl::PlayPause));
     seek_back.connect_clicked(|_| crate::media_control(crate::MediaControl::SeekBy(-10_000_000)));
     seek_fwd.connect_clicked(|_| crate::media_control(crate::MediaControl::SeekBy(10_000_000)));
-    scrubber.connect_change_value(|scale, _, val| {
-        // Relative seek by the delta between the dragged value and the current one.
-        let offset = ((val - scale.value()) * 1_000_000.0).round() as i64;
-        crate::media_control(crate::MediaControl::SeekBy(offset));
-        gtk::glib::Propagation::Proceed
+    let scrub_state = Rc::new(ScrubState::default());
+    scrubber.connect_change_value({
+        let state = Rc::clone(&scrub_state);
+        move |scale, _, val| {
+            // Relative seek by the delta between the dragged value and the value
+            // currently on screen. That base is our own, not the player's: while a
+            // seek is pending `accepts_snapshot` keeps the snapshots out, so the
+            // delta cannot be measured against a position the user never saw.
+            let offset = ((val - scale.value()) * 1_000_000.0).round() as i64;
+            state.requested(Instant::now(), val);
+            crate::media_control(crate::MediaControl::SeekBy(offset));
+            gtk::glib::Propagation::Proceed
+        }
     });
 
     controls.append(&previous);
@@ -170,6 +226,7 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
         art_picture,
         art_icon,
         art_url: Rc::new(RefCell::new(None)),
+        scrub: scrub_state,
     };
     set_media_snapshot(&view, snapshot);
     view
@@ -315,7 +372,9 @@ pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
             view.scrubber.set_range(0.0, len);
             view.time_total.set_text(&fmt_secs(len));
         }
-        if let Some(pos) = snapshot.position_secs {
+        if let Some(pos) = snapshot.position_secs
+            && view.scrub.accepts_snapshot(Instant::now(), pos)
+        {
             view.scrubber.set_value(pos);
             view.time_pos.set_text(&fmt_secs(pos));
         }
@@ -331,5 +390,49 @@ pub fn set_media_snapshot(view: &MediaView, snapshot: &MediaSnapshot) {
         view.scrubber.set_sensitive(false);
         view.time_pos.set_text("0:00");
         view.time_total.set_text("0:00");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_snapshot_does_not_yank_the_scrubber_while_a_seek_is_in_flight() {
+        let state = ScrubState::default();
+        let requested_at = Instant::now();
+        state.requested(requested_at, 100.0);
+
+        assert!(
+            !state.accepts_snapshot(requested_at + Duration::from_millis(200), 12.0),
+            "the player is still reporting the pre-seek position"
+        );
+        assert!(
+            state.accepts_snapshot(requested_at + Duration::from_millis(600), 100.2),
+            "the player caught up, so its position is the truth again"
+        );
+        assert!(
+            state.accepts_snapshot(requested_at + Duration::from_secs(2), 100.9),
+            "and later snapshots flow normally"
+        );
+    }
+
+    #[test]
+    fn a_player_that_never_catches_up_does_not_freeze_the_scrubber() {
+        let state = ScrubState::default();
+        let requested_at = Instant::now();
+        state.requested(requested_at, 100.0);
+
+        assert!(!state.accepts_snapshot(requested_at, 12.0));
+        assert!(
+            state.accepts_snapshot(requested_at + SEEK_SETTLE, 12.0),
+            "a seek that never landed must not block the UI for good"
+        );
+    }
+
+    #[test]
+    fn snapshots_are_accepted_when_nothing_is_pending() {
+        let state = ScrubState::default();
+        assert!(state.accepts_snapshot(Instant::now(), 42.0));
     }
 }
