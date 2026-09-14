@@ -46,6 +46,7 @@ pub fn reap_finished_children() -> usize {
     process::reap_finished()
 }
 pub(crate) use placeholders::{PlaceholderContext, expand_placeholders, expand_placeholders_shell};
+pub(crate) use search::snapshot::SearchData;
 #[cfg(test)]
 pub(crate) use search::apps::clean_desktop_exec;
 pub(crate) use search::apps::{AppEntry, app_action, load_apps, search_apps};

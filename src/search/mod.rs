@@ -11,6 +11,7 @@ pub(crate) mod named_values;
 pub(crate) mod notifications;
 pub(crate) mod processes;
 pub(crate) mod scripts;
+pub(crate) mod snapshot;
 pub(crate) mod system;
 pub(crate) mod web;
 pub(crate) mod windows;
