@@ -306,10 +306,14 @@ fn build_ui(
             let list = list.clone();
             let result_counter = result_counter.clone();
             let displayed_query = query.clone();
-            let searching = Rc::clone(&launcher);
-            search_flow.request(
+            let snapshot_source = Rc::clone(&launcher);
+            search_flow.request_off_thread(
                 query,
-                move |query| searching.borrow().search(query),
+                // The snapshot is taken on the main thread (cheap clones)...
+                move || snapshot_source.borrow().search_data(),
+                // ...the search runs on a worker thread (providers fork processes)...
+                |data: &crate::SearchData, query| data.search(query),
+                // ...and the result is rendered back on the main thread.
                 move |actions| {
                     render_results(
                         &launcher.borrow(),

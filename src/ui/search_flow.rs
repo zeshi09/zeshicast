@@ -11,8 +11,9 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use gtk::glib;
@@ -21,6 +22,9 @@ use crate::Action;
 
 /// How long the entry has to stay unchanged before the search runs.
 pub(crate) const SEARCH_DEBOUNCE: Duration = Duration::from_millis(80);
+
+/// How often the main loop checks whether the worker finished.
+pub(crate) const SEARCH_POLL: Duration = Duration::from_millis(25);
 
 /// A finished search may be shown only while its generation is still the
 /// current one.
@@ -106,6 +110,54 @@ impl Debounce {
     }
 }
 
+/// Runs `search` on a worker thread and returns the channel carrying its result
+/// back to the main loop.
+///
+/// A provider that panics must not take the palette down: the panic is caught,
+/// the sender is dropped, and the receiver reports `Disconnected`, which stops
+/// the poller and leaves the previous results on screen.
+fn spawn_search<Search>(search: Search) -> Receiver<Vec<Action>>
+where
+    Search: FnOnce() -> Vec<Action> + Send + 'static,
+{
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        if let Ok(actions) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(search)) {
+            let _ = sender.send(actions);
+        }
+    });
+    receiver
+}
+
+/// Waits for the worker's result on the main loop and delivers it only while its
+/// generation is still current (M-1).
+///
+/// The channel is polled instead of waking the main context from the worker:
+/// that keeps the palette free of an extra dependency, and the timer only exists
+/// while a search is in flight, so an idle palette gains no periodic wakeups.
+fn deliver_when_current<Deliver>(
+    generation: Generation,
+    token: u64,
+    receiver: Receiver<Vec<Action>>,
+    deliver: Deliver,
+) where
+    Deliver: FnOnce(Vec<Action>) + 'static,
+{
+    let deliver = RefCell::new(Some(deliver));
+    let _source = glib::timeout_add_local(SEARCH_POLL, move || match receiver.try_recv() {
+        Ok(actions) => {
+            if generation.is_current(token)
+                && let Some(deliver) = deliver.borrow_mut().take()
+            {
+                deliver(actions);
+            }
+            glib::ControlFlow::Break
+        }
+        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+    });
+}
+
 /// Debounce + generation for one search entry.
 #[derive(Clone)]
 pub(crate) struct SearchFlow {
@@ -130,8 +182,11 @@ impl SearchFlow {
         }
     }
 
-    /// Called for every keystroke: only the last query of a burst is searched,
-    /// and `deliver` runs only if no newer query arrived while `search` ran.
+    /// The synchronous variant of [`Self::request_off_thread`]: only the last
+    /// query of a burst is searched, and `deliver` runs only if no newer query
+    /// arrived while `search` ran. Kept for the coalescing tests, which need no
+    /// thread and no timing.
+    #[cfg(test)]
     pub(crate) fn request(
         &self,
         query: String,
@@ -141,6 +196,7 @@ impl SearchFlow {
         self.request_after(SEARCH_DEBOUNCE, query, search, deliver);
     }
 
+    #[cfg(test)]
     fn request_after(
         &self,
         delay: Duration,
@@ -155,6 +211,33 @@ impl SearchFlow {
             if generation.is_current(token) {
                 deliver(actions);
             }
+        });
+    }
+
+    /// Debounced search on a worker thread (M-1).
+    ///
+    /// `snapshot` builds the search inputs on the main thread when the delay
+    /// elapses, `search` runs off it, and `deliver` runs back on the main thread
+    /// -- only if no newer query was started in the meantime. Providers fork
+    /// processes, so this is what keeps typing responsive while a search runs.
+    pub(crate) fn request_off_thread<Data, Snapshot, Search, Deliver>(
+        &self,
+        query: String,
+        snapshot: Snapshot,
+        search: Search,
+        deliver: Deliver,
+    ) where
+        Data: Send + 'static,
+        Snapshot: FnOnce() -> Data + 'static,
+        Search: FnOnce(&Data, &str) -> Vec<Action> + Send + 'static,
+        Deliver: FnOnce(Vec<Action>) + 'static,
+    {
+        let generation = self.generation.clone();
+        self.debounce.arm(SEARCH_DEBOUNCE, move || {
+            let token = generation.begin();
+            let data = snapshot();
+            let receiver = spawn_search(move || search(&data, &query));
+            deliver_when_current(generation, token, receiver, deliver);
         });
     }
 }
@@ -193,6 +276,34 @@ mod tests {
                 None => break,
             }
         }
+    }
+
+    #[test]
+    fn search_runs_off_the_main_thread() {
+        let main_thread = std::thread::current().id();
+        let receiver = spawn_search(move || {
+            assert_ne!(
+                std::thread::current().id(),
+                main_thread,
+                "providers fork processes, so the search must not run on the main loop"
+            );
+            Vec::new()
+        });
+
+        assert!(
+            receiver.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "the result comes back over the channel"
+        );
+    }
+
+    #[test]
+    fn a_panicking_search_does_not_wedge_the_flow() {
+        let receiver = spawn_search(|| panic!("provider blew up"));
+
+        assert!(
+            receiver.recv_timeout(Duration::from_secs(5)).is_err(),
+            "a panicking provider closes the channel instead of hanging the palette"
+        );
     }
 
     #[test]
