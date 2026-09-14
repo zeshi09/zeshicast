@@ -540,7 +540,10 @@ fn niri_window_actions(
         .iter()
         .filter_map(|w| {
             let id = w.get("id").and_then(|v| v.as_u64())?;
-            let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("(no title)");
+            let title = w
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no title)");
             let app_id = w.get("app_id").and_then(|v| v.as_str()).unwrap_or("");
             let haystack = format!("{title} {app_id}");
             let score = if needle.is_empty() {
@@ -585,7 +588,10 @@ fn hyprland_window_actions(
         .iter()
         .filter_map(|w| {
             let addr = w.get("address").and_then(|v| v.as_str())?;
-            let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("(no title)");
+            let title = w
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no title)");
             let class = w.get("class").and_then(|v| v.as_str()).unwrap_or("");
             let haystack = format!("{title} {class}");
             let score = if needle.is_empty() {
@@ -658,7 +664,10 @@ fn sway_window_actions(
         .iter()
         .filter_map(|w| {
             let id = w.get("id").and_then(|v| v.as_u64())?;
-            let title = w.get("name").and_then(|v| v.as_str()).unwrap_or("(no title)");
+            let title = w
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no title)");
             let app_id = w.get("app_id").and_then(|v| v.as_str()).unwrap_or("");
             let haystack = format!("{title} {app_id}");
             let score = if needle.is_empty() {
@@ -786,4 +795,3 @@ mod tests {
         assert!(output.is_none());
     }
 }
-

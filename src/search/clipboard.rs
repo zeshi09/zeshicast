@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-use crate::{fuzzy_score, Action, ActionKind, MAX_RESULTS};
+use crate::{Action, ActionKind, MAX_RESULTS, fuzzy_score};
 
 pub(crate) const MAX_CLIPBOARD_ENTRIES: usize = 100;
 pub(crate) const MAX_CLIPBOARD_TEXT_BYTES: usize = 20_000;

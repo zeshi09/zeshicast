@@ -180,6 +180,10 @@ impl SearchProvider for ClipboardProvider<'_> {
     }
 }
 
+/// Shorter fuzzy queries match almost everything in the index at full scan cost,
+/// so they are left to the explicit `file `/`find ` prefixes (M-6).
+const MIN_FUZZY_FILE_QUERY: usize = 3;
+
 pub(crate) struct FilesProvider<'a> {
     pub(crate) files: &'a [FileEntry],
 }
@@ -194,7 +198,7 @@ impl SearchProvider for FilesProvider<'_> {
                 .map(|(_, value)| value.trim())
                 .unwrap_or_default();
             search_files(self.files, needle, true)
-        } else if query.trim().len() >= 2 {
+        } else if query.trim().len() >= MIN_FUZZY_FILE_QUERY {
             search_files(self.files, query, false)
         } else {
             Vec::new()
@@ -241,20 +245,27 @@ impl SearchProvider for EmojiProvider {
 }
 
 pub(crate) fn fuzzy_score(text: &str, query: &str) -> Option<i32> {
-    let query = query.trim().to_lowercase();
+    fuzzy_score_lower(&text.to_lowercase(), &query.trim().to_lowercase())
+}
+
+/// [`fuzzy_score`] for a haystack *and* a query that are already lowercase
+/// (M-6).
+///
+/// The file index stores `name_lower` per entry and lowers the query once per
+/// search, so scanning 10 000 entries never allocates a string per entry.
+pub(crate) fn fuzzy_score_lower(text_lower: &str, query: &str) -> Option<i32> {
     if query.is_empty() {
         return None;
     }
 
-    let text_lower = text.to_lowercase();
     if text_lower == query {
         return Some(500);
     }
-    if text_lower.starts_with(&query) {
-        return Some(400 - text.len() as i32);
+    if text_lower.starts_with(query) {
+        return Some(400 - text_lower.len() as i32);
     }
-    if text_lower.contains(&query) {
-        return Some(300 - text_lower.find(&query).unwrap_or(0) as i32);
+    if text_lower.contains(query) {
+        return Some(300 - text_lower.find(query).unwrap_or(0) as i32);
     }
 
     let mut score = 0;

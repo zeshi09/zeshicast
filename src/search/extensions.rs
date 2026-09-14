@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::commands::{gate_action_intent, ActionIntent};
+use super::commands::{ActionIntent, gate_action_intent};
 use crate::{Action, Capability, CapabilitySet};
 
 pub use crate::services::extension_protocol::*;

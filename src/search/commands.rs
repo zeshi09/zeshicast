@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{
-    expand_placeholders, expand_placeholders_shell, fuzzy_score, normalize_alias, tagged_subtitle,
-    toml_value_string, Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind,
-    ActionRisk, Capability, CapabilitySet, CommandArgumentKind, ExtensionManifest, ExtensionOrigin,
-    JsonCommandAction, PlaceholderContext, ProcessCommand, ShellCommand,
+    Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
+    CapabilitySet, CommandArgumentKind, ExtensionManifest, ExtensionOrigin, JsonCommandAction,
+    PlaceholderContext, ProcessCommand, ShellCommand, expand_placeholders,
+    expand_placeholders_shell, fuzzy_score, normalize_alias, tagged_subtitle, toml_value_string,
 };
 
 #[derive(Debug, Clone)]
@@ -552,14 +552,16 @@ pub(crate) fn run_json_command_actions(action: &JsonCommandAction) -> Vec<Action
             action.score,
             &action.capabilities,
         ),
-        Err(error) => vec![Action::new(
-            &action.category,
-            "JSON command failed",
-            ActionKind::None,
-            action.score,
-        )
-        .with_subtitle(format!("JSON command failed: {error}"))
-        .with_icon("dialog-warning-symbolic")],
+        Err(error) => vec![
+            Action::new(
+                &action.category,
+                "JSON command failed",
+                ActionKind::None,
+                action.score,
+            )
+            .with_subtitle(format!("JSON command failed: {error}"))
+            .with_icon("dialog-warning-symbolic"),
+        ],
     }
 }
 
@@ -633,14 +635,16 @@ pub(crate) fn parse_json_actions(
     capabilities: &[Capability],
 ) -> Vec<Action> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(input) else {
-        return vec![Action::new(
-            category,
-            "Invalid JSON output",
-            ActionKind::None,
-            base_score,
-        )
-        .with_subtitle("Expected an array or {\"results\": [...]}")
-        .with_icon("dialog-warning-symbolic")];
+        return vec![
+            Action::new(
+                category,
+                "Invalid JSON output",
+                ActionKind::None,
+                base_score,
+            )
+            .with_subtitle("Expected an array or {\"results\": [...]}")
+            .with_icon("dialog-warning-symbolic"),
+        ];
     };
 
     let values = value

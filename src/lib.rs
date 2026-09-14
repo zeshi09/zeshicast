@@ -176,11 +176,7 @@ mod tests {
 
     #[test]
     fn file_search_uses_index_without_explicit_prefix() {
-        let files = vec![FileEntry {
-            name: "project-notes.md".to_string(),
-            path: PathBuf::from("/tmp/project-notes.md"),
-            is_dir: false,
-        }];
+        let files = vec![FileEntry::new("notes.txt", PathBuf::from("/home/user/notes.txt"), false)];
 
         let results = search_files(&files, "notes", false);
         assert_eq!(results.len(), 1);

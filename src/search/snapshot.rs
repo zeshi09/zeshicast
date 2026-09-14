@@ -13,16 +13,17 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::app::preference_enabled_value;
+use crate::search::files;
 use crate::{
-    app_action, fuzzy_score, normalize_alias, search_audio_actions, search_media_actions,
-    search_network_actions, search_notification_actions, search_system_actions, Action, ActionKind,
-    ActionTarget, AppEntry, AppsProvider, AudioProvider, BrowserTabsProvider, CalcHistoryEntry,
-    ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExtensionManifest,
-    ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider, LauncherCommand, MediaProvider,
-    NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider,
-    PlaceholderContext, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
-    SearchProvider, ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
-    MAX_RESULTS,
+    Action, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider, BrowserTabsProvider,
+    CalcHistoryEntry, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider,
+    ExtensionManifest, ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider,
+    LauncherCommand, MAX_RESULTS, MediaProvider, NamedValue, NamedValuesProvider, NetworkProvider,
+    NiriProvider, NotificationsProvider, PlaceholderContext, ProcessesProvider, ScriptEntry,
+    ScriptsProvider, SearchContext, SearchProvider, ShellCommand, SwayProvider, SystemProvider,
+    WebProvider, WindowsProvider, app_action, fuzzy_score, normalize_alias, search_audio_actions,
+    search_media_actions, search_network_actions, search_notification_actions,
+    search_system_actions,
 };
 
 /// Everything `search` reads from the application.
@@ -155,7 +156,11 @@ impl SearchData {
         providers.push(Box::new(ClipboardProvider {
             entries: &self.clipboard_history,
         }));
-        providers.push(Box::new(FilesProvider { files: &self.files }));
+        // M-6: the file index is the most expensive provider, so skip it for a
+        // query another provider already owns.
+        if !files::is_dedicated_query(trimmed) {
+            providers.push(Box::new(FilesProvider { files: &self.files }));
+        }
         providers.push(Box::new(ProcessesProvider));
         providers.push(Box::new(BrowserTabsProvider));
         providers.push(Box::new(ExtensionsProvider {
