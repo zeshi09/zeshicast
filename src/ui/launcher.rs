@@ -368,7 +368,7 @@ fn build_ui(
         let script_output_view = script_output_view.clone();
         let window_grid_view = window_grid_view.clone();
         list.connect_row_activated(move |_, row| {
-            if let Some(action) = action_for_row(&list_ref, &results, row) {
+            if let Some(action) = action_for_row(&results, row) {
                 if let Some(command) = action.launcher_command() {
                     match command {
                         crate::LauncherCommand::CreateSnippet(content) => {
@@ -1446,6 +1446,7 @@ pub(crate) fn render_results(
 
     let total = displayed_actions.len();
     *results.borrow_mut() = displayed_actions;
+    tag_action_rows(list, results);
     select_first_action_row(list);
 
     // Update overflow counter: show total when > threshold
@@ -1490,6 +1491,7 @@ fn set_raw_result_actions(
     }
 
     *results.borrow_mut() = actions;
+    tag_action_rows(list, results);
     select_first_action_row(list);
 }
 
@@ -2533,40 +2535,52 @@ pub(crate) fn selected_action(
     results: &Rc<RefCell<Vec<Action>>>,
 ) -> Option<Action> {
     let row = list.selected_row()?;
-    let index = action_index_for_row(list, &row)?;
+    let index = action_index_for_row(&row)?;
     results.borrow().get(index).cloned()
 }
 
-fn action_for_row(
-    list: &ListBox,
-    results: &Rc<RefCell<Vec<Action>>>,
-    row: &gtk::ListBoxRow,
-) -> Option<Action> {
-    let index = action_index_for_row(list, row)?;
+fn action_for_row(results: &Rc<RefCell<Vec<Action>>>, row: &gtk::ListBoxRow) -> Option<Action> {
+    let index = action_index_for_row(row)?;
     results.borrow().get(index).cloned()
 }
 
-fn action_index_for_row(list: &ListBox, row: &gtk::ListBoxRow) -> Option<usize> {
-    let mut selectable = Vec::new();
+/// Prefix of the tag that ties a row to the action it displays (B-4).
+const ACTION_ROW_TAG: &str = "zeshicast-action-row:";
+
+/// Tie every selectable row to the action registered for it.
+///
+/// The row list and `results` are built by different code paths, and
+/// `action_index_for_row` used to *count* selectable rows to guess which action a
+/// highlighted row stood for. Whenever the two disagreed -- exactly the case with
+/// the hand-built calculator row, which was in the list but not in `results` --
+/// the guess was silently one off, and highlighting a row ran its neighbour's
+/// action. Tagging removes the guess: a row reports the index it was registered
+/// under, and a selectable row nobody registered (more rows than actions) has no
+/// tag at all, so nothing runs instead of the wrong thing.
+fn tag_action_rows(list: &ListBox, results: &Rc<RefCell<Vec<Action>>>) {
+    let registered = results.borrow().len();
+    let mut next = 0usize;
     let mut index = 0;
-    while let Some(candidate) = list.row_at_index(index) {
-        selectable.push(candidate.is_selectable());
+    while let Some(row) = list.row_at_index(index) {
+        if row.is_selectable() {
+            row.set_widget_name(&match next < registered {
+                true => format!("{ACTION_ROW_TAG}{next}"),
+                false => String::new(),
+            });
+            next += 1;
+        }
         index += 1;
     }
-    action_index_for_rows(&selectable, row.index() as usize)
 }
 
 /// Which action a highlighted row displays (B-4).
-///
-/// `selectable[i]` says whether row `i` can be highlighted. Non-selectable rows
-/// (section headers, the empty-state label) hold no action, so they are skipped
-/// rather than counted -- but a *selectable* row with no action behind it shifts
-/// every row below it, which is what the calculator row used to do.
-fn action_index_for_rows(selectable: &[bool], row_index: usize) -> Option<usize> {
-    if !selectable.get(row_index).copied().unwrap_or(false) {
-        return None;
-    }
-    Some(selectable[..=row_index].iter().filter(|on| **on).count() - 1)
+fn action_index_for_row(row: &gtk::ListBoxRow) -> Option<usize> {
+    action_index_from_tag(&row.widget_name())
+}
+
+/// Read the action index back out of a row tag.
+fn action_index_from_tag(tag: &str) -> Option<usize> {
+    tag.strip_prefix(ACTION_ROW_TAG)?.parse().ok()
 }
 
 /// Outcome of the capture path for a Script action. Distinguishes "the script
@@ -2799,7 +2813,7 @@ fn select_first_action_row(list: &ListBox) {
 mod tests {
     use super::{
         ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, ScriptCaptureOutcome,
-        action_index_for_rows, action_panel_display_items, action_panel_display_rows,
+        action_index_from_tag, action_panel_display_items, action_panel_display_rows,
         calc_row_action, decode_clipboard_text, empty_state_fallback_actions, read_png_from_stream,
         run_script_capture, secondary_action_risk, watch_clipboard_text_with, with_calc_row_first,
     };
@@ -3262,19 +3276,34 @@ mod tests {
     }
 
     #[test]
-    fn row_index_maps_to_the_same_action() {
-        // [calculator, section header, action, action] -- the header is not
-        // selectable and must not shift the actions after it.
-        let selectable = [true, false, true, true];
+    fn a_row_reports_the_action_that_was_registered_for_it() {
+        // Rows are tagged in list order, and only selectable ones are tagged at
+        // all: `[calculator, header, action, action]`.
+        let tags = [
+            "zeshicast-action-row:0",
+            "",
+            "zeshicast-action-row:1",
+            "zeshicast-action-row:2",
+        ];
 
-        assert_eq!(action_index_for_rows(&selectable, 0), Some(0));
+        assert_eq!(action_index_from_tag(tags[0]), Some(0));
         assert_eq!(
-            action_index_for_rows(&selectable, 1),
+            action_index_from_tag(tags[1]),
             None,
-            "a header displays no action"
+            "a header has no action"
         );
-        assert_eq!(action_index_for_rows(&selectable, 2), Some(1));
-        assert_eq!(action_index_for_rows(&selectable, 3), Some(2));
-        assert_eq!(action_index_for_rows(&selectable, 4), None);
+        assert_eq!(action_index_from_tag(tags[2]), Some(1));
+        assert_eq!(action_index_from_tag(tags[3]), Some(2));
+    }
+
+    #[test]
+    fn an_unregistered_row_never_runs_a_neighbour_action() {
+        assert_eq!(action_index_from_tag(""), None, "a row nobody registered");
+        assert_eq!(action_index_from_tag("zeshicast-action-row:x"), None);
+        assert_eq!(
+            action_index_from_tag("iface:eth0"),
+            None,
+            "an unrelated tag is not an action index"
+        );
     }
 }
