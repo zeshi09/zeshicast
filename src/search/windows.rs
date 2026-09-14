@@ -1,11 +1,14 @@
 use std::collections::HashMap;
-use std::process::{Command, Stdio};
+use std::io::Read;
+use std::process::{Command, Output, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::{Action, ActionKind, ProcessCommand, ShellCommand, SystemActionEntry, fuzzy_score};
 
-const WINDOW_QUERY_TIMEOUT: Duration = Duration::from_millis(200);
+/// A cold compositor client (spawning `niri msg`/`hyprctl` for the first time)
+/// regularly needs more than 200 ms, which used to look like a hang (M-5).
+const WINDOW_QUERY_TIMEOUT: Duration = Duration::from_millis(500);
 const WINDOW_CACHE_TTL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,31 +492,47 @@ fn command_json_value(program: &str, args: &[&str]) -> Option<serde_json::Value>
     serde_json::from_str(text).ok()
 }
 
-fn command_output_with_timeout(
-    program: &str,
-    args: &[&str],
-    timeout: Duration,
-) -> Option<std::process::Output> {
+fn command_output_with_timeout(program: &str, args: &[&str], timeout: Duration) -> Option<Output> {
     let mut child = Command::new(program)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let started_at = Instant::now();
+    let stdout = child.stdout.take()?;
 
-    loop {
+    // Drain the pipe on a worker thread (M-5). A child that writes more than the
+    // 64 KiB pipe buffer blocks in `write` and therefore never exits; the
+    // watchdog below would read that as a hang, kill the child and throw its
+    // output away -- which is exactly what a big `swaymsg -t get_tree` looks
+    // like.
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let mut stdout = stdout;
+        let _ = stdout.read_to_end(&mut bytes);
+        bytes
+    });
+
+    let started_at = Instant::now();
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(Some(status)) => break status,
             Ok(None) if started_at.elapsed() >= timeout => {
+                // Killing closes the pipe, which releases the reader thread.
                 let _ = child.kill();
                 let _ = child.wait();
                 return None;
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
             Err(_) => return None,
         }
-    }
+    };
+
+    Some(Output {
+        status,
+        stdout: reader.join().ok()?,
+        stderr: Vec::new(),
+    })
 }
 
 fn window_snapshot_actions(snapshot: &WindowSnapshot, mode: &WindowSearchQuery) -> Vec<Action> {
@@ -793,5 +812,20 @@ mod tests {
     fn command_output_with_timeout_stops_slow_process() {
         let output = command_output_with_timeout("sleep", &["1"], Duration::from_millis(50));
         assert!(output.is_none());
+    }
+
+    #[test]
+    fn large_output_is_not_lost() {
+        // 1 MiB is far more than the 64 KiB pipe buffer: the child blocks in
+        // `write` until somebody drains the pipe (M-5).
+        let output = command_output_with_timeout(
+            "sh",
+            &["-c", "yes 0123456789abcdef | head -c 1048576"],
+            Duration::from_secs(10),
+        )
+        .expect("the command finishes and its output is captured");
+
+        assert_eq!(output.stdout.len(), 1_048_576);
+        assert!(output.status.success());
     }
 }
