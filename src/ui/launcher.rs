@@ -242,7 +242,7 @@ fn build_ui(
     let status_strip = crate::ui::StatusStrip::new();
     apply_status_strip_preferences(&status_strip, &launcher);
     status_strip.set_network_snapshot(&crate::NetworkSnapshot::default());
-    status_strip.set_battery_snapshot(&crate::battery_snapshot());
+    status_strip.set_battery_snapshot(&crate::cached_battery_snapshot());
     status_strip.set_audio_snapshot(&crate::AudioSnapshot::default());
     status_strip.set_media_snapshot(&crate::MediaSnapshot::default());
 
@@ -658,13 +658,13 @@ fn build_ui(
         glib::timeout_add_seconds_local(1, move || {
             if preference_enabled(&launcher, "show_status_strip", true) {
                 status_strip.set_network_snapshot(&crate::cached_network_snapshot());
-                status_strip.set_battery_snapshot(&crate::battery_snapshot());
+                status_strip.set_battery_snapshot(&crate::cached_battery_snapshot());
                 status_strip.set_audio_snapshot(&crate::cached_audio_snapshot());
-                status_strip.set_media_snapshot(&crate::media_snapshot());
+                status_strip.set_media_snapshot(&crate::cached_media_snapshot());
                 status_strip.set_keyboard_layout(crate::cached_keyboard_layout().as_deref());
             }
             if navigation.current() == crate::ui::LauncherView::Media {
-                crate::ui::set_media_snapshot(&media_view, &crate::media_snapshot());
+                crate::ui::set_media_snapshot(&media_view, &crate::cached_media_snapshot());
             } else if navigation.current() == crate::ui::LauncherView::Audio {
                 let snapshot = crate::cached_audio_snapshot();
                 if *last_audio.borrow() != snapshot {
@@ -672,7 +672,7 @@ fn build_ui(
                     crate::ui::set_audio_snapshot(&audio_view, &snapshot);
                 }
             } else if navigation.current() == crate::ui::LauncherView::Dashboard {
-                crate::ui::set_dashboard_media_snapshot(&dashboard_view, &crate::media_snapshot());
+                crate::ui::set_dashboard_media_snapshot(&dashboard_view, &crate::cached_media_snapshot());
             }
             glib::ControlFlow::Continue
         });
@@ -700,7 +700,7 @@ fn build_ui(
                 );
                 crate::ui::set_dashboard_battery_snapshot(
                     &dashboard_view,
-                    &crate::battery_snapshot(),
+                    &crate::cached_battery_snapshot(),
                 );
                 crate::ui::set_dashboard_audio_snapshot(
                     &dashboard_view,
@@ -729,18 +729,18 @@ fn build_ui(
             preference_duration_ms(&launcher, "dashboard_poll_interval_ms", 1000);
         glib::timeout_add_local(dashboard_poll_interval, move || {
             if navigation.current() == crate::ui::LauncherView::Dashboard {
-                crate::ui::set_dashboard_snapshot(&dashboard_view, &crate::system_snapshot());
+                crate::ui::set_dashboard_snapshot(&dashboard_view, &crate::cached_system_snapshot());
                 crate::ui::set_dashboard_thermal(
                     &dashboard_view,
-                    crate::thermal_snapshot()
+                    crate::cached_thermal_snapshot()
                         .hottest_zone()
                         .map(|z| z.temperature_c),
                 );
             } else if navigation.current() == crate::ui::LauncherView::SystemMonitor {
                 crate::ui::set_system_monitor_snapshot(
                     &system_monitor_view,
-                    &crate::system_snapshot(),
-                    &crate::top_processes_by_memory(8),
+                    &crate::cached_system_snapshot(),
+                    &crate::cached_top_processes(),
                 );
             }
             glib::ControlFlow::Continue
@@ -1662,7 +1662,7 @@ pub(crate) fn terminate_selected_system_process_or_confirm<F>(
     let Some(row) = system_monitor_view.list.selected_row() else {
         return;
     };
-    let Some(process) = crate::top_processes_by_memory(8)
+    let Some(process) = crate::cached_top_processes()
         .get(row.index() as usize)
         .cloned()
     else {

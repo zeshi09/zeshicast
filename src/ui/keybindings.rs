@@ -351,7 +351,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Dashboard => {
-                crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
+                crate::ui::set_dashboard_snapshot(dashboard_view, &crate::cached_system_snapshot());
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::SystemMonitor => {
@@ -363,7 +363,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Media => {
-                crate::ui::set_media_snapshot(media_view, &crate::media_snapshot());
+                crate::ui::set_media_snapshot(media_view, &crate::cached_media_snapshot());
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Network => {
@@ -406,7 +406,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Dashboard => {
-                crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
+                crate::ui::set_dashboard_snapshot(dashboard_view, &crate::cached_system_snapshot());
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::SystemMonitor => {
@@ -418,7 +418,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Media => {
-                crate::ui::set_media_snapshot(media_view, &crate::media_snapshot());
+                crate::ui::set_media_snapshot(media_view, &crate::cached_media_snapshot());
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Network => {
@@ -531,8 +531,8 @@ fn handle_view_key(
                 move || {
                     crate::ui::set_system_monitor_snapshot(
                         &system_monitor_view,
-                        &crate::system_snapshot(),
-                        &crate::top_processes_by_memory(8),
+                        &crate::cached_system_snapshot(),
+                        &crate::cached_top_processes(),
                     );
                 },
             );

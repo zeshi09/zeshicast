@@ -318,7 +318,7 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     };
     set_dashboard_snapshot(&view, snapshot);
     set_dashboard_network_snapshot(&view, &NetworkSnapshot::default());
-    set_dashboard_battery_snapshot(&view, &crate::battery_snapshot());
+    set_dashboard_battery_snapshot(&view, &crate::cached_battery_snapshot());
     set_dashboard_audio_snapshot(&view, &AudioSnapshot::default());
     set_dashboard_media_snapshot(&view, &MediaSnapshot::default());
     set_dashboard_notification_snapshot(&view, &NotificationSnapshot::default());
@@ -338,7 +338,7 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
         view.date.set_text(&now.format("%A, %B %-d").to_string());
     }
     // Update workspace chip
-    let ws = crate::workspace_snapshot();
+    let ws = crate::cached_workspace_snapshot();
     let ws_short = ws
         .active_name
         .clone()

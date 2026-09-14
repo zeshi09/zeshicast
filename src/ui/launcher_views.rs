@@ -33,17 +33,17 @@ pub(super) fn show_dashboard_view(
     action_bar: &GtkBox,
     dashboard_view: &crate::ui::DashboardView,
 ) {
-    crate::ui::set_dashboard_snapshot(dashboard_view, &crate::system_snapshot());
+    crate::ui::set_dashboard_snapshot(dashboard_view, &crate::cached_system_snapshot());
     crate::ui::set_dashboard_thermal(
         dashboard_view,
-        crate::thermal_snapshot()
+        crate::cached_thermal_snapshot()
             .hottest_zone()
             .map(|z| z.temperature_c),
     );
     crate::ui::set_dashboard_network_snapshot(dashboard_view, &crate::network_snapshot());
-    crate::ui::set_dashboard_battery_snapshot(dashboard_view, &crate::battery_snapshot());
+    crate::ui::set_dashboard_battery_snapshot(dashboard_view, &crate::cached_battery_snapshot());
     crate::ui::set_dashboard_audio_snapshot(dashboard_view, &crate::audio_snapshot());
-    crate::ui::set_dashboard_media_snapshot(dashboard_view, &crate::media_snapshot());
+    crate::ui::set_dashboard_media_snapshot(dashboard_view, &crate::cached_media_snapshot());
     crate::ui::set_dashboard_notification_snapshot(dashboard_view, &crate::notification_snapshot());
     entry.set_visible(false);
     action_bar.set_visible(false);
@@ -58,8 +58,8 @@ pub(super) fn show_system_monitor_view(
 ) {
     crate::ui::set_system_monitor_snapshot(
         system_monitor_view,
-        &crate::system_snapshot(),
-        &crate::top_processes_by_memory(8),
+        &crate::cached_system_snapshot(),
+        &crate::cached_top_processes(),
     );
     entry.set_visible(false);
     action_bar.set_visible(false);
@@ -129,7 +129,7 @@ pub(super) fn show_media_view(
     action_bar: &GtkBox,
     media_view: &crate::ui::MediaView,
 ) {
-    crate::ui::set_media_snapshot(media_view, &crate::media_snapshot());
+    crate::ui::set_media_snapshot(media_view, &crate::cached_media_snapshot());
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Media);

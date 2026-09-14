@@ -325,7 +325,7 @@ pub fn set_system_monitor_snapshot(
     let load_fraction = snapshot.load_average.map(load_fraction).unwrap_or_default();
     view.load_bar.set_fraction(load_fraction);
     push_metric_graph(&view.load_graph, load_fraction);
-    set_system_monitor_thermal_snapshot(view, &crate::thermal_snapshot());
+    set_system_monitor_thermal_snapshot(view, &crate::cached_thermal_snapshot());
     view.memory.set_text(
         &snapshot
             .memory_used_percent()

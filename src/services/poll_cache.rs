@@ -11,13 +11,27 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use crate::{AudioSnapshot, NetworkSnapshot, audio_snapshot, keyboard_layout, network_snapshot};
+use crate::{
+    AudioSnapshot, BatterySnapshot, MediaSnapshot, NetworkSnapshot, ProcessSummary, SystemSnapshot,
+    ThermalSnapshot, WorkspaceSnapshot, audio_snapshot, battery_snapshot, keyboard_layout,
+    media_snapshot, network_snapshot, system_snapshot, thermal_snapshot, top_processes_by_memory,
+    workspace_snapshot,
+};
+
+/// How many processes the cached snapshot keeps; the views ask for 8.
+const CACHED_PROCESSES: usize = 8;
 
 #[derive(Default)]
 struct Cache {
     network: NetworkSnapshot,
     audio: AudioSnapshot,
     keyboard_layout: Option<String>,
+    media: MediaSnapshot,
+    system: SystemSnapshot,
+    processes: Vec<ProcessSummary>,
+    workspace: WorkspaceSnapshot,
+    thermal: ThermalSnapshot,
+    battery: BatterySnapshot,
 }
 
 static CACHE: OnceLock<Arc<Mutex<Cache>>> = OnceLock::new();
@@ -40,11 +54,39 @@ pub fn start() {
             let audio = audio_snapshot();
             let layout = keyboard_layout();
             let network = tick.is_multiple_of(3).then(network_snapshot);
+            // MPRIS answers within `media`'s per-call budget, and a player that
+            // keeps timing out is skipped there, so this stays cheap (M-2).
+            let media = media_snapshot();
+            // These fork (ps/ip/thermal zones/compositor): every other tick is
+            // enough for a dashboard nobody is watching continuously (M-3).
+            let system = tick.is_multiple_of(2).then(system_snapshot);
+            let processes = tick
+                .is_multiple_of(2)
+                .then(|| top_processes_by_memory(CACHED_PROCESSES));
+            let workspace = tick.is_multiple_of(3).then(workspace_snapshot);
+            let thermal = tick.is_multiple_of(3).then(thermal_snapshot);
+            let battery = tick.is_multiple_of(3).then(battery_snapshot);
             if let Ok(mut cache) = cache.lock() {
                 cache.audio = audio;
                 cache.keyboard_layout = layout;
+                cache.media = media;
                 if let Some(network) = network {
                     cache.network = network;
+                }
+                if let Some(system) = system {
+                    cache.system = system;
+                }
+                if let Some(processes) = processes {
+                    cache.processes = processes;
+                }
+                if let Some(workspace) = workspace {
+                    cache.workspace = workspace;
+                }
+                if let Some(thermal) = thermal {
+                    cache.thermal = thermal;
+                }
+                if let Some(battery) = battery {
+                    cache.battery = battery;
                 }
             }
             tick = tick.wrapping_add(1);
@@ -78,4 +120,46 @@ pub fn cached_audio_snapshot() -> AudioSnapshot {
 /// Latest cached keyboard-layout code (e.g. "en"/"ru"), or `None` if unknown.
 pub fn cached_keyboard_layout() -> Option<String> {
     cache().lock().ok().and_then(|c| c.keyboard_layout.clone())
+}
+
+/// Latest cached media snapshot (never blocks on a D-Bus call).
+pub fn cached_media_snapshot() -> MediaSnapshot {
+    cache().lock().map(|c| c.media.clone()).unwrap_or_default()
+}
+
+/// Latest cached CPU/memory/load snapshot (never forks `ps`).
+pub fn cached_system_snapshot() -> SystemSnapshot {
+    cache().lock().map(|c| c.system.clone()).unwrap_or_default()
+}
+
+/// Latest cached process list, by memory (never forks `ps`).
+pub fn cached_top_processes() -> Vec<ProcessSummary> {
+    cache()
+        .lock()
+        .map(|c| c.processes.clone())
+        .unwrap_or_default()
+}
+
+/// Latest cached compositor workspace snapshot (never forks the compositor IPC).
+pub fn cached_workspace_snapshot() -> WorkspaceSnapshot {
+    cache()
+        .lock()
+        .map(|c| c.workspace.clone())
+        .unwrap_or_default()
+}
+
+/// Latest cached thermal snapshot (never reads the thermal zones on the UI thread).
+pub fn cached_thermal_snapshot() -> ThermalSnapshot {
+    cache()
+        .lock()
+        .map(|c| c.thermal.clone())
+        .unwrap_or_default()
+}
+
+/// Latest cached battery snapshot (never reads /sys on the UI thread).
+pub fn cached_battery_snapshot() -> BatterySnapshot {
+    cache()
+        .lock()
+        .map(|c| c.battery.clone())
+        .unwrap_or_default()
 }

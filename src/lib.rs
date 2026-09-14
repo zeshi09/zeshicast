@@ -118,8 +118,9 @@ pub use services::notifications::{
 };
 #[cfg(feature = "gui")]
 pub use services::poll_cache::{
-    cached_audio_snapshot, cached_keyboard_layout, cached_network_snapshot,
-    start as start_poll_cache,
+    cached_audio_snapshot, cached_battery_snapshot, cached_keyboard_layout, cached_media_snapshot,
+    cached_network_snapshot, cached_system_snapshot, cached_thermal_snapshot,
+    cached_top_processes, cached_workspace_snapshot, start as start_poll_cache,
 };
 pub use services::storage as storage_service;
 pub use services::system_stats::{
