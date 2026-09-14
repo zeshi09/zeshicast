@@ -2,8 +2,100 @@ use crate::{AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSn
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Image, Label, ListBox, Orientation, ProgressBar};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
+
+/// How long a slider drag must pause before `wpctl` is told about it (M-8).
+const VOLUME_DEBOUNCE: Duration = Duration::from_millis(120);
+
+/// Arms a delayed callback and returns a cancel handle.
+type ArmFn = Rc<dyn Fn(Duration, Box<dyn FnOnce()>) -> Box<dyn Fn()>>;
+/// Hands a target and a volume percentage to `wpctl`.
+type ApplyFn = Rc<dyn Fn(&str, u32)>;
+type CancelFn = Box<dyn Fn()>;
+type CancelSlot = Rc<RefCell<Option<CancelFn>>>;
+
+/// Applies the newest value of a drag and coalesces the ones in between.
+///
+/// `connect_value_changed` fires for every step of a drag, and each step used to
+/// run `wpctl set-volume` **synchronously on the main thread**: dragging a slider
+/// for a second spawned dozens of processes, stalled the UI, and the volume that
+/// survived was whichever `wpctl` finished last rather than the value the user
+/// released on.
+struct VolumeDrag {
+    arm: ArmFn,
+    apply: ApplyFn,
+    cancel: RefCell<Option<CancelFn>>,
+}
+
+impl VolumeDrag {
+    fn new(arm: ArmFn, apply: ApplyFn) -> Self {
+        Self {
+            arm,
+            apply,
+            cancel: RefCell::new(None),
+        }
+    }
+
+    fn set(&self, target: &str, percent: f64) {
+        let percent = percent.round().clamp(0.0, 150.0) as u32;
+        let state = DragState {
+            pending: Rc::new(RefCell::new(Some((target.to_string(), percent)))),
+            cancel: Rc::new(RefCell::new(self.cancel.borrow_mut().take())),
+        };
+        if let Some(cancel) = state.cancel.borrow_mut().as_ref() {
+            cancel();
+        }
+
+        let apply = Rc::clone(&self.apply);
+        let fire: Box<dyn FnOnce()> = Box::new(move || state.fire(apply));
+        *self.cancel.borrow_mut() = Some((self.arm)(VOLUME_DEBOUNCE, fire));
+    }
+}
+
+/// The part of [`VolumeDrag`] a pending timer needs.
+struct DragState {
+    pending: Rc<RefCell<Option<(String, u32)>>>,
+    cancel: CancelSlot,
+}
+
+impl DragState {
+    fn fire(&self, apply: ApplyFn) {
+        *self.cancel.borrow_mut() = None;
+        if let Some((target, percent)) = self.pending.borrow_mut().take() {
+            apply(&target, percent);
+        }
+    }
+}
+
+fn glib_timer_arm() -> ArmFn {
+    Rc::new(|delay: Duration, fire: Box<dyn FnOnce()>| {
+        let source: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let slot = Rc::clone(&source);
+        let id = glib::timeout_add_local_once(delay, move || {
+            *slot.borrow_mut() = None;
+            fire();
+        });
+        *source.borrow_mut() = Some(id);
+        Box::new(move || {
+            if let Some(id) = source.borrow_mut().take() {
+                id.remove();
+            }
+        })
+    })
+}
+
+/// Hand the volume to `wpctl` off the main thread -- `status()` blocks until
+/// `wpctl` exits, which used to freeze the UI for the duration.
+fn apply_default_volume(target: &str, percent: u32) {
+    let target = target.to_string();
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("wpctl")
+            .args(["set-volume", &target, &format!("{percent}%")])
+            .status();
+    });
+}
 
 #[derive(Clone)]
 pub struct AudioView {
@@ -57,17 +149,22 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     mute_output.set_tooltip_text(Some("Toggle mute"));
     mute_output.set_valign(gtk::Align::Center);
 
+    let sink_drag = Rc::new(VolumeDrag::new(
+        glib_timer_arm(),
+        Rc::new(apply_default_volume),
+    ));
     let output_bar_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
     output_bar_scale.set_draw_value(false);
     output_bar_scale.set_hexpand(true);
     output_bar_scale.add_css_class("audio-volume-bar");
     {
         let suppress = Rc::clone(&suppress_volume_cb);
+        let sink_drag = Rc::clone(&sink_drag);
         output_bar_scale.connect_value_changed(move |scale| {
             if suppress.get() {
                 return;
             }
-            set_default_volume("@DEFAULT_AUDIO_SINK@", scale.value());
+            sink_drag.set("@DEFAULT_AUDIO_SINK@", scale.value());
         });
     }
 
@@ -104,17 +201,22 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     mute_input.set_tooltip_text(Some("Toggle microphone mute"));
     mute_input.set_valign(gtk::Align::Center);
 
+    let source_drag = Rc::new(VolumeDrag::new(
+        glib_timer_arm(),
+        Rc::new(apply_default_volume),
+    ));
     let input_bar_scale = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
     input_bar_scale.set_draw_value(false);
     input_bar_scale.set_hexpand(true);
     input_bar_scale.add_css_class("audio-volume-bar");
     {
         let suppress = Rc::clone(&suppress_volume_cb);
+        let source_drag = Rc::clone(&source_drag);
         input_bar_scale.connect_value_changed(move |scale| {
             if suppress.get() {
                 return;
             }
-            set_default_volume("@DEFAULT_AUDIO_SOURCE@", scale.value());
+            source_drag.set("@DEFAULT_AUDIO_SOURCE@", scale.value());
         });
     }
 
@@ -192,14 +294,6 @@ pub fn set_audio_snapshot(view: &AudioView, snapshot: &AudioSnapshot) {
     view.suppress_volume_cb.set(false);
 
     set_audio_stream_rows(&view.streams_list, &snapshot.streams);
-}
-
-/// `wpctl set-volume <target> <percent>%` — clamped to a sane 0–150 range.
-fn set_default_volume(target: &str, percent: f64) {
-    let pct = percent.round().clamp(0.0, 150.0) as u32;
-    let _ = std::process::Command::new("wpctl")
-        .args(["set-volume", target, &format!("{pct}%")])
-        .status();
 }
 
 /// Fill a device ListBox from real devices; clicking a row sets it as the
@@ -391,4 +485,104 @@ fn audio_stream_row(stream: &AudioStreamSnapshot) -> gtk::ListBoxRow {
     layout.append(&volume);
     row.set_child(Some(&layout));
     row
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Fires = Rc<RefCell<Vec<Rc<RefCell<Option<Box<dyn FnOnce()>>>>>>>;
+    type Applied = Rc<RefCell<Vec<(String, u32)>>>;
+
+    /// A fake timer: callbacks run only when the test asks, and cancelling drops
+    /// them the way `glib::SourceId::remove` does.
+    fn fake_timer() -> (ArmFn, Fires) {
+        let fires: Fires = Rc::new(RefCell::new(Vec::new()));
+        let arm: ArmFn = {
+            let fires = Rc::clone(&fires);
+            Rc::new(move |_delay, fire| {
+                let slot = Rc::new(RefCell::new(Some(fire)));
+                fires.borrow_mut().push(Rc::clone(&slot));
+                Box::new(move || drop(slot.borrow_mut().take()))
+            })
+        };
+        (arm, fires)
+    }
+
+    fn fire_all(fires: &Fires) {
+        for slot in std::mem::take(&mut *fires.borrow_mut()) {
+            if let Some(fire) = slot.borrow_mut().take() {
+                fire();
+            }
+        }
+    }
+
+    fn recorder() -> (ApplyFn, Applied) {
+        let applied: Applied = Rc::new(RefCell::new(Vec::new()));
+        let apply = {
+            let applied = Rc::clone(&applied);
+            Rc::new(move |target: &str, percent: u32| {
+                applied.borrow_mut().push((target.to_string(), percent));
+            })
+        };
+        (apply, applied)
+    }
+
+    #[test]
+    fn a_drag_applies_only_the_last_value() {
+        let (arm, fires) = fake_timer();
+        let (apply, applied) = recorder();
+        let drag = VolumeDrag::new(arm, apply);
+
+        for value in [10.0, 20.0, 30.0, 42.0] {
+            drag.set("@DEFAULT_AUDIO_SINK@", value);
+        }
+        assert!(applied.borrow().is_empty(), "nothing runs mid-drag");
+
+        fire_all(&fires);
+
+        assert_eq!(
+            applied.borrow().as_slice(),
+            [("@DEFAULT_AUDIO_SINK@".to_string(), 42)],
+            "only the value the drag ended on reaches wpctl"
+        );
+    }
+
+    #[test]
+    fn one_gesture_means_one_wpctl_call_per_sink() {
+        let (arm, fires) = fake_timer();
+        let (apply, applied) = recorder();
+        let drag = VolumeDrag::new(arm, apply);
+
+        drag.set("@DEFAULT_AUDIO_SINK@", 60.0);
+        fire_all(&fires);
+        drag.set("@DEFAULT_AUDIO_SINK@", 80.0);
+        drag.set("@DEFAULT_AUDIO_SINK@", 90.0);
+        fire_all(&fires);
+
+        assert_eq!(
+            applied.borrow().as_slice(),
+            [
+                ("@DEFAULT_AUDIO_SINK@".to_string(), 60),
+                ("@DEFAULT_AUDIO_SINK@".to_string(), 90),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_percent_is_clamped() {
+        let (arm, fires) = fake_timer();
+        let (apply, applied) = recorder();
+        let drag = VolumeDrag::new(arm, apply);
+
+        drag.set("@DEFAULT_AUDIO_SOURCE@", 200.0);
+        drag.set("@DEFAULT_AUDIO_SOURCE@", -5.0);
+        fire_all(&fires);
+
+        assert_eq!(
+            applied.borrow().as_slice(),
+            [("@DEFAULT_AUDIO_SOURCE@".to_string(), 0)],
+            "out-of-range values are clamped, not dropped"
+        );
+    }
 }
