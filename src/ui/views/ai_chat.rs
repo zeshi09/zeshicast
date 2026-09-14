@@ -1,5 +1,7 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Entry, Label, Orientation};
@@ -22,6 +24,11 @@ pub struct AiChatView {
     /// Re-fetch the model list from Ollama.
     pub refresh_models: Button,
     pub history: Rc<RefCell<Vec<crate::ChatMessage>>>,
+    /// True while a reply is streaming (M-8): a second request would interleave
+    /// two streams into the same labels and register a second stop handler.
+    pub streaming: Rc<Cell<bool>>,
+    /// Cancellation flag of the stream in flight, if any.
+    pub cancel: Rc<RefCell<Option<Arc<AtomicBool>>>>,
 }
 
 pub fn ai_chat_view() -> AiChatView {
@@ -99,11 +106,23 @@ pub fn ai_chat_view() -> AiChatView {
     ask.set_valign(gtk::Align::Center);
     input_row.append(&ask);
 
+    let streaming = Rc::new(Cell::new(false));
+    let cancel: Rc<RefCell<Option<Arc<AtomicBool>>>> = Rc::new(RefCell::new(None));
     let stop = Button::with_label("■");
     stop.add_css_class("dashboard-button");
     stop.add_css_class("widget-btn");
     stop.set_tooltip_text(Some("Stop generation"));
     stop.set_visible(false);
+    // Connected once, at build time: the old code called `connect_clicked` on
+    // every request, so the handlers piled up on the same button forever.
+    {
+        let cancel = Rc::clone(&cancel);
+        stop.connect_clicked(move |_| {
+            if let Some(flag) = cancel.borrow().as_ref() {
+                flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+    }
     input_row.append(&stop);
 
     let copy = Button::with_label("Copy");
@@ -149,5 +168,7 @@ pub fn ai_chat_view() -> AiChatView {
         model_list,
         refresh_models,
         history,
+        streaming,
+        cancel,
     }
 }

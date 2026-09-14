@@ -16,6 +16,10 @@ pub(super) fn ask_ai_from_view(
     if prompt.is_empty() {
         return;
     }
+    if !can_start_request(ai_chat_view.streaming.get(), &prompt) {
+        return;
+    }
+    ai_chat_view.streaming.set(true);
 
     // Clear input entry so the user is ready to type their next query
     ai_chat_view.input.set_text("");
@@ -58,13 +62,8 @@ pub(super) fn ask_ai_from_view(
     let (tx, rx) = mpsc::sync_channel::<StreamChunk>(64);
     let cancel_flag = chat_local_ai_streaming(config, messages, tx);
 
-    // Connect stop button to cancel flag
-    {
-        let cancel_flag2 = cancel_flag.clone();
-        ai_chat_view.stop.connect_clicked(move |_| {
-            cancel_flag2.store(true, std::sync::atomic::Ordering::Relaxed);
-        });
-    }
+    // Hand the new flag to the stop button's single, persistent handler.
+    *ai_chat_view.cancel.borrow_mut() = Some(cancel_flag.clone());
 
     let ai_chat_view = ai_chat_view.clone();
     let assistant_lbl = assistant_lbl.clone();
@@ -106,7 +105,11 @@ pub(super) fn ask_ai_from_view(
                 Ok(StreamChunk::Error(e)) => {
                     assistant_lbl.set_text(&e);
                     ai_chat_view.output.set_text(&e);
-                    ai_chat_view.history.borrow_mut().pop();
+                    // The error bubble is on screen, so it belongs in the history
+                    // too: popping the user's prompt instead (what this used to
+                    // do) dropped the question while leaving it visible, and the
+                    // next request then went to the model without it.
+                    ai_chat_view.history.borrow_mut().push(error_reply(&e));
                     finish_ai_view(&ai_chat_view);
                     return glib::ControlFlow::Break;
                 }
@@ -130,11 +133,27 @@ pub(super) fn ask_ai_from_view(
 }
 
 fn finish_ai_view(view: &crate::ui::AiChatView) {
+    view.streaming.set(false);
+    *view.cancel.borrow_mut() = None;
     view.status.set_visible(false);
     view.ask.set_visible(true);
     view.stop.set_visible(false);
     view.copy.set_sensitive(true);
     view.save.set_sensitive(true);
+}
+
+/// Whether a question may be sent now (M-8).
+///
+/// An empty prompt has nothing to send, and starting a second request while one
+/// is streaming pushes a second set of bubbles, interleaves both streams into the
+/// same labels, and sends the model a half-answered conversation.
+fn can_start_request(streaming: bool, prompt: &str) -> bool {
+    !streaming && !prompt.is_empty()
+}
+
+/// The assistant turn to record when the request failed (M-8).
+fn error_reply(error: &str) -> ChatMessage {
+    ChatMessage::assistant(format!("[error] {error}"))
 }
 
 pub(super) fn ai_snippet_name(prompt: &str) -> String {
@@ -262,5 +281,34 @@ mod tests {
             vec!["clock", "date", "network"]
         );
         assert!(parse_list_preference(" , ").is_empty());
+    }
+    #[test]
+    fn a_second_request_is_refused_while_one_is_streaming() {
+        assert!(can_start_request(false, "why is the sky blue?"));
+        assert!(
+            !can_start_request(true, "and why is it blue?"),
+            "two streams would write into the same labels"
+        );
+        assert!(!can_start_request(false, ""), "nothing to ask");
+    }
+
+    #[test]
+    fn a_failed_request_keeps_the_prompt_it_was_asked() {
+        let prompt = "why is the sky blue?";
+        let mut history = vec![ChatMessage::user(prompt)];
+        history.push(error_reply("connection refused"));
+
+        assert_eq!(
+            history.first().map(|m| m.content.as_str()),
+            Some(prompt),
+            "the question is still on screen, so it stays in the history"
+        );
+        assert_eq!(history.len(), 2, "the failure is part of the transcript");
+        assert!(
+            history
+                .last()
+                .is_some_and(|m| m.content == "[error] connection refused"),
+            "the model is told the turn failed instead of seeing an answer"
+        );
     }
 }
