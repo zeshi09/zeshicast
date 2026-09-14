@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::{Action, ActionKind, ActionRisk};
 
@@ -48,6 +50,50 @@ impl BrowserTab {
     }
 }
 
+/// How long a tab snapshot is reused (M-8).
+const TAB_CACHE_TTL: Duration = Duration::from_secs(2);
+
+type TabCache = Mutex<Option<(Instant, Vec<BrowserTab>)>>;
+
+fn tab_cache() -> &'static TabCache {
+    static CACHE: OnceLock<TabCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// Open tabs, cached for [`TAB_CACHE_TTL`] (M-8).
+///
+/// This provider reads the session store of *every* browser profile, and the old
+/// code did that on every keystroke -- far more expensive than the title match it
+/// feeds. Tab state does not change faster than a couple of seconds.
+///
+/// The session file it reads is `sessionstore-backups/recovery.js`, which
+/// current Firefox no longer writes (it writes `recovery.jsonlz4`), so on a
+/// modern profile this usually returns nothing. Fixing that needs an lz4 decoder
+/// and is deliberately left as its own step; caching keeps a dead branch from
+/// costing anything on the hot path in the meantime.
+fn open_tabs_cached_with<F>(collect: F) -> Vec<BrowserTab>
+where
+    F: FnOnce() -> Vec<BrowserTab>,
+{
+    let now = Instant::now();
+    if let Ok(cache) = tab_cache().lock()
+        && let Some((captured_at, tabs)) = cache.as_ref()
+        && now.duration_since(*captured_at) <= TAB_CACHE_TTL
+    {
+        return tabs.clone();
+    }
+
+    let tabs = collect();
+    if let Ok(mut cache) = tab_cache().lock() {
+        *cache = Some((now, tabs.clone()));
+    }
+    tabs
+}
+
+fn open_tabs_cached() -> Vec<BrowserTab> {
+    open_tabs_cached_with(collect_open_tabs)
+}
+
 pub fn search_browser_tabs(query: &str) -> Vec<Action> {
     let query_clean = query
         .strip_prefix("tab:")
@@ -58,7 +104,7 @@ pub fn search_browser_tabs(query: &str) -> Vec<Action> {
         return Vec::new();
     }
 
-    let tabs = collect_open_tabs();
+    let tabs = open_tabs_cached();
     let mut actions = Vec::new();
 
     for tab in tabs {
@@ -291,5 +337,27 @@ mod tests {
         assert_eq!(tabs.len(), 2);
         assert_eq!(tabs[0].title, "Google");
         assert_eq!(tabs[1].title, "NixOS");
+    }
+    #[test]
+    fn tab_collection_is_cached_between_queries() {
+        let calls = std::cell::Cell::new(0usize);
+        let first = open_tabs_cached_with(|| {
+            calls.set(calls.get() + 1);
+            vec![BrowserTab {
+                title: "cached".to_string(),
+                url: "https://example.invalid".to_string(),
+                browser: "Test".to_string(),
+                icon: String::new(),
+            }]
+        });
+        // The cache is process-wide, so the second call must not collect again.
+        let second = open_tabs_cached_with(|| {
+            calls.set(calls.get() + 1);
+            Vec::new()
+        });
+
+        assert_eq!(calls.get(), 1, "the profile walk happens once per TTL");
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1, "the cached tabs are reused");
     }
 }
