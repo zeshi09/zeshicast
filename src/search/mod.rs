@@ -7,6 +7,7 @@ pub(crate) mod emoji;
 pub(crate) mod extensions;
 pub(crate) mod files;
 pub(crate) mod media;
+pub(crate) mod mozlz4;
 pub(crate) mod named_values;
 pub(crate) mod notifications;
 pub(crate) mod processes;

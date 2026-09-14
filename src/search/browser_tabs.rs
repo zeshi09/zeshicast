@@ -140,13 +140,10 @@ pub fn collect_open_tabs() -> Vec<BrowserTab> {
     if let Ok(entries) = fs::read_dir(&firefox_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                let recovery_json = path.join("sessionstore-backups/recovery.js");
-                if recovery_json.is_file()
-                    && let Ok(content) = fs::read_to_string(&recovery_json)
-                {
-                    tabs.extend(parse_firefox_json(&content));
-                }
+            if path.is_dir()
+                && let Some(content) = read_session_store(&path.join("sessionstore-backups"))
+            {
+                tabs.extend(parse_firefox_json(&content));
             }
         }
     }
@@ -179,6 +176,22 @@ pub fn collect_open_tabs() -> Vec<BrowserTab> {
     }
 
     tabs
+}
+
+/// Read a Firefox session store, preferring the format current Firefox writes.
+///
+/// Modern Firefox writes `recovery.jsonlz4`; the `recovery.js` this provider used
+/// to read has not been written for years, which is why the tab provider quietly
+/// returned nothing on a current profile (P3.8b).
+fn read_session_store(backups: &Path) -> Option<String> {
+    let compressed = backups.join("recovery.jsonlz4");
+    if let Ok(bytes) = fs::read(&compressed) {
+        match crate::search::mozlz4::decompress(&bytes) {
+            Ok(text) => return Some(text),
+            Err(error) => eprintln!("failed to decode {}: {error}", compressed.display()),
+        }
+    }
+    fs::read_to_string(backups.join("recovery.js")).ok()
 }
 
 pub fn extract_domain(url: &str) -> String {
