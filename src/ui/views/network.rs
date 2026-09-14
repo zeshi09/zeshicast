@@ -1,6 +1,6 @@
+use crate::{NetworkInterfaceSnapshot, NetworkSnapshot};
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, ListBox, Orientation};
-use crate::{NetworkInterfaceSnapshot, NetworkSnapshot};
 
 #[derive(Clone)]
 pub struct NetworkView {
@@ -11,7 +11,6 @@ pub struct NetworkView {
     pub copy_ip: Button,
     pub copy_mac: Button,
 }
-
 
 pub fn network_view(snapshot: &NetworkSnapshot) -> NetworkView {
     let root = GtkBox::new(Orientation::Vertical, 0);
@@ -45,7 +44,6 @@ pub fn network_view(snapshot: &NetworkSnapshot) -> NetworkView {
     }
 }
 
-
 pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -73,6 +71,7 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
     for network in &snapshot.wifi_networks {
         let row = gtk::ListBoxRow::new();
         row.add_css_class("result-row");
+        row.set_widget_name(&format!("wifi:{}", network.ssid));
         if network.active {
             row.add_css_class("network-active");
         }
@@ -183,10 +182,12 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
     }
 }
 
-
 fn ethernet_row(iface: &NetworkInterfaceSnapshot) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.add_css_class("result-row");
+    // The row carries its identity: the list also holds section headers and
+    // Wi-Fi rows, so a row index is not an index into `interfaces` (M-7).
+    row.set_widget_name(&format!("iface:{}", iface.name));
 
     let connected = iface.state.eq_ignore_ascii_case("up") && !iface.ipv4_addresses.is_empty();
     if connected {

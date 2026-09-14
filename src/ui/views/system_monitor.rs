@@ -1,10 +1,10 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use super::dashboard::format_duration;
+use super::metric_graph::{MetricGraph, metric_graph, push_metric_graph};
+use crate::{ProcessSummary, SystemSnapshot, ThermalSnapshot};
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, DrawingArea, Label, ListBox, Orientation, ProgressBar};
-use crate::{ProcessSummary, SystemSnapshot, ThermalSnapshot};
-use super::metric_graph::{metric_graph, push_metric_graph, MetricGraph};
-use super::dashboard::format_duration;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct SystemMonitorView {
@@ -27,8 +27,13 @@ pub struct SystemMonitorView {
     pub net_tx: Label,
     pub list: ListBox,
     pub kill: Button,
+    /// The processes the rows were built from (M-7).
+    ///
+    /// Killing must read the row's process from here instead of indexing into a
+    /// freshly polled snapshot: the poller may have reordered the list between
+    /// the paint and the click, which used to kill an unrelated process.
+    pub displayed_processes: Rc<RefCell<Vec<ProcessSummary>>>,
 }
-
 
 pub fn system_monitor_view(
     snapshot: &SystemSnapshot,
@@ -298,12 +303,12 @@ pub fn system_monitor_view(
         net_rx,
         net_tx,
         list,
+        displayed_processes: Rc::new(RefCell::new(Vec::new())),
         kill,
     };
     set_system_monitor_snapshot(&view, snapshot, processes);
     view
 }
-
 
 pub fn set_system_monitor_snapshot(
     view: &SystemMonitorView,
@@ -385,7 +390,7 @@ pub fn set_system_monitor_snapshot(
             .map(|count| count.to_string())
             .unwrap_or("unknown".to_string()),
     );
-    set_process_rows(&view.list, processes);
+    set_process_rows(&view.list, processes, &view.displayed_processes);
 }
 
 pub fn set_system_monitor_thermal_snapshot(view: &SystemMonitorView, snapshot: &ThermalSnapshot) {
@@ -405,7 +410,6 @@ pub fn set_system_monitor_thermal_snapshot(view: &SystemMonitorView, snapshot: &
     ));
 }
 
-
 pub(crate) fn load_fraction(load: f32) -> f64 {
     let cores = std::thread::available_parallelism()
         .map(|value| value.get() as f32)
@@ -414,10 +418,45 @@ pub(crate) fn load_fraction(load: f32) -> f64 {
     (load / cores).clamp(0.0, 1.0) as f64
 }
 
-fn set_process_rows(list: &ListBox, processes: &[ProcessSummary]) {
+/// The process a row shows (M-7). The kill action must use this rather than an
+/// index into a cache that may have been refreshed since the row was painted.
+pub(crate) fn row_process(
+    displayed: &[ProcessSummary],
+    row_index: usize,
+) -> Option<ProcessSummary> {
+    displayed.get(row_index).cloned()
+}
+
+/// Row to select after a rebuild: the same process if it is still running,
+/// otherwise the first row (M-7).
+fn row_for_pid(processes: &[ProcessSummary], previous_pid: Option<u32>) -> Option<usize> {
+    if processes.is_empty() {
+        return None;
+    }
+    Some(
+        processes
+            .iter()
+            .position(|process| Some(process.pid) == previous_pid)
+            .unwrap_or(0),
+    )
+}
+
+fn set_process_rows(
+    list: &ListBox,
+    processes: &[ProcessSummary],
+    displayed: &Rc<RefCell<Vec<ProcessSummary>>>,
+) {
+    let previous_pid = list.selected_row().and_then(|row| {
+        displayed
+            .borrow()
+            .get(row.index() as usize)
+            .map(|process| process.pid)
+    });
+
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
+    *displayed.borrow_mut() = processes.to_vec();
 
     if processes.is_empty() {
         list.append(&super::secondary_action_row(
@@ -437,7 +476,11 @@ fn set_process_rows(list: &ListBox, processes: &[ProcessSummary]) {
         list.append(&process_row(process, max_memory_kib));
     }
 
-    if let Some(row) = list.row_at_index(0) {
+    // Restore the selection by PID: selecting row 0 on every refresh (as this
+    // did) moved the highlight away from the process the user had picked.
+    if let Some(index) = row_for_pid(processes, previous_pid)
+        && let Some(row) = list.row_at_index(index as i32)
+    {
         list.select_row(Some(&row));
     }
 }
@@ -510,3 +553,49 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
     row
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn process(pid: u32, name: &str) -> ProcessSummary {
+        ProcessSummary {
+            pid,
+            name: name.to_string(),
+            memory_kib: Some(1024),
+        }
+    }
+
+    #[test]
+    fn kill_uses_row_pid_not_index() {
+        // The rows were painted from this list...
+        let displayed = vec![process(41, "editor"), process(42, "browser")];
+        // ...while the poller has already published a different order.
+        let refreshed = vec![process(43, "compiler"), process(44, "music")];
+        let _ = refreshed;
+
+        assert_eq!(
+            crate::ui::row_process(&displayed, 1).map(|process| process.pid),
+            Some(42),
+            "the kill must target the process the row shows"
+        );
+        assert_eq!(crate::ui::row_process(&displayed, 5).map(|p| p.pid), None);
+    }
+
+    #[test]
+    fn selection_survives_refresh() {
+        let before = vec![process(7, "first"), process(8, "second")];
+
+        assert_eq!(
+            row_for_pid(&before, Some(8)),
+            Some(1),
+            "the selected process keeps its highlight"
+        );
+        assert_eq!(
+            row_for_pid(&before, Some(999)),
+            Some(0),
+            "a process that exited falls back to the first row"
+        );
+        assert_eq!(row_for_pid(&[], Some(7)), None);
+        assert_eq!(row_for_pid(&before, None), Some(0));
+    }
+}

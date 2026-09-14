@@ -70,6 +70,7 @@ pub fn install_child_reaper() {
         gtk::glib::ControlFlow::Continue
     });
 }
+pub(crate) use views::row_process;
 pub use views::{
     ActionPanelDisplayItem, ActionPanelView, AiChatView, AudioView, ClipboardHistoryView,
     DashboardView, EmojiPickerView, ExtensionBrowserView, FontBrowserView, MediaView, NetworkView,

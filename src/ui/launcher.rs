@@ -678,7 +678,10 @@ fn build_ui(
                     crate::ui::set_audio_snapshot(&audio_view, &snapshot);
                 }
             } else if navigation.current() == crate::ui::LauncherView::Dashboard {
-                crate::ui::set_dashboard_media_snapshot(&dashboard_view, &crate::cached_media_snapshot());
+                crate::ui::set_dashboard_media_snapshot(
+                    &dashboard_view,
+                    &crate::cached_media_snapshot(),
+                );
             }
             glib::ControlFlow::Continue
         });
@@ -741,7 +744,10 @@ fn build_ui(
                 return glib::ControlFlow::Continue;
             }
             if navigation.current() == crate::ui::LauncherView::Dashboard {
-                crate::ui::set_dashboard_snapshot(&dashboard_view, &crate::cached_system_snapshot());
+                crate::ui::set_dashboard_snapshot(
+                    &dashboard_view,
+                    &crate::cached_system_snapshot(),
+                );
                 crate::ui::set_dashboard_thermal(
                     &dashboard_view,
                     crate::cached_thermal_snapshot()
@@ -1341,7 +1347,14 @@ pub(crate) fn update_results(
     query: &str,
     counter: Option<&Label>,
 ) {
-    render_results(launcher, results, list, query, counter, launcher.search(query));
+    render_results(
+        launcher,
+        results,
+        list,
+        query,
+        counter,
+        launcher.search(query),
+    );
 }
 
 /// The mode badge follows every keystroke immediately: it is cheap, and the
@@ -1674,10 +1687,12 @@ pub(crate) fn terminate_selected_system_process_or_confirm<F>(
     let Some(row) = system_monitor_view.list.selected_row() else {
         return;
     };
-    let Some(process) = crate::cached_top_processes()
-        .get(row.index() as usize)
-        .cloned()
-    else {
+    // M-7: the row's own process, not `cached_top_processes()[row.index()]` --
+    // the poller may have reordered the list since the row was painted.
+    let Some(process) = crate::ui::row_process(
+        &system_monitor_view.displayed_processes.borrow(),
+        row.index() as usize,
+    ) else {
         return;
     };
 
@@ -1694,13 +1709,30 @@ pub(crate) fn terminate_selected_system_process_or_confirm<F>(
     );
 }
 
+/// The interface a network row stands for, or `None` for other rows (M-7).
+fn row_interface_name(row: &gtk::ListBoxRow) -> Option<String> {
+    row.widget_name().strip_prefix("iface:").map(str::to_string)
+}
+
+/// The SSID a Wi-Fi row stands for, or `None` for other rows.
+fn row_wifi_ssid(row: &gtk::ListBoxRow) -> Option<String> {
+    row.widget_name().strip_prefix("wifi:").map(str::to_string)
+}
+
 fn copy_selected_network_value(list: &ListBox, value: NetworkCopyValue) {
     let Some(row) = list.selected_row() else {
         return;
     };
-    let Some(interface) = crate::network_snapshot()
+    // The list holds section headers and Wi-Fi rows, so a row index is not an
+    // index into `interfaces` (M-7).
+    let Some(name) = row_interface_name(&row) else {
+        return;
+    };
+    let snapshot = crate::cached_network_snapshot();
+    let Some(interface) = snapshot
         .interfaces
-        .get(row.index() as usize)
+        .iter()
+        .find(|interface| interface.name == name)
         .cloned()
     else {
         return;
@@ -1724,31 +1756,19 @@ fn run_selected_network_command(list: &ListBox, value: NetworkCommandValue) {
     let Some(row) = list.selected_row() else {
         return;
     };
-    let snapshot = crate::network_snapshot();
-    let index = row.index() as usize;
-
     match value {
         NetworkCommandValue::DisconnectInterface => {
-            let Some(interface) = snapshot.interfaces.get(index) else {
+            let Some(name) = row_interface_name(&row) else {
                 return;
             };
-            run_command_request("nmcli", ["device", "disconnect", interface.name.as_str()]);
+            run_command_request("nmcli", ["device", "disconnect", name.as_str()]);
         }
         NetworkCommandValue::ConnectWifi => {
-            let wifi_offset = snapshot.interfaces.len()
-                + usize::from(!snapshot.dns_servers.is_empty())
-                + usize::from(!snapshot.wifi_networks.is_empty());
-            let Some(network) = index
-                .checked_sub(wifi_offset)
-                .and_then(|index| snapshot.wifi_networks.get(index))
-            else {
+            let Some(ssid) = row_wifi_ssid(&row) else {
                 return;
             };
             // "--" so an SSID like "-w" is not parsed as an nmcli option.
-            run_command_request(
-                "nmcli",
-                ["dev", "wifi", "connect", "--", network.ssid.as_str()],
-            );
+            run_command_request("nmcli", ["dev", "wifi", "connect", "--", ssid.as_str()]);
         }
     }
 }
