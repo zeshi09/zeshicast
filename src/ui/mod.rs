@@ -30,6 +30,35 @@ pub use panels::{
 pub use status_strip::StatusStrip;
 pub use style::install_css;
 
+/// Whether the palette window is visible (P3.3).
+static UI_VISIBLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// `true` while the palette is hidden.
+///
+/// Recurring timers check this first: a hidden palette must not repaint views,
+/// re-read clocks or fork anything. Deliberate exceptions: the clipboard monitor
+/// (it has to notice copies while hidden), the child reaper (it only calls
+/// `waitpid`), the keyboard-layout OSD drain (a separate layer-shell surface)
+/// and the in-flight result pollers, which stop on their own.
+pub(crate) fn hidden() -> bool {
+    !UI_VISIBLE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Keeps [`hidden`] and the background pollers in step with the window (P3.3):
+/// hiding the palette pauses `poll_cache`, showing it resumes the poller and the
+/// timers on their next tick.
+pub(crate) fn track_window_visibility(window: &gtk::ApplicationWindow) {
+    use gtk::prelude::WidgetExt;
+
+    let update = |window: &gtk::ApplicationWindow| {
+        let visible = window.is_visible();
+        UI_VISIBLE.store(visible, std::sync::atomic::Ordering::Relaxed);
+        crate::services::poll_cache::set_active(visible);
+    };
+    update(window);
+    window.connect_visible_notify(update);
+}
+
 /// Periodic housekeeping for the GTK main loop.
 ///
 /// The launcher spawns applications and shell commands fire-and-forget; this

@@ -103,6 +103,9 @@ impl StatusStrip {
     fn start_clock(&self) {
         let strip = self.clone();
         glib::timeout_add_seconds_local(1, move || {
+            if crate::ui::hidden() {
+                return glib::ControlFlow::Continue;
+            }
             strip.refresh();
             glib::ControlFlow::Continue
         });

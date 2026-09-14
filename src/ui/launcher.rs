@@ -130,6 +130,9 @@ fn build_ui(
         .build();
     window.add_css_class("launcher-window");
     configure_window(&window);
+    // Timers and pollers follow the window (P3.3): a hidden palette does no
+    // per-second work and forks nothing.
+    crate::ui::track_window_visibility(&window);
 
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("launcher-frame");
@@ -656,6 +659,9 @@ fn build_ui(
         // 1s tick doesn't rebuild (and visibly flicker) the list every second.
         let last_audio = Rc::new(RefCell::new(crate::AudioSnapshot::default()));
         glib::timeout_add_seconds_local(1, move || {
+            if crate::ui::hidden() {
+                return glib::ControlFlow::Continue;
+            }
             if preference_enabled(&launcher, "show_status_strip", true) {
                 status_strip.set_network_snapshot(&crate::cached_network_snapshot());
                 status_strip.set_battery_snapshot(&crate::cached_battery_snapshot());
@@ -687,6 +693,9 @@ fn build_ui(
         let last_network = Rc::new(RefCell::new(crate::NetworkSnapshot::default()));
         let last_notifications = Rc::new(RefCell::new(crate::NotificationSnapshot::default()));
         glib::timeout_add_seconds_local(1, move || {
+            if crate::ui::hidden() {
+                return glib::ControlFlow::Continue;
+            }
             if navigation.current() == crate::ui::LauncherView::Network {
                 let snapshot = crate::cached_network_snapshot();
                 if *last_network.borrow() != snapshot {
@@ -728,6 +737,9 @@ fn build_ui(
         let dashboard_poll_interval =
             preference_duration_ms(&launcher, "dashboard_poll_interval_ms", 1000);
         glib::timeout_add_local(dashboard_poll_interval, move || {
+            if crate::ui::hidden() {
+                return glib::ControlFlow::Continue;
+            }
             if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_snapshot(&dashboard_view, &crate::cached_system_snapshot());
                 crate::ui::set_dashboard_thermal(

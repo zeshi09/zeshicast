@@ -8,6 +8,7 @@
 //! main thread reads cheaply (a mutex clone, no subprocesses). The cache starts
 //! empty so launcher construction never waits for these tools.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -35,6 +36,8 @@ struct Cache {
 }
 
 static CACHE: OnceLock<Arc<Mutex<Cache>>> = OnceLock::new();
+/// Cleared while the palette is hidden (P3.3): a hidden palette must not fork.
+static ACTIVE: AtomicBool = AtomicBool::new(true);
 static STARTED: OnceLock<()> = OnceLock::new();
 
 /// Start the background poller. Idempotent — subsequent calls are no-ops.
@@ -47,6 +50,12 @@ pub fn start() {
         let mut tick: u64 = 0;
         let target_interval = Duration::from_secs(1);
         loop {
+            if !is_active() {
+                // Hidden palette: keep the thread, do no work. The cached values
+                // stay readable and the first visible tick refreshes them.
+                std::thread::sleep(target_interval);
+                continue;
+            }
             let start = std::time::Instant::now();
             // Audio reacts to volume keys and the keyboard layout to the switch
             // hotkey, so refresh both every tick. Network state rarely changes,
@@ -96,6 +105,16 @@ pub fn start() {
             }
         }
     });
+}
+
+/// Pause or resume the poller (P3.3). Idempotent.
+pub fn set_active(active: bool) {
+    ACTIVE.store(active, Ordering::Relaxed);
+}
+
+/// Whether the poller is currently running its loop body.
+pub fn is_active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
 }
 
 fn cache() -> Arc<Mutex<Cache>> {
@@ -162,4 +181,20 @@ pub fn cached_battery_snapshot() -> BatterySnapshot {
         .lock()
         .map(|c| c.battery.clone())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poller_can_be_paused_and_resumed() {
+        assert!(is_active(), "the poller starts running");
+
+        set_active(false);
+        assert!(!is_active(), "a hidden palette pauses the poller");
+
+        set_active(true);
+        assert!(is_active(), "showing the palette resumes it");
+    }
 }

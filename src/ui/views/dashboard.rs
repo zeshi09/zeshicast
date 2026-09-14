@@ -88,6 +88,9 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         let date_c = date.clone();
         let show_colon = Rc::new(RefCell::new(true));
         glib::timeout_add_seconds_local(1, move || {
+            if crate::ui::hidden() {
+                return glib::ControlFlow::Continue;
+            }
             let now = Local::now();
             // Blink the colon via alpha only — the ':' glyph always stays so the
             // digits never shift horizontally (constant width, matches mockup).
