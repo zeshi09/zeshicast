@@ -167,7 +167,11 @@ pub fn show_notification_osd(
         osd.body_label.set_text(body_trimmed);
         osd.body_label.set_visible(!body_trimmed.is_empty());
 
-        update_icon(&osd.icon_box, app_name, app_icon);
+        // The toast's own counter, after this show() bumped it.
+        let toast_generation = osd.generation;
+        update_icon(&osd.icon_box, app_name, app_icon, move || {
+            is_current_notification_generation(toast_generation)
+        });
 
         osd.window.set_visible(true);
         osd.revealer.set_reveal_child(true);
@@ -293,7 +297,56 @@ fn safe_icon_path_in(
         .then_some(canonical)
 }
 
-fn update_icon(icon_box: &GtkBox, app_name: &str, app_icon: &str) {
+/// Whether the notification toast still shows the generation that asked for an
+/// icon. `false` when there is no toast at all: nothing should be applied to a
+/// surface that has already been dismissed (P2.5b).
+fn is_current_notification_generation(generation: u64) -> bool {
+    NOTIFICATION_OSD.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|osd| osd.generation == generation)
+    })
+}
+
+/// Read and decode an icon without blocking the main loop (P2.5b).
+///
+/// `gtk::Image::from_file` reads and decodes synchronously, and this runs on the
+/// path a notification's `app_icon` takes -- an attacker-chosen file inside an
+/// icon directory (what `safe_icon_path` allows) could therefore freeze the whole
+/// UI for as long as reading and decoding it takes. The generation check keeps a
+/// slow read from overwriting the icon of a notification that has replaced it.
+fn load_icon_async(
+    icon_box: &GtkBox,
+    path: std::path::PathBuf,
+    is_current: impl Fn() -> bool + 'static,
+) {
+    let icon_box = icon_box.clone();
+    gio::File::for_path(path).load_bytes_async(gio::Cancellable::NONE, move |result| {
+        if !is_current() {
+            return;
+        }
+        let Ok((bytes, _etag)) = result else {
+            return;
+        };
+        let Ok(texture) = gtk::gdk::Texture::from_bytes(&bytes) else {
+            return;
+        };
+
+        let img = gtk::Image::from_paintable(Some(&texture));
+        img.set_pixel_size(32);
+        while let Some(child) = icon_box.first_child() {
+            icon_box.remove(&child);
+        }
+        icon_box.append(&img);
+    });
+}
+
+fn update_icon(
+    icon_box: &GtkBox,
+    app_name: &str,
+    app_icon: &str,
+    is_current: impl Fn() -> bool + 'static,
+) {
     while let Some(child) = icon_box.first_child() {
         icon_box.remove(&child);
     }
@@ -301,10 +354,8 @@ fn update_icon(icon_box: &GtkBox, app_name: &str, app_icon: &str) {
     let icon_trimmed = app_icon.trim();
     if !icon_trimmed.is_empty() {
         if let Some(path) = safe_icon_path(icon_trimmed) {
-            let img = gtk::Image::from_file(path);
-            img.set_pixel_size(32);
-            icon_box.append(&img);
-            return;
+            // The fallback below is drawn now and replaced when the bytes arrive.
+            load_icon_async(icon_box, path, is_current);
         }
         let display = gtk::gdk::Display::default();
         let has_theme_icon = display
@@ -556,5 +607,13 @@ mod tests {
         assert!(safe_icon_path_in(&dirs, &a_directory.to_string_lossy()).is_none());
         assert!(safe_icon_path_in(&dirs, "/etc/hostname").is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+    #[test]
+    fn an_icon_load_is_refused_when_its_toast_is_gone() {
+        // No OSD has been built in this process (building one needs a display),
+        // so the fail-closed direction is what can be asserted here: a load whose
+        // generation no longer matches must not touch the surface.
+        assert!(!is_current_notification_generation(0));
+        assert!(!is_current_notification_generation(7));
     }
 }
