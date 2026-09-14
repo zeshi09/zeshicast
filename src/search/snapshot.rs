@@ -14,15 +14,15 @@ use std::collections::{HashMap, HashSet};
 
 use crate::app::preference_enabled_value;
 use crate::{
-    Action, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider, BrowserTabsProvider,
-    CalcHistoryEntry, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider,
-    ExtensionManifest, ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider,
-    LauncherCommand, MAX_RESULTS, MediaProvider, NamedValue, NamedValuesProvider, NetworkProvider,
-    NiriProvider, NotificationsProvider, PlaceholderContext, ProcessesProvider, ScriptEntry,
-    ScriptsProvider, SearchContext, SearchProvider, ShellCommand, SwayProvider, SystemProvider,
-    WebProvider, WindowsProvider, app_action, fuzzy_score, normalize_alias, search_audio_actions,
-    search_media_actions, search_network_actions, search_notification_actions,
-    search_system_actions,
+    app_action, fuzzy_score, normalize_alias, search_audio_actions, search_media_actions,
+    search_network_actions, search_notification_actions, search_system_actions, Action, ActionKind,
+    ActionTarget, AppEntry, AppsProvider, AudioProvider, BrowserTabsProvider, CalcHistoryEntry,
+    ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider, ExtensionManifest,
+    ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider, LauncherCommand, MediaProvider,
+    NamedValue, NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider,
+    PlaceholderContext, ProcessesProvider, ScriptEntry, ScriptsProvider, SearchContext,
+    SearchProvider, ShellCommand, SwayProvider, SystemProvider, WebProvider, WindowsProvider,
+    MAX_RESULTS,
 };
 
 /// Everything `search` reads from the application.
