@@ -100,7 +100,40 @@ fn emphasis(text: &str) -> String {
     let bold = wrap_pairs(&escaped, "**", "<b>", "</b>");
     let guarded = bold.replace("**", &STAR_GUARD.to_string());
     let italic = wrap_pairs(&guarded, "*", "<i>", "</i>");
-    italic.replace(STAR_GUARD, "**")
+    let markup = italic.replace(STAR_GUARD, "**");
+
+    // Crossing spans (e.g. `*a **b* c**`) come out as `<i>a <b>b</i> c</b>`.
+    // Pango rejects that outright and the label renders *nothing*, so fall back
+    // to the literal text: a marker the user typed is better than a blank line.
+    if spans_are_nested(&markup) {
+        markup
+    } else {
+        escaped
+    }
+}
+
+/// `true` when every tag in `markup` is closed in the order it was opened.
+fn spans_are_nested(markup: &str) -> bool {
+    let mut stack: Vec<&str> = Vec::new();
+    let mut rest = markup;
+
+    while let Some(position) = rest.find('<') {
+        let tail = &rest[position..];
+        let Some(end) = tail.find('>') else {
+            return false;
+        };
+        let tag = &tail[..=end];
+        if let Some(name) = tag.strip_prefix("</") {
+            if stack.pop() != Some(name) {
+                return false;
+            }
+        } else {
+            stack.push(&tag[1..]);
+        }
+        rest = &tail[end + 1..];
+    }
+
+    stack.is_empty()
 }
 
 /// Replace an *even* number of `marker` occurrences with alternating open/close
@@ -148,6 +181,32 @@ mod tests {
             to_pango_markup("**hi** and *there*"),
             "<b>hi</b> and <i>there</i>"
         );
+    }
+
+    #[test]
+    fn crossing_markers_do_not_produce_invalid_markup() {
+        // `<i>a <b>b</i> c</b>` is rejected by Pango, which used to blank the
+        // whole label; the markers are left literal instead.
+        assert_eq!(to_pango_markup("*a **b* c**"), "*a **b* c**");
+        assert_eq!(to_pango_markup("*a **b** c*"), "<i>a <b>b</b> c</i>");
+    }
+
+    #[test]
+    fn emitted_markup_is_always_nested() {
+        for input in [
+            "**bold** and *italic*",
+            "*a **b* c**",
+            "a ** b",
+            "`code` and **bold**",
+            "**a *b** c*",
+            "***triple***",
+        ] {
+            let markup = to_pango_markup(input);
+            assert!(
+                spans_are_nested(&markup),
+                "invalid nesting for {input:?}: {markup}"
+            );
+        }
     }
 
     #[test]

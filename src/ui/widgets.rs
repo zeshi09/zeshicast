@@ -65,6 +65,11 @@ pub fn scrollable_list(list: &ListBox) -> ScrolledWindow {
 }
 
 pub fn move_selection(list: &ListBox, delta: i32) {
+    if delta == 0 {
+        // `next` would never advance below (`delta.signum()` is 0), so a row that
+        // is not selectable made this loop run forever.
+        return;
+    }
     let current = list.selected_row().map(|row| row.index()).unwrap_or(0);
     let mut next = (current + delta).max(0);
 

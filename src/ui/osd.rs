@@ -137,10 +137,14 @@ pub fn show_notification_osd(
     let default_app = gio::Application::default().and_then(|a| a.downcast::<Application>().ok());
     let app = app.or(default_app.as_ref());
 
+    // freedesktop: 0 means "the notification never expires on its own" (the
+    // server would be free to choose a timeout); a negative value means the
+    // server decides. Used to treat 0 as 8 s, which silently dismissed
+    // notifications the sender asked to keep.
     let dwell_ms = match expire_timeout_ms {
-        ms if ms > 0 => (ms as u64).clamp(1500, 30_000),
-        0 => 8_000,
-        _ => 4_500,
+        ms if ms > 0 => Some((ms as u64).clamp(1500, 30_000)),
+        0 => None,
+        _ => Some(4_500),
     };
 
     let generation = NOTIFICATION_OSD.with(|cell| {
@@ -202,7 +206,10 @@ pub fn dismiss_notification_osd() {
     }
 }
 
-fn schedule_dismiss(generation: u64, delay_ms: u64) {
+fn schedule_dismiss(generation: u64, delay_ms: Option<u64>) {
+    let Some(delay_ms) = delay_ms else {
+        return;
+    };
     glib::timeout_add_local_once(Duration::from_millis(delay_ms), move || {
         let (still_current, hovered) = NOTIFICATION_OSD.with(|cell| {
             if let Some(osd) = cell.borrow().as_ref()
@@ -408,7 +415,7 @@ fn build_notification_osd(app: Option<&Application>) -> NotificationOsd {
             let current_generation = NOTIFICATION_OSD
                 .with(|cell| cell.borrow().as_ref().map(|o| o.generation).unwrap_or(0));
             if current_generation > 0 {
-                schedule_dismiss(current_generation, 1800);
+                schedule_dismiss(current_generation, Some(1800));
             }
         });
     }
