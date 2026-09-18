@@ -194,22 +194,6 @@ mod tests {
         assert_eq!(err.message, "Method not found");
     }
 
-    #[test]
-    fn extension_command_info_serde() {
-        let info = ExtensionCommandInfo {
-            id: "cmd_run".to_string(),
-            title: "Run Task".to_string(),
-            subtitle: Some("Subtitle".to_string()),
-            icon: Some("icon".to_string()),
-            keywords: Some(vec!["run".to_string(), "task".to_string()]),
-            mode: Some("view".to_string()),
-        };
-        let serialized = serde_json::to_string(&info).unwrap();
-        let deserialized: ExtensionCommandInfo = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized.id, "cmd_run");
-        assert_eq!(deserialized.title, "Run Task");
-        assert_eq!(deserialized.mode.as_deref(), Some("view"));
-    }
     fn item(id: &str, title: &str) -> ExtensionSearchResultItem {
         ExtensionSearchResultItem {
             id: id.to_string(),

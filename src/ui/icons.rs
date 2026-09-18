@@ -85,7 +85,11 @@ pub fn fa_glyph(icon_name: &str) -> &'static str {
 }
 
 /// Build a Font Awesome icon label.
-/// Falls back gracefully if FA font is not installed — shows the GTK image instead.
+///
+/// The glyph is a Font Awesome private-use codepoint, so it only renders as an
+/// icon when the system has a Font Awesome family fontconfig can fall back to;
+/// otherwise the generic circle (or a blank box) is what the user sees. An
+/// unknown `icon_name` deliberately gets that circle rather than nothing.
 pub fn fa_icon(icon_name: &str, size_px: u32) -> Label {
     let glyph = fa_glyph(icon_name);
     let label = Label::new(Some(glyph));

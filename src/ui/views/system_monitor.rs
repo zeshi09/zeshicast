@@ -245,29 +245,6 @@ pub fn system_monitor_view(
     processes_label.set_visible(false);
 
     // ── Process table ────────────────────────────────────────────────────────
-    // Table header: filter + sort buttons
-    let table_header = GtkBox::new(Orientation::Horizontal, 8);
-    table_header.set_margin_start(14);
-    table_header.set_margin_end(14);
-    table_header.set_margin_bottom(4);
-
-    let filter_entry = gtk::Entry::builder()
-        .placeholder_text("filter processes…")
-        .hexpand(true)
-        .build();
-    filter_entry.add_css_class("search-entry");
-    table_header.append(&filter_entry);
-
-    let sort_cpu = Button::with_label("CPU ↓");
-    sort_cpu.add_css_class("action-bar-more");
-    sort_cpu.set_tooltip_text(Some("Sort by CPU usage"));
-    let sort_mem = Button::with_label("MEM");
-    sort_mem.add_css_class("action-bar-more");
-    sort_mem.set_tooltip_text(Some("Sort by Memory usage"));
-    table_header.append(&sort_cpu);
-    table_header.append(&sort_mem);
-    root.append(&table_header);
-
     let list = super::results_list();
     list.set_vexpand(true);
     let scroller = super::scrollable_list(&list);
@@ -546,14 +523,6 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
     mem_lbl.set_width_chars(6);
     mem_lbl.set_xalign(1.0);
     layout.append(&mem_lbl);
-
-    // Kill × — hidden, shown only when row is selected (via CSS .kill-btn)
-    let kill_btn = Button::with_label("×");
-    kill_btn.add_css_class("action-bar-btn");
-    kill_btn.add_css_class("kill-btn");
-    kill_btn.set_valign(gtk::Align::Center);
-    kill_btn.set_tooltip_text(Some("Kill process"));
-    layout.append(&kill_btn);
 
     row.set_child(Some(&layout));
     row

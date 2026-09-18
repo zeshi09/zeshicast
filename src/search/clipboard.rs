@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::{self, Write};
 use std::path::Path;
 
 use crate::action::{Action, ActionKind};
@@ -19,23 +18,6 @@ pub(crate) fn load_clipboard_history(path: &Path) -> Vec<String> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter_map(decode_clipboard_line)
         .collect()
-}
-
-#[allow(dead_code)]
-pub(crate) fn write_clipboard_history(path: &Path, entries: &[String]) -> io::Result<()> {
-    let lines = entries
-        .iter()
-        .map(|entry| encode_clipboard_line(entry))
-        .collect::<Vec<_>>();
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut file = fs::File::create(path)?;
-    for line in lines {
-        writeln!(file, "{line}")?;
-    }
-    Ok(())
 }
 
 pub(crate) fn normalize_clipboard_text(text: &str) -> String {
@@ -69,6 +51,7 @@ pub(crate) fn clipboard_preview(text: &str) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn encode_clipboard_line(text: &str) -> String {
     let mut encoded = String::new();
     for ch in text.chars() {

@@ -359,7 +359,13 @@ clipboard history is cleared.
 {{date:%d.%m.%Y}}   custom chrono/strftime format
 {{time:%H:%M}}      custom time format
 {{calc:2 + 2}}      calculator result
+{{uuid}}            a fresh identifier, generated locally
 ```
+
+`{{uuid}}` is not RFC 4122: it formats the current nanosecond timestamp into
+UUID *shape* (`xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx`) so a command has a unique
+string to work with. It is not a random, unguessable identifier — do not use it
+as a token or a secret.
 
 ### Quicklinks and snippets
 

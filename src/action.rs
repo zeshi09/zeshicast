@@ -96,8 +96,11 @@ impl ActionFormCommand {
     }
 }
 
+/// A JSON command's deferred action. Its producer is `search/commands.rs`, which
+/// is `gui` (a command's stdout becomes palette rows), so the headless build has
+/// the type but never fills it in.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct JsonCommandAction {
     pub(crate) category: String,
     pub(crate) command: ShellCommand,
@@ -677,19 +680,6 @@ impl SecondaryAction {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) const SCORE_PIN_BOOST: i32 = 700;
-#[allow(dead_code)]
-pub(crate) const SCORE_WINDOW_BOOST: i32 = 280;
-#[allow(dead_code)]
-pub(crate) const SCORE_COMPOSITOR_BOOST: i32 = 260;
-#[allow(dead_code)]
-pub(crate) const SCORE_PROCESS_BOOST: i32 = 240;
-#[allow(dead_code)]
-pub(crate) const SCORE_APP_BOOST: i32 = 100;
-#[allow(dead_code)]
-pub(crate) const SCORE_CLIPBOARD_BOOST: i32 = 35;
-
 impl Action {
     pub(crate) fn new(
         category: impl Into<String>,
@@ -793,7 +783,7 @@ impl Action {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub(crate) fn json_command_data(&self) -> Option<&JsonCommandAction> {
         match &self.kind {
             ActionKind::JsonCommand(command) => Some(command),

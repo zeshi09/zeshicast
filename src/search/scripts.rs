@@ -314,13 +314,6 @@ pub(crate) fn run_script_stdout_with_args(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// Run a script and return its stdout. Used for mode=fullOutput / compact result display.
-#[cfg(feature = "gui")]
-#[allow(dead_code)]
-pub(crate) fn run_script_stdout(path: &std::path::Path) -> std::io::Result<String> {
-    run_script_stdout_with_args(path, &[])
-}
-
 pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action> {
     if entries.is_empty() {
         return Vec::new();

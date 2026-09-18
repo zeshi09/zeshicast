@@ -9,21 +9,6 @@ use serde_json::Value;
 
 use crate::process::{CHILD_EXIT_GRACE, ChildGuard};
 
-#[allow(dead_code)]
-pub const PARSE_ERROR: i64 = -32700;
-#[allow(dead_code)]
-pub const INVALID_REQUEST: i64 = -32600;
-#[allow(dead_code)]
-pub const METHOD_NOT_FOUND: i64 = -32601;
-#[allow(dead_code)]
-pub const INVALID_PARAMS: i64 = -32602;
-#[allow(dead_code)]
-pub const INTERNAL_ERROR: i64 = -32603;
-#[allow(dead_code)]
-pub const TIMEOUT_ERROR: i64 = -32000;
-#[allow(dead_code)]
-pub const CAPABILITY_DENIED: i64 = -32001;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
@@ -61,34 +46,6 @@ pub struct JsonRpcError {
     pub data: Option<Value>,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionInitParams {
-    pub client: String,
-    pub version: String,
-    pub capabilities: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionInitResult {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub protocol_version: String,
-    #[serde(default)]
-    pub capabilities: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionCommandInfo {
-    pub id: String,
-    pub title: String,
-    pub subtitle: Option<String>,
-    pub icon: Option<String>,
-    pub keywords: Option<Vec<String>>,
-    pub mode: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionSearchResultItem {
     pub id: String,
@@ -107,19 +64,6 @@ pub struct ExtensionExecuteResult {
     pub open_url: Option<String>,
     pub copy_text: Option<String>,
     pub notify: Option<String>,
-}
-
-/// Verify that all `required` capabilities exist within `granted`.
-#[allow(dead_code)]
-pub fn check_capabilities(granted: &[String], required: &[String]) -> Result<(), String> {
-    for req in required {
-        if !granted.iter().any(|g| g.eq_ignore_ascii_case(req)) {
-            return Err(format!(
-                "Capability check failed: missing required capability '{req}'"
-            ));
-        }
-    }
-    Ok(())
 }
 
 /// Executes a JSON-RPC 2.0 request against an external executable with stdin/stdout isolation
@@ -245,36 +189,6 @@ pub fn call_json_rpc_with_args(
         .ok_or_else(|| "Empty RPC result".to_string())
 }
 
-#[allow(dead_code)]
-pub fn initialize(
-    binary_path: &Path,
-    client_version: &str,
-    capabilities: &[String],
-    timeout_ms: u64,
-) -> Result<ExtensionInitResult, String> {
-    let params = serde_json::json!({
-        "client": "zeshicast",
-        "version": client_version,
-        "capabilities": capabilities,
-    });
-    let result = call_json_rpc(binary_path, "initialize", params, timeout_ms)?;
-    serde_json::from_value(result).map_err(|e| format!("Failed to parse initialize result: {e}"))
-}
-
-#[allow(dead_code)]
-pub fn list_commands(
-    binary_path: &Path,
-    timeout_ms: u64,
-) -> Result<Vec<ExtensionCommandInfo>, String> {
-    let result = call_json_rpc(
-        binary_path,
-        "list_commands",
-        serde_json::json!({}),
-        timeout_ms,
-    )?;
-    serde_json::from_value(result).map_err(|e| format!("Failed to parse list_commands result: {e}"))
-}
-
 pub fn search(
     binary_path: &Path,
     query: &str,
@@ -305,26 +219,6 @@ pub fn execute(
 mod tests {
     use super::*;
     use std::time::Instant;
-
-    #[test]
-    fn test_check_capabilities_success() {
-        let granted = vec!["shell".to_string(), "filesystem".to_string()];
-        let required = vec!["shell".to_string()];
-        assert!(check_capabilities(&granted, &required).is_ok());
-
-        let required_case = vec!["SHELL".to_string()];
-        assert!(check_capabilities(&granted, &required_case).is_ok());
-
-        assert!(check_capabilities(&granted, &[]).is_ok());
-    }
-
-    #[test]
-    fn test_check_capabilities_missing() {
-        let granted = vec!["shell".to_string()];
-        let required = vec!["network".to_string()];
-        let err = check_capabilities(&granted, &required).unwrap_err();
-        assert!(err.contains("missing required capability 'network'"));
-    }
 
     #[test]
     fn test_call_json_rpc_with_args_echo() {
@@ -481,20 +375,6 @@ mod tests {
 
     #[test]
     fn test_protocol_types_serde() {
-        let init_res: ExtensionInitResult = serde_json::from_str(
-            r#"{
-            "id": "test.ext",
-            "name": "Test Extension",
-            "version": "1.0.0",
-            "protocol_version": "2.0",
-            "capabilities": ["shell"]
-        }"#,
-        )
-        .unwrap();
-
-        assert_eq!(init_res.id, "test.ext");
-        assert_eq!(init_res.capabilities, vec!["shell"]);
-
         let exec_res: ExtensionExecuteResult = serde_json::from_str(
             r#"{
             "success": true,

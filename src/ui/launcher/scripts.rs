@@ -42,7 +42,7 @@ fn finish_script_run(
 
 /// Run a Script action's executable synchronously (call from a worker thread)
 /// and classify its result for the capture path.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn run_script_capture(action: &Action) -> ScriptCaptureOutcome {
     run_script_capture_with_args(action, &[])
 }

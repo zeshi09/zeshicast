@@ -11,42 +11,6 @@ use crate::search::clipboard::MAX_CLIPBOARD_ENTRIES;
 /// keeps it from colliding with any real copied text.
 pub const CLIPBOARD_IMAGE_PREFIX: &str = "\u{1}zeshicast-image:";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum ClipboardItem {
-    Text(String),
-    Image(PathBuf),
-}
-
-#[allow(dead_code)]
-impl ClipboardItem {
-    pub fn parse(raw: &str) -> Self {
-        if let Some(path) = clipboard_image_path(raw) {
-            Self::Image(PathBuf::from(path))
-        } else {
-            Self::Text(raw.to_string())
-        }
-    }
-
-    pub fn to_raw(&self) -> String {
-        match self {
-            Self::Text(text) => text.clone(),
-            Self::Image(path) => format!("{CLIPBOARD_IMAGE_PREFIX}{}", path.display()),
-        }
-    }
-
-    pub fn is_image(&self) -> bool {
-        matches!(self, Self::Image(_))
-    }
-
-    pub fn image_path(&self) -> Option<&Path> {
-        match self {
-            Self::Image(path) => Some(path.as_path()),
-            Self::Text(_) => None,
-        }
-    }
-}
-
 /// If `value` is a *validated* image entry, return the cached PNG path.
 ///
 /// A value that merely carries the sentinel prefix is **not** enough: the path
