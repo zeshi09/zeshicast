@@ -470,7 +470,10 @@ until the input is complete. Shell and JSON producer commands run through
 > the context they land in before reaching `sh -c`, so untrusted input cannot
 > inject commands. `--env {{arg:env}}`, `--env "{{arg:env}}"` and
 > `'prefix {{arg:env}}'` are equally safe; prefer the unquoted form for
-> readability.
+> readability. A placeholder inside a here-document body is escaped for that
+> body too; the one case that cannot be made safe — a value containing a line
+> equal to the delimiter — is left unsubstituted rather than injected. See
+> [docs/security.md](docs/security.md#placeholder-handling) for the exact rules.
 
 `[env]` values are expanded with the same placeholders as `command` and injected
 only into that command process.

@@ -1481,4 +1481,48 @@ DEPLOY_TOKEN = "{{pref:token}}"
             );
         }
     }
+
+    /// Every test `docs/security.md` names must exist (P5.6).
+    ///
+    /// The document states the security model and, beside each claim, the test
+    /// that keeps it true -- an HTML comment, invisible when rendered:
+    /// `<!-- test: name -->`. Without this check a renamed or deleted test would
+    /// leave the document asserting something nothing verifies.
+    #[test]
+    fn documented_invariants_have_the_tests_they_name() {
+        fn collect_sources(dir: &std::path::Path, out: &mut String) {
+            for entry in std::fs::read_dir(dir).expect("read src") {
+                let path = entry.expect("directory entry").path();
+                if path.is_dir() {
+                    collect_sources(&path, out);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    out.push_str(&std::fs::read_to_string(&path).expect("read source file"));
+                    out.push('\n');
+                }
+            }
+        }
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let doc =
+            std::fs::read_to_string(root.join("docs/security.md")).expect("read docs/security.md");
+        let mut sources = String::new();
+        collect_sources(&root.join("src"), &mut sources);
+
+        let mut named = 0;
+        for line in doc.lines() {
+            let Some(rest) = line.trim().strip_prefix("<!-- test:") else {
+                continue;
+            };
+            let name = rest.trim().trim_end_matches("-->").trim();
+            assert!(
+                sources.contains(&format!("#[test]\n    fn {name}(")),
+                "docs/security.md names the test `{name}`, which no longer exists"
+            );
+            named += 1;
+        }
+        assert!(
+            named >= 30,
+            "docs/security.md should point at the tests behind its claims; found {named}"
+        );
+    }
 }
