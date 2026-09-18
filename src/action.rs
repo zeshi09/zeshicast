@@ -748,9 +748,6 @@ impl Action {
 
     pub(crate) fn execution_request(&self) -> Option<ExecutionRequest> {
         match &self.kind {
-            ActionKind::Launch(command) => Some(ExecutionRequest::Shell {
-                command: ShellCommand::new(command),
-            }),
             ActionKind::OpenPath(path) => Some(ExecutionRequest::OpenPath(path.clone())),
             ActionKind::OpenUrl(url) => Some(ExecutionRequest::OpenUrl(url.clone())),
             ActionKind::Copy(text) => Some(ExecutionRequest::Copy(text.clone())),
@@ -812,7 +809,7 @@ impl Action {
 
     pub fn value(&self) -> String {
         match &self.kind {
-            ActionKind::Launch(command) | ActionKind::OpenUrl(command) => command.clone(),
+            ActionKind::OpenUrl(command) => command.clone(),
             ActionKind::Shell(command) => command.command.clone(),
             ActionKind::Command(command) => command.display(),
             ActionKind::OpenPath(path) => path.display().to_string(),
@@ -1037,7 +1034,6 @@ fn report_extension_problem(detail: &str) {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ActionKind {
-    Launch(String),
     OpenPath(PathBuf),
     OpenUrl(String),
     Copy(String),

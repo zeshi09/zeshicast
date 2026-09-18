@@ -381,7 +381,7 @@ mod tests {
         let action = Action::new(
             "App",
             "Firefox",
-            ActionKind::Launch("firefox".to_string()),
+            ActionKind::Command(ProcessCommand::new("firefox", Vec::new())),
             1,
         );
         let actions = app.available_secondary_actions(&action);

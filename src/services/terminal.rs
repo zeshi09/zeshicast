@@ -153,4 +153,24 @@ mod tests {
     fn which_finds_sh() {
         assert!(which("sh").is_some());
     }
+
+    #[test]
+    fn the_action_string_stays_one_argument_for_the_terminal_shell() {
+        // The terminal needs a shell, so this one path really is `bash -c`. What
+        // matters is that the action arrives as a single argument: nothing of it
+        // is spliced into a larger line, and no quoting of ours can turn part of
+        // it into a second command.
+        let command = terminal_process_command("echo hi; rm -rf /tmp/x", Some("foot"), true);
+
+        assert_eq!(command.program, "foot");
+        assert_eq!(command.args[0], "-e");
+        assert_eq!(command.args[1], "bash");
+        assert_eq!(command.args[2], "-c");
+        assert!(
+            command.args[3].starts_with("echo hi; rm -rf /tmp/x"),
+            "the action must be the whole script, not a fragment of one: {}",
+            command.args[3]
+        );
+        assert_eq!(command.args.len(), 4, "no other argument may be added");
+    }
 }
