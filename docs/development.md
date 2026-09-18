@@ -98,6 +98,24 @@ Use focused unit tests for parsers, placeholder expansion, capability checks,
 storage migrations, and action execution policy. Use GUI-feature tests when a
 change touches GTK-facing structs, launcher actions, or daemon behavior.
 
+## Where The Launcher Lives
+
+The palette was one 3300-line file; it is now a module per responsibility (P5.2),
+and everything in it is re-exported at `ui::launcher::`, which is the path the
+rest of `ui` uses:
+
+- `ui/launcher/mod.rs` — `GuiState`, `ensure_ui`, presenting the window, and the
+  launcher's own tests;
+- `ui/launcher/build.rs` — widget construction (`build_ui` and the action bar);
+- `ui/launcher/results.rs` — actions into rows, and a row back into its action;
+- `ui/launcher/views.rs` — switching to and filling the sub-views;
+- `ui/launcher/run.rs` — running a selected action, confirmations, the form panel;
+- `ui/launcher/scripts.rs` — script actions and their stdout capture.
+
+A row does not carry an index into `results`: it is tagged with the action it
+was built from (`ACTION_ROW_TAG`), so a stale or unregistered row runs nothing
+instead of a neighbour's action (B-4).
+
 ## Adding A Provider
 
 1. Put provider-specific parsing and search logic under `src/search/` or
