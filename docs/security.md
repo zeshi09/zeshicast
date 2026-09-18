@@ -64,7 +64,12 @@ The `permissions` field is enforced for custom commands.
 - Extension search results (JSON-RPC `search`) pass through the same gate:
   `open_url`/`copy_text` results need `open_url`/`clipboard_write`, and results
   that execute the extension (no `open_url`/`copy_text`) need `shell` and always
-  ask for confirmation.
+  ask for confirmation. Such a result carries the extension's item **id**, which
+  goes back to that extension over its own JSON-RPC `execute` method
+  (`ExecutionRequest::ExtensionExec`) -- the id is never a shell command line.
+  Effects in the `execute` reply (`open_url`, `copy_text`) pass through the same
+  gate again, so a reply cannot ask for more than the manifest granted; `file://`
+  URLs still need `open_path`.
 - The `commands` field of a manifest accepts only `*.toml` files. Executable
   JSON-RPC extensions must be declared in `binaries`, which requires
   `capabilities = ["shell"]`; entries without it are not loaded.
@@ -134,9 +139,9 @@ the already-confirmed script to collect stdout for the result view;
 command's own `sh -c` template (already gated by the JSON action's confirmation
 and its `shell` capability).
 
-Known residual (see the plan's P2/P5): an extension search result without
-`open_url`/`copy_text` is executed as `sh -c <id>` (confirmed, `shell`-gated)
-instead of through the extension's JSON-RPC `execute` method.
+Extension items are executed over the extension's JSON-RPC `execute` method
+(P1.5c). A failure there is reported to the user instead of being invisible on a
+shell's stderr, and the item's `output`/`notify` are shown as a notification.
 
 ## Known Gaps (as of 2026-08)
 

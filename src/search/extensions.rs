@@ -122,12 +122,14 @@ pub fn search_extension(
         } else if let Some(text) = item.copy_text {
             ActionIntent::Copy(text)
         } else {
-            // TODO(P2): route this through the extension's JSON-RPC `execute`
-            // method (`services::extension_protocol::execute`) instead of
-            // treating the id as a shell command line. It is gated by the
-            // manifest's `shell` capability and a confirmation prompt, but the
-            // id is not a program name.
-            ActionIntent::Launch(cmd_id)
+            // The extension decides what the id means, so the id goes back to
+            // the extension over its own JSON-RPC `execute` method instead of to
+            // a shell (P1.5c). Still behind the manifest's `shell` capability
+            // and a confirmation prompt.
+            ActionIntent::ExtensionItem {
+                binary: binary_path.to_path_buf(),
+                id: cmd_id,
+            }
         };
         let gated = gate_action_intent(intent, capabilities);
         if let Some(denial) = &gated.denial {

@@ -127,7 +127,9 @@ pub enum HttpRequest {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ExecutionRequest {
-    Shell { command: ShellCommand },
+    Shell {
+        command: ShellCommand,
+    },
     Command(ProcessCommand),
     OpenPath(PathBuf),
     OpenUrl(String),
@@ -135,6 +137,17 @@ pub(crate) enum ExecutionRequest {
     Http(HttpRequest),
     Media(crate::MediaControl),
     Notification(crate::NotificationAction),
+    /// Run one item of an extension through that extension's own JSON-RPC
+    /// `execute` method (P1.5c). The id names an item *in that extension*, so it
+    /// is not a command line and never reaches a shell.
+    ExtensionExec {
+        binary: PathBuf,
+        id: String,
+        /// What the producing extension was granted. The reply's effects are
+        /// checked against this, so a reply cannot ask for more than the
+        /// manifest declared.
+        granted: CapabilitySet,
+    },
 }
 
 impl ExecutionRequest {
@@ -143,6 +156,9 @@ impl ExecutionRequest {
     pub(crate) fn required_capabilities(&self) -> CapabilitySet {
         match self {
             Self::Shell { .. } | Self::Command(_) => CapabilitySet::new(vec![Capability::Shell]),
+            // An extension item may do anything the extension itself could; it
+            // stays behind the manifest's `shell` capability (no relaxation).
+            Self::ExtensionExec { .. } => CapabilitySet::new(vec![Capability::Shell]),
             Self::OpenPath(_) => CapabilitySet::new(vec![Capability::OpenPath]),
             Self::OpenUrl(_) => CapabilitySet::new(vec![Capability::OpenUrl]),
             Self::Copy(_) => CapabilitySet::new(vec![Capability::ClipboardWrite]),
@@ -490,6 +506,65 @@ mod tests {
             ActionRisk::ClipboardClear
         );
     }
+
+    #[test]
+    fn an_extension_item_never_becomes_a_shell_command() {
+        // The regression this guards: the item id used to be handed to `sh -c`
+        // as if it were a command line.
+        let action = Action::new(
+            "Extension: demo",
+            "Deploy",
+            ActionKind::ExtensionItem {
+                binary: PathBuf::from("/usr/bin/demo-extension"),
+                id: "deploy".to_string(),
+            },
+            100,
+        )
+        .with_capabilities(CapabilitySet::new(vec![Capability::Shell]));
+
+        match action.execution_request() {
+            Some(ExecutionRequest::ExtensionExec { binary, id, .. }) => {
+                assert_eq!(binary, PathBuf::from("/usr/bin/demo-extension"));
+                assert_eq!(id, "deploy");
+            }
+            other => panic!("expected an extension exec request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_extension_reply_effect_needs_the_capability_it_asks_for() {
+        let reply = crate::services::extension_protocol::ExtensionExecuteResult {
+            success: true,
+            output: None,
+            open_url: Some("https://example.com".to_string()),
+            copy_text: Some("secret".to_string()),
+            notify: None,
+        };
+
+        assert!(
+            extension_reply_effects(&reply, &CapabilitySet::empty()).is_empty(),
+            "an empty ceiling must neither open a URL nor copy text"
+        );
+
+        let granted = CapabilitySet::new(vec![Capability::OpenUrl, Capability::ClipboardWrite]);
+        assert_eq!(extension_reply_effects(&reply, &granted).len(), 2);
+    }
+
+    #[test]
+    fn a_reply_cannot_reach_the_filesystem_through_a_file_url() {
+        let reply = crate::services::extension_protocol::ExtensionExecuteResult {
+            success: true,
+            output: None,
+            open_url: Some("file:///etc/shadow".to_string()),
+            copy_text: None,
+            notify: None,
+        };
+
+        // `open_url` alone must not open local paths, exactly as for search
+        // results.
+        let granted = CapabilitySet::new(vec![Capability::OpenUrl]);
+        assert!(extension_reply_effects(&reply, &granted).is_empty());
+    }
 }
 
 impl ActionRisk {
@@ -686,6 +761,11 @@ impl Action {
             ActionKind::HttpCopy(req) => Some(ExecutionRequest::Http(req.clone())),
             ActionKind::Media(control) => Some(ExecutionRequest::Media(*control)),
             ActionKind::Notification(action) => Some(ExecutionRequest::Notification(*action)),
+            ActionKind::ExtensionItem { binary, id } => Some(ExecutionRequest::ExtensionExec {
+                binary: binary.clone(),
+                id: id.clone(),
+                granted: self.capabilities.clone(),
+            }),
             ActionKind::Launcher(_)
             | ActionKind::Form(_)
             | ActionKind::JsonCommand(_)
@@ -743,6 +823,8 @@ impl Action {
                 HttpRequest::AiChat { query, .. } => query.clone(),
             },
             ActionKind::Launcher(_) => self.title.clone(),
+            // The id is the value a row shows and copies; the binary is not.
+            ActionKind::ExtensionItem { id, .. } => id.clone(),
             ActionKind::Form(form) => form.command.display(),
             ActionKind::JsonCommand(command) => command.command.command.clone(),
             ActionKind::Media(_) => self.title.clone(),
@@ -841,6 +923,15 @@ fn run_verified_request(request: ExecutionRequest) {
                 }
             });
         }
+        ExecutionRequest::ExtensionExec {
+            binary,
+            id,
+            granted,
+        } => {
+            // A JSON-RPC round trip with its own timeout: keep it off the
+            // caller's thread, like the HTTP round trips above.
+            std::thread::spawn(move || run_extension_item(&binary, &id, &granted));
+        }
         ExecutionRequest::Media(control) => crate::media_control(control),
         ExecutionRequest::Notification(action) => match action {
             crate::NotificationAction::ToggleDnd => {
@@ -849,6 +940,99 @@ fn run_verified_request(request: ExecutionRequest) {
             crate::NotificationAction::ClearAll => crate::clear_notifications(),
         },
     }
+}
+
+/// How long one extension `execute` call may run before its child is killed.
+const EXTENSION_EXEC_TIMEOUT_MS: u64 = 5_000;
+
+/// Run one extension item over the extension's own JSON-RPC protocol (P1.5c).
+///
+/// This is what an extension result does now: the *extension* decides what the
+/// id means. Previously the id was handed to `sh -c` as if it were a command
+/// line, so an item whose id happened to look like a command ran that command
+/// instead of the item the user picked.
+fn run_extension_item(binary: &Path, id: &str, granted: &CapabilitySet) {
+    let reply = match crate::services::extension_protocol::execute(
+        binary,
+        id,
+        None,
+        EXTENSION_EXEC_TIMEOUT_MS,
+    ) {
+        Ok(reply) => reply,
+        Err(error) => {
+            report_extension_problem(&format!("'{id}' failed: {error}"));
+            return;
+        }
+    };
+
+    if !reply.success {
+        let detail = reply
+            .output
+            .clone()
+            .unwrap_or_else(|| "the extension refused the item".to_string());
+        report_extension_problem(&format!("'{id}': {detail}"));
+        return;
+    }
+
+    for effect in extension_reply_effects(&reply, granted) {
+        apply_extension_effect(effect);
+    }
+
+    if let Some(message) = reply.output.clone().or_else(|| reply.notify.clone()) {
+        crate::push_notification("Zeshicast", "Extension", &message, 0);
+    }
+}
+
+/// The effects an extension's reply may have, filtered through the same gate the
+/// items themselves pass (fail closed): a reply asking for more than the
+/// manifest granted is dropped, not applied.
+fn extension_reply_effects(
+    reply: &crate::services::extension_protocol::ExtensionExecuteResult,
+    granted: &CapabilitySet,
+) -> Vec<ActionKind> {
+    use crate::search::commands::{ActionIntent, gate_action_intent};
+
+    let granted: Vec<Capability> = granted.iter().collect();
+    let requested = [
+        reply.open_url.clone().map(ActionIntent::OpenUrl),
+        reply.copy_text.clone().map(ActionIntent::Copy),
+    ];
+
+    requested
+        .into_iter()
+        .flatten()
+        .filter_map(|intent| {
+            // A denial here means "do not do this", never "do it anyway".
+            let gated = gate_action_intent(intent, &granted);
+            gated.denial.is_none().then_some(gated.kind)
+        })
+        .collect()
+}
+
+/// Apply one effect an extension's reply asked for.
+fn apply_extension_effect(effect: ActionKind) {
+    match effect {
+        ActionKind::OpenUrl(url) => {
+            spawn_command(&ProcessCommand::new("xdg-open", vec![url]));
+        }
+        ActionKind::OpenPath(path) => {
+            spawn_command(&ProcessCommand::new(
+                "xdg-open",
+                vec![path.to_string_lossy().to_string()],
+            ));
+        }
+        ActionKind::Copy(text) => copy_to_clipboard(&text),
+        // `gate_action_intent` cannot let anything else through for the intents
+        // above; doing nothing is the safe response if that ever changes.
+        _ => {}
+    }
+}
+
+/// Tell the user an extension item failed. The old path could not: it ran the id
+/// as a shell command and whatever happened to stderr was invisible.
+fn report_extension_problem(detail: &str) {
+    eprintln!("extension item {detail}");
+    crate::push_notification("Zeshicast", "Extension Item Failed", detail, 0);
 }
 
 #[derive(Debug, Clone)]
@@ -867,6 +1051,11 @@ pub(crate) enum ActionKind {
     Media(crate::MediaControl),
     /// Notification action routed to our own notification store.
     Notification(crate::NotificationAction),
+    /// One item of an external extension, run over its own protocol.
+    ExtensionItem {
+        binary: PathBuf,
+        id: String,
+    },
     None,
 }
 

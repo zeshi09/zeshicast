@@ -287,7 +287,6 @@ pub fn search(
     serde_json::from_value(result).map_err(|e| format!("Failed to parse search result: {e}"))
 }
 
-#[allow(dead_code)]
 pub fn execute(
     binary_path: &Path,
     id: &str,
@@ -510,5 +509,45 @@ mod tests {
         assert!(exec_res.success);
         assert_eq!(exec_res.output.as_deref(), Some("all good"));
         assert_eq!(exec_res.notify.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn execute_asks_the_extension_over_its_own_protocol() {
+        use std::process::Command;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // The item contract: the id is sent to the extension's own `execute`
+        // method, with the id in the params -- an id is never a command line.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/extension-protocol-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let stamp = NEXT.fetch_add(1, Ordering::Relaxed);
+        let script = dir.join(format!("fake-extension-{}-{stamp}.sh", std::process::id()));
+        let seen = dir.join(format!("seen-{}-{stamp}.txt", std::process::id()));
+
+        let reply_line = r#"{"jsonrpc":"2.0","id":1,"result":{"success":true,"output":"ran","open_url":null,"copy_text":null,"notify":null}}"#;
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nread -r line\nprintf '%s\\n' \"$line\" > {seen}\nprintf '%s\\n' '{reply_line}'\n",
+                seen = seen.display()
+            ),
+        )
+        .unwrap();
+        Command::new("chmod")
+            .args(["+x", script.to_str().unwrap()])
+            .status()
+            .unwrap();
+
+        let reply = execute(&script, "deploy", None, 5_000).expect("the extension answered");
+        assert!(reply.success);
+        assert_eq!(reply.output.as_deref(), Some("ran"));
+
+        let request = std::fs::read_to_string(&seen).expect("the request was recorded");
+        assert!(request.contains(r#""method":"execute""#), "got {request}");
+        assert!(
+            request.contains(r#""deploy""#),
+            "the id must travel in the request: {request}"
+        );
     }
 }

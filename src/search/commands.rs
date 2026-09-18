@@ -729,8 +729,13 @@ impl ParsedJsonActionKind {
 pub(crate) enum ActionIntent {
     OpenUrl(String),
     Copy(String),
-    /// Run the producing extension's command by id.
-    Launch(String),
+    /// Run an item of the producing extension through that extension's own
+    /// JSON-RPC `execute` method. The id names an item in that extension, so it
+    /// is never a command line (P1.5c).
+    ExtensionItem {
+        binary: PathBuf,
+        id: String,
+    },
     #[cfg(any(feature = "gui", test))]
     OpenPath(String),
     #[cfg(any(feature = "gui", test))]
@@ -766,7 +771,7 @@ impl GatedAction {
 }
 
 /// The single gate for results produced by commands and extensions. Anything
-/// that can execute code (`Shell`, `Launch`) is downgraded to a confirmed
+/// that can execute code (`Shell`, `ExtensionItem`) is downgraded to a confirmed
 /// action; anything else is checked against the granted capabilities.
 pub(crate) fn gate_action_intent(intent: ActionIntent, capabilities: &[Capability]) -> GatedAction {
     let allowed = |capability: Capability| has_capability(capabilities, capability);
@@ -825,9 +830,9 @@ pub(crate) fn gate_action_intent(intent: ActionIntent, capabilities: &[Capabilit
                 GatedAction::blocked("Blocked: JSON action requires permissions = [\"shell\"]")
             }
         }
-        ActionIntent::Launch(id) => {
+        ActionIntent::ExtensionItem { binary, id } => {
             if allowed(Capability::Shell) {
-                GatedAction::allowed(ActionKind::Launch(id), ActionRisk::Shell)
+                GatedAction::allowed(ActionKind::ExtensionItem { binary, id }, ActionRisk::Shell)
             } else {
                 GatedAction::blocked(
                     "Blocked: extension result requires capabilities = [\"shell\"]",
@@ -1249,15 +1254,21 @@ permissions = ["shell"]
     }
 
     #[test]
-    fn gate_action_intent_blocks_launch_without_shell() {
-        let blocked = gate_action_intent(ActionIntent::Launch("id".to_string()), &[]);
+    fn gate_action_intent_blocks_an_extension_item_without_shell() {
+        let item = || ActionIntent::ExtensionItem {
+            binary: PathBuf::from("/usr/bin/demo-extension"),
+            id: "deploy".to_string(),
+        };
+
+        let blocked = gate_action_intent(item(), &[]);
         assert!(matches!(blocked.kind, ActionKind::None));
         assert!(blocked.denial.is_some());
-        assert!(!blocked.risk.requires_confirmation());
 
-        let allowed =
-            gate_action_intent(ActionIntent::Launch("id".to_string()), &[Capability::Shell]);
-        assert!(matches!(allowed.kind, ActionKind::Launch(_)));
+        let allowed = gate_action_intent(item(), &[Capability::Shell]);
+        assert!(
+            matches!(allowed.kind, ActionKind::ExtensionItem { .. }),
+            "an item must stay an item: never a shell command line"
+        );
         assert_eq!(allowed.risk, ActionRisk::Shell);
         assert!(allowed.risk.requires_confirmation());
     }
