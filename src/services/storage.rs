@@ -7,23 +7,31 @@ use rusqlite::{Connection, Result, params};
 const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 fn open(config_dir: &Path) -> Result<Connection> {
-    std::fs::create_dir_all(config_dir).ok();
+    if let Err(error) = std::fs::create_dir_all(config_dir) {
+        log::warn!("could not create {}: {error}", config_dir.display());
+    }
     let db_path = config_dir.join("zeshicast.db");
     let mut conn = Connection::open(&db_path)?;
-    secure_database_permissions(&db_path);
+    // P4.4: this used to be a silent `let _ =`. The database holds clipboard
+    // history, so failing to restrict it to 0600 is worth a journal entry.
+    if let Err(error) = secure_database_permissions(&db_path) {
+        log::warn!("could not restrict {} to 0600: {error}", db_path.display());
+    }
     conn.execute_batch("PRAGMA journal_mode = WAL;")?;
     init(&mut conn)?;
     Ok(conn)
 }
 
 #[cfg(unix)]
-fn secure_database_permissions(path: &Path) {
+fn secure_database_permissions(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
 #[cfg(not(unix))]
-fn secure_database_permissions(_path: &Path) {}
+fn secure_database_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
 
 fn init(conn: &mut Connection) -> Result<()> {
     migrate(conn)
@@ -636,5 +644,30 @@ mod tests {
         assert!(loaded[1].tags.is_empty());
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn failing_to_restrict_the_database_is_reported_not_swallowed() {
+        // The failure used to disappear into `let _ =`; now it reaches the
+        // caller, which logs it.
+        assert!(
+            secure_database_permissions(Path::new("/nonexistent/zeshicast.db")).is_err(),
+            "a missing file is an error"
+        );
+
+        let dir = test_dir("db-permissions");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("zeshicast.db");
+        std::fs::write(&file, b"").unwrap();
+        assert!(secure_database_permissions(&file).is_ok());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

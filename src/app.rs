@@ -72,9 +72,10 @@ pub struct SnippetSummary {
 fn migrate_legacy_storage_if_needed(config_dir: &Path) {
     if !storage::clipboard_has_data(config_dir) {
         let legacy = load_clipboard_history(&config_dir.join("clipboard.txt"));
-        if !legacy.is_empty() {
-            storage::migrate_clipboard(config_dir, &legacy).ok();
-        }
+        if !legacy.is_empty()
+            && let Err(error) = storage::migrate_clipboard(config_dir, &legacy) {
+                log::warn!("could not migrate the legacy clipboard history: {error}");
+            }
     }
     if !storage::usage_has_data(config_dir) {
         let recent_legacy = load_lines(&config_dir.join("recent.txt"))
@@ -82,9 +83,10 @@ fn migrate_legacy_storage_if_needed(config_dir: &Path) {
             .map(|l| l.to_lowercase())
             .collect::<Vec<_>>();
         let freq_legacy = load_frequencies(&config_dir.join("frequencies.txt"));
-        if !recent_legacy.is_empty() {
-            storage::migrate_usage(config_dir, &recent_legacy, &freq_legacy).ok();
-        }
+        if !recent_legacy.is_empty()
+            && let Err(error) = storage::migrate_usage(config_dir, &recent_legacy, &freq_legacy) {
+                log::warn!("could not migrate the legacy usage history: {error}");
+            }
     }
     if !storage::snippet_has_data(config_dir) {
         let legacy = load_named_values(&config_dir.join("snippets.txt"));
@@ -93,7 +95,9 @@ fn migrate_legacy_storage_if_needed(config_dir: &Path) {
                 .into_iter()
                 .map(|item| (item.name, item.value, item.tags))
                 .collect();
-            storage::migrate_snippets(config_dir, &entries).ok();
+            if let Err(error) = storage::migrate_snippets(config_dir, &entries) {
+                log::warn!("could not migrate the legacy snippets: {error}");
+            }
         }
     }
 }
@@ -113,7 +117,9 @@ fn load_clipboard_and_usage(
     let clip_rows = storage::clipboard_load_with_limit(config_dir, clipboard_retention);
     let history: Vec<String> = clip_rows.iter().map(|(t, _)| t.clone()).collect();
     let timestamps: HashMap<String, i64> = clip_rows.into_iter().collect();
-    let _ = prune_clipboard_image_cache(&history);
+    if let Err(error) = prune_clipboard_image_cache(&history) {
+        log::warn!("could not prune the clipboard image cache: {error}");
+    }
 
     let recent = storage::usage_recent(config_dir, 50);
     let frequencies = storage::usage_frequencies(config_dir);

@@ -325,12 +325,17 @@ pub fn save_clipboard_image(bytes: &[u8]) -> io::Result<String> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(()) = fs::create_dir_all(&dir) {
-                let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+            if let Err(error) = fs::create_dir_all(&dir) {
+                log::warn!("could not create {}: {error}", dir.display());
+            } else if let Err(error) = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+            {
+                log::warn!("could not restrict {} to 0700: {error}", dir.display());
             }
         }
         #[cfg(not(unix))]
-        let _ = fs::create_dir_all(&dir);
+        if let Err(error) = fs::create_dir_all(&dir) {
+            log::warn!("could not create {}: {error}", dir.display());
+        }
 
         crate::write_file_atomic(&path, bytes, 0o600)?;
     }

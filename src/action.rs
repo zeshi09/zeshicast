@@ -1119,10 +1119,10 @@ fn spawn_shell(command: &ShellCommand) {
     match crate::process::spawn_detached(&mut process) {
         // Deliberately no command text: the daemon's stdout may be read by
         // other processes and shell commands can embed secrets.
-        Ok(child) => println!("started: sh -c <command> (pid {})", child.pid()),
+        Ok(child) => log::info!("started: sh -c <command> (pid {})", child.pid()),
         // No command text here either: placeholder-expanded commands can
-        // carry secrets and stderr ends up in journald.
-        Err(error) => eprintln!("failed to start shell command: {error}"),
+        // carry secrets and the journal is not private.
+        Err(error) => log::warn!("failed to start shell command: {error}"),
     }
 }
 
@@ -1130,17 +1130,17 @@ fn spawn_command(command: &ProcessCommand) {
     let mut process = Command::new(&command.program);
     process.args(&command.args).envs(&command.env);
     match crate::process::spawn_detached(&mut process) {
-        Ok(child) => println!("started: {} (pid {})", command.program, child.pid()),
-        Err(error) => eprintln!("failed to start {}: {error}", command.program),
+        Ok(child) => log::info!("started: {} (pid {})", command.program, child.pid()),
+        Err(error) => log::warn!("failed to start {}: {error}", command.program),
     }
 }
 
 fn copy_to_clipboard(text: &str) {
     if let Some(path) = crate::clipboard_image_path(text) {
         if crate::copy_clipboard_image(path) {
-            println!("copied image to clipboard");
+            log::info!("copied image to clipboard");
         } else {
-            eprintln!("copy failed; install wl-clipboard or xclip to copy images");
+            log::warn!("copy failed; install wl-clipboard or xclip to copy images");
         }
         return;
     }
@@ -1149,11 +1149,11 @@ fn copy_to_clipboard(text: &str) {
         copy_with("wl-copy", &[], text) || copy_with("xclip", &["-selection", "clipboard"], text);
 
     if copied {
-        println!("copied to clipboard");
+        log::info!("copied to clipboard");
     } else {
-        // Never echo the copied value: it may be a secret and the daemon's
-        // stdout is not guaranteed to stay private.
-        eprintln!("copy failed; install wl-clipboard or xclip to copy automatically");
+        // Never echo the copied value: it may be a secret and the journal is
+        // not guaranteed to stay private either.
+        log::warn!("copy failed; install wl-clipboard or xclip to copy automatically");
     }
 }
 

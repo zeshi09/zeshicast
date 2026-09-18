@@ -6,6 +6,7 @@ use zeshicast::cli::{CliCommand, parse_cli_args};
 use zeshicast::{Action, ExecutionDecision, SecondaryActionKind, Zeshicast};
 
 fn main() {
+    zeshicast::logging::init();
     let args: Vec<String> = env::args().skip(1).collect();
     std::process::exit(run_cli(parse_cli_args(args)));
 }

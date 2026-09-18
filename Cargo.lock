@@ -1615,6 +1615,7 @@ dependencies = [
  "chrono",
  "flate2",
  "gtk4",
+ "log",
  "rusqlite",
  "rustix",
  "serde",

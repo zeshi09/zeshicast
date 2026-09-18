@@ -16,6 +16,10 @@ gui = ["dep:gtk"]
 layer-shell = ["gui"]
 
 [dependencies]
+# Logging facade (P4.4): the daemon is a systemd service, so it needs
+# levels and a filter instead of bare prints. The subscriber lives in
+# src/logging.rs and reads RUST_LOG.
+log = "0.4"
 chrono = "0.4.44"
 flate2 = "1.1"
 gtk = { package = "gtk4", version = "0.11.3", optional = true, features = ["v4_6"] }

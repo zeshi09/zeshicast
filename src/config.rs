@@ -547,7 +547,7 @@ pub(crate) fn load_preferences_or_default(path: &Path) -> HashMap<String, String
     match load_preferences(path) {
         Ok(preferences) => preferences,
         Err(error) => {
-            eprintln!("failed to read preferences: {error}");
+            log::warn!("failed to read preferences: {error}");
             HashMap::new()
         }
     }
@@ -564,14 +564,14 @@ pub(crate) fn load_preferences_with_backup(path: &Path) -> (HashMap<String, Stri
         Err(error) => {
             let backup = back_up_corrupt_file(path);
             match backup {
-                Ok(Some(backup)) => eprintln!(
+                Ok(Some(backup)) => log::warn!(
                     "failed to read preferences: {error}; using defaults and refusing to write (backup: {})",
                     backup.display()
                 ),
-                Ok(None) => eprintln!(
+                Ok(None) => log::warn!(
                     "failed to read preferences: {error}; using defaults and refusing to write (backup not needed)"
                 ),
-                Err(backup_error) => eprintln!(
+                Err(backup_error) => log::warn!(
                     "failed to read preferences: {error}; using defaults and refusing to write (backup failed: {backup_error})"
                 ),
             }

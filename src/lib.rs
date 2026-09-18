@@ -1,3 +1,4 @@
+pub mod logging;
 mod action;
 mod app;
 pub mod cli;

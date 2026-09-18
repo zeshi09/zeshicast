@@ -113,6 +113,10 @@ fn install_termination_handlers(app: &Application) {
 }
 
 fn main() -> glib::ExitCode {
+    // Logging first (P4.4): the GUI process is the daemon in `--daemon` mode, so
+    // its diagnostics belong in the journal with levels, not on stdout.
+    zeshicast::logging::init();
+
     // GTK4's Vulkan/NGL renderer randomly clips the tops of glyphs on some
     // GPU/driver setups; the cairo (software) renderer is glitch-free and plenty
     // fast for a launcher. Default to it, but let the user override.

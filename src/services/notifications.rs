@@ -96,10 +96,19 @@ fn load_persisted_dnd() -> bool {
 
 fn persist_dnd(dnd: bool) {
     let path = dnd_state_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Some(parent) = path.parent()
+        && let Err(error) = std::fs::create_dir_all(parent)
+    {
+        log::warn!("could not create {}: {error}", parent.display());
     }
-    let _ = std::fs::write(path, if dnd { "1" } else { "0" });
+    // Losing this only means do-not-disturb is not remembered across restarts,
+    // so it is a warning and not an error.
+    if let Err(error) = std::fs::write(&path, if dnd { "1" } else { "0" }) {
+        log::warn!(
+            "could not persist do-not-disturb to {}: {error}",
+            path.display()
+        );
+    }
 }
 
 fn now_secs() -> u64 {
