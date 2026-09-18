@@ -144,42 +144,29 @@
               after = [ "graphical-session.target" ];
               wantedBy = [ "graphical-session.target" ];
               path = cfg.extraRuntimePackages;
-              # Hardening зеркален packaging/zeshicast-gtk.service (P2-6).
-              # Включать закомментированное ниже только после ручной проверки:
-              # GTK4/malloc/rustls могут ломаться под W^X и строгим фильтром.
+              # Hardening (P4.1, вариант B). Зеркален
+              # packaging/zeshicast-gtk.service -- держать в синхроне.
+              #
+              # Демон запускает приложения пользователя, а systemd применяет эти
+              # директивы и к его потомкам: mount namespace, seccomp, W^X и
+              # границы capabilities наследуются через fork+exec. Поэтому здесь
+              # остались только те настройки, которые не меняют поведение
+              # запущенного приложения; всё, что меняло, перечислено в
+              # docs/security.md вместе с тем, что именно ломалось.
               serviceConfig = {
                 ExecStart = "${lib.getExe cfg.package} --daemon";
                 ExecStop = "${lib.getExe cfg.package} --quit";
                 Restart = "on-failure";
                 RestartSec = 2;
+                # Единственное намеренное отличие запуска из палитры: setuid и
+                # файловые capabilities не срабатывают (sudo/pkexec оттуда не
+                # запустятся). Всё остальное обязано вести себя как из шелла.
                 NoNewPrivileges = true;
-                PrivateTmp = true;
-                ProtectSystem = "full";
-                ProtectHome = "read-only";
-                # %h корректен для user-юнитов; демону нужны запись конфига и кэша.
-                ReadWritePaths = [
-                  "%h/.config/zeshicast"
-                  "%h/.cache/zeshicast"
-                  "%h/.local/share/fonts/zeshicast"  # bundled font install (ui/fonts.rs)
-                ];
-                RestrictSUIDSGID = true;
-                LockPersonality = true;
-                RestrictRealtime = true;
+                ProtectClock = true;
+                ProtectHostname = true;
                 ProtectKernelTunables = true;
                 ProtectKernelModules = true;
                 ProtectControlGroups = true;
-                ProtectClock = true;
-                ProtectHostname = true;
-                CapabilityBoundingSet = [ ];
-                RestrictAddressFamilies = [
-                  "AF_UNIX"
-                  "AF_INET"
-                  "AF_INET6"
-                  "AF_NETLINK"
-                ];
-                MemoryDenyWriteExecute = true;
-                SystemCallFilter = [ "@system-service" ];
-                SystemCallArchitectures = "native";
               };
             };
           };
@@ -202,42 +189,22 @@
                 PartOf = [ "graphical-session.target" ];
                 After = [ "graphical-session.target" ];
               };
-              # Hardening зеркален packaging/zeshicast-gtk.service (P2-6).
-              # Включать закомментированное ниже только после ручной проверки:
-              # GTK4/malloc/rustls могут ломаться под W^X и строгим фильтром.
+              # Hardening (P4.1, вариант B). Зеркален
+              # packaging/zeshicast-gtk.service -- держать в синхроне.
+              # Почему здесь так мало, объяснено там же и в docs/security.md.
               Service = {
                 ExecStart = "${lib.getExe cfg.package} --daemon";
                 ExecStop = "${lib.getExe cfg.package} --quit";
                 Restart = "on-failure";
                 RestartSec = 2;
+                # Единственное намеренное отличие запуска из палитры: setuid и
+                # файловые capabilities не срабатывают.
                 NoNewPrivileges = true;
-                PrivateTmp = true;
-                ProtectSystem = "full";
-                ProtectHome = "read-only";
-                # %h корректен для user-юнитов; демону нужны запись конфига и кэша.
-                ReadWritePaths = [
-                  "%h/.config/zeshicast"
-                  "%h/.cache/zeshicast"
-                  "%h/.local/share/fonts/zeshicast"  # bundled font install (ui/fonts.rs)
-                ];
-                RestrictSUIDSGID = true;
-                LockPersonality = true;
-                RestrictRealtime = true;
+                ProtectClock = true;
+                ProtectHostname = true;
                 ProtectKernelTunables = true;
                 ProtectKernelModules = true;
                 ProtectControlGroups = true;
-                ProtectClock = true;
-                ProtectHostname = true;
-                CapabilityBoundingSet = [ ];
-                RestrictAddressFamilies = [
-                  "AF_UNIX"
-                  "AF_INET"
-                  "AF_INET6"
-                  "AF_NETLINK"
-                ];
-                MemoryDenyWriteExecute = true;
-                SystemCallFilter = [ "@system-service" ];
-                SystemCallArchitectures = "native";
               };
               Install.WantedBy = [ "graphical-session.target" ];
             };

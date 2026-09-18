@@ -49,7 +49,9 @@ pub(crate) use placeholders::{PlaceholderContext, expand_placeholders, expand_pl
 #[cfg(test)]
 pub(crate) use search::apps::clean_desktop_exec;
 pub(crate) use search::apps::{AppEntry, app_action, load_apps, search_apps};
-pub(crate) use search::calculator::{Calculator, calc_action, format_number, looks_like_expression};
+pub(crate) use search::calculator::{
+    Calculator, calc_action, format_number, looks_like_expression,
+};
 pub(crate) use search::clipboard::{
     MAX_CLIPBOARD_ENTRIES, clipboard_preview, load_clipboard_history, normalize_clipboard_text,
     search_clipboard,
@@ -1378,5 +1380,46 @@ DEPLOY_TOKEN = "{{pref:token}}"
             decode_cmdline(b"zeshicast-gtk\0--daemon\0"),
             "zeshicast-gtk --daemon"
         );
+    }
+
+    /// The daemon unit must not restrict what it launches (P4.1).
+    ///
+    /// systemd applies these directives to the daemon's children too -- mount
+    /// namespaces, seccomp filters, W^X and capability bounds are inherited
+    /// across fork+exec -- so each one listed here was observed to break
+    /// something a user can start from the palette. `docs/security.md` records
+    /// what each of them broke. Keep this list in step with that table.
+    #[test]
+    fn the_daemon_unit_does_not_restrict_what_it_launches() {
+        const INHERITED_AND_BREAKING: &[&str] = &[
+            "ProtectSystem",
+            "ProtectHome",
+            "PrivateTmp",
+            "ReadWritePaths",
+            "MemoryDenyWriteExecute",
+            "SystemCallFilter",
+            "SystemCallArchitectures",
+            "RestrictSUIDSGID",
+            "LockPersonality",
+            "RestrictRealtime",
+            "CapabilityBoundingSet",
+            "RestrictAddressFamilies",
+        ];
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for unit in ["flake.nix", "packaging/zeshicast-gtk.service"] {
+            let text = std::fs::read_to_string(root.join(unit))
+                .unwrap_or_else(|error| panic!("cannot read {unit}: {error}"));
+            for directive in INHERITED_AND_BREAKING {
+                assert!(
+                    !text.contains(directive),
+                    "{unit} sets {directive}, which every launched application inherits"
+                );
+            }
+            assert!(
+                text.contains("NoNewPrivileges"),
+                "{unit} must keep the one deliberate restriction"
+            );
+        }
     }
 }

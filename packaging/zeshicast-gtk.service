@@ -9,27 +9,20 @@ ExecStart=@BIN@/zeshicast-gtk --daemon
 Restart=on-failure
 RestartSec=2
 
-# Hardening (P2-6). Демону нужны: session D-Bus, Wayland-сокет,
-# wl-paste/wl-copy, MPRIS D-Bus, сеть (AI endpoints) и запись в
-# ~/.config/zeshicast и ~/.cache/zeshicast. %h корректен для user-юнитов.
+# Hardening (P4.1, вариант B). Здесь мало намеренно: systemd применяет эти
+# директивы и к потомкам демона, а демон запускает приложения пользователя --
+# mount namespace, seccomp, W^X и границы capabilities наследуются через
+# fork+exec и ломают то, что из шелла работает. Что именно и почему убрано,
+# перечислено в docs/security.md. Зеркален определениям в flake.nix.
+#
+# Намеренное отличие от запуска из шелла одно: setuid и файловые capabilities
+# не срабатывают, поэтому sudo/pkexec из палитры не запустятся.
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=%h/.config/zeshicast %h/.cache/zeshicast %h/.local/share/fonts/zeshicast
-RestrictSUIDSGID=true
-LockPersonality=true
-RestrictRealtime=true
+ProtectClock=true
+ProtectHostname=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-ProtectClock=true
-ProtectHostname=true
-CapabilityBoundingSet=
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-MemoryDenyWriteExecute=true
-SystemCallFilter=@system-service
-SystemCallArchitectures=native
 
 [Install]
 WantedBy=graphical-session.target

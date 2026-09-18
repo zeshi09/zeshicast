@@ -115,6 +115,51 @@ The command template itself is still executable shell code. Review the whole
 template before installing a command, especially when it uses `{{clipboard}}` or
 preferences containing secrets.
 
+## The systemd Unit
+
+The daemon is a user service, and systemd applies its hardening to the daemon's
+*children* as well: mount namespaces, seccomp filters, `NoNewPrivileges` and
+capability bounds are all inherited across `fork` + `exec`. Since the daemon's
+job is to launch the user's applications, opening paths and URLs, any directive
+that constrains a child is a behaviour change for everything started from the
+palette -- the very thing a launcher must not have.
+
+The unit therefore keeps only directives that a launched application cannot
+notice, plus one deliberate exception. What was removed, and what it broke for a
+launched app (P4.1):
+
+| Removed | What it broke |
+| --- | --- |
+| `ProtectSystem=full`, `ProtectHome=read-only`, `ReadWritePaths` | an app could not write `~/.mozilla`, `~/.config`, or its own state |
+| `PrivateTmp=true` | a launched app saw a different `/tmp` than a shell (sockets and IPC files there became invisible) |
+| `MemoryDenyWriteExecute=true` | JIT runtimes died: firefox, electron, Java, Wine |
+| `SystemCallArchitectures=native` | 32-bit binaries lost their syscalls: Steam, 32-bit Wine, older games |
+| `SystemCallFilter=@system-service` | `ptrace` was blocked, breaking debuggers and anything using it |
+| `RestrictSUIDSGID=true` | setuid/setgid helpers stopped working when launched from the palette |
+| `CapabilityBoundingSet=` | file-capability binaries lost their capabilities (`ping`, `dumpcap`) |
+| `RestrictAddressFamilies=` | `AF_BLUETOOTH`, `AF_PACKET`, `AF_VSOCK` were unavailable to a launched app |
+| `LockPersonality=true` | Wine and runtimes that call `personality()` failed |
+| `RestrictRealtime=true` | a launched app could not request realtime scheduling |
+
+Kept: `NoNewPrivileges`, `ProtectClock`, `ProtectHostname`,
+`ProtectKernelTunables`, `ProtectKernelModules`, `ProtectControlGroups`. The
+`Protect*` ones only make kernel interfaces read-only, which no application
+started from the palette depends on.
+
+`NoNewPrivileges` is kept on purpose and is the single known difference from
+launching the same application in a shell: a setuid or file-capability binary
+runs without the privilege escalation, so `sudo`/`pkexec` do not work when
+started from the palette.
+
+The consequence is measured, not estimated: `systemd-analyze security` scores
+this unit **8.1 EXPOSED** where the sandboxed version scored **3.4 OK**. That is
+the price of being able to launch applications at all, and it is why the daemon's
+protection against untrusted input lives in code -- the single execution point,
+the capability gate, ids that never become shell command lines -- rather than in
+systemd. The alternative, if the systemd-level hardening is ever wanted back, is
+not a stronger sandbox on this unit: it is routing every launch through a
+transient unit so the application is not an inherited child.
+
 ## Destructive Actions
 
 System power actions, process kill actions, clipboard clear, shell actions, and
