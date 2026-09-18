@@ -10,12 +10,14 @@ use super::launcher::{
     show_extension_view, show_preferences_view, show_root_view, show_snippet_view,
     terminate_selected_system_process_or_confirm,
 };
+use crate::action::{Action, SecondaryActionKind};
+use crate::app::{SnippetSummary, Zeshicast};
+use crate::services::clipboard_store::ClipboardSummary;
 use crate::ui::launcher_views::{
     show_ai_chat_view, show_audio_view, show_dashboard_view, show_emoji_view,
     show_font_browser_view, show_media_view, show_network_view, show_notifications_view,
     show_system_monitor_view,
 };
-use crate::{Action, ClipboardSummary, SecondaryActionKind, SnippetSummary, Zeshicast};
 use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
@@ -374,7 +376,10 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Dashboard => {
-                crate::ui::set_dashboard_snapshot(dashboard_view, &crate::cached_system_snapshot());
+                crate::ui::set_dashboard_snapshot(
+                    dashboard_view,
+                    &crate::services::poll_cache::cached_system_snapshot(),
+                );
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::SystemMonitor => {
@@ -386,7 +391,10 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Media => {
-                crate::ui::set_media_snapshot(media_view, &crate::cached_media_snapshot());
+                crate::ui::set_media_snapshot(
+                    media_view,
+                    &crate::services::poll_cache::cached_media_snapshot(),
+                );
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Network => {
@@ -396,7 +404,7 @@ fn handle_view_key(
             crate::ui::LauncherView::Notifications => {
                 crate::ui::set_notification_snapshot(
                     notifications_view,
-                    &crate::notification_snapshot(),
+                    &crate::services::notifications::notification_snapshot(),
                 );
                 glib::Propagation::Stop
             }
@@ -431,7 +439,10 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Dashboard => {
-                crate::ui::set_dashboard_snapshot(dashboard_view, &crate::cached_system_snapshot());
+                crate::ui::set_dashboard_snapshot(
+                    dashboard_view,
+                    &crate::services::poll_cache::cached_system_snapshot(),
+                );
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::SystemMonitor => {
@@ -443,7 +454,10 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Media => {
-                crate::ui::set_media_snapshot(media_view, &crate::cached_media_snapshot());
+                crate::ui::set_media_snapshot(
+                    media_view,
+                    &crate::services::poll_cache::cached_media_snapshot(),
+                );
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Network => {
@@ -453,7 +467,7 @@ fn handle_view_key(
             crate::ui::LauncherView::Notifications => {
                 crate::ui::set_notification_snapshot(
                     notifications_view,
-                    &crate::notification_snapshot(),
+                    &crate::services::notifications::notification_snapshot(),
                 );
                 glib::Propagation::Stop
             }
@@ -554,8 +568,8 @@ fn handle_view_key(
                 move || {
                     crate::ui::set_system_monitor_snapshot(
                         &system_monitor_view,
-                        &crate::cached_system_snapshot(),
-                        &crate::cached_top_processes(),
+                        &crate::services::poll_cache::cached_system_snapshot(),
+                        &crate::services::poll_cache::cached_top_processes(),
                     );
                 },
             );

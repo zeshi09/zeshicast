@@ -1,4 +1,4 @@
-use crate::Zeshicast;
+use crate::app::Zeshicast;
 use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
@@ -98,7 +98,7 @@ pub(crate) fn watch_clipboard_image_with(
 
         let mut reader = std::io::BufReader::new(stdout);
         while let Ok(Some(png_bytes)) = read_png_from_stream(&mut reader) {
-            if let Ok(path) = crate::save_clipboard_image(&png_bytes)
+            if let Ok(path) = crate::services::clipboard_store::save_clipboard_image(&png_bytes)
                 && tx.send(path).is_err()
             {
                 return;
@@ -310,11 +310,16 @@ fn capture_clipboard_image(
             return;
         };
         let png = texture.save_to_png_bytes();
-        let Ok(path_str) = crate::save_clipboard_image(png.as_ref()) else {
+        let Ok(path_str) = crate::services::clipboard_store::save_clipboard_image(png.as_ref())
+        else {
             return;
         };
 
-        let value = format!("{}{}", crate::CLIPBOARD_IMAGE_PREFIX, path_str);
+        let value = format!(
+            "{}{}",
+            crate::services::clipboard_store::CLIPBOARD_IMAGE_PREFIX,
+            path_str
+        );
         if last.borrow().as_deref() == Some(value.as_str()) {
             return;
         }

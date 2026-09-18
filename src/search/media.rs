@@ -1,4 +1,6 @@
-use crate::{Action, ActionKind, MediaControl, fuzzy_score};
+use crate::action::{Action, ActionKind};
+use crate::search::fuzzy_score;
+use crate::services::media::MediaControl;
 
 #[derive(Debug, Clone)]
 struct MediaActionEntry {

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 
-use crate::home_dir;
+use crate::config::home_dir;
 
 const OUTFIT: &[u8] = include_bytes!("../resources/fonts/Outfit.ttf");
 const JETBRAINS_MONO: &[u8] = include_bytes!("../resources/fonts/JetBrainsMono.ttf");

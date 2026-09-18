@@ -20,7 +20,7 @@ pub(crate) fn empty_state_fallback_actions(query: &str) -> Vec<Action> {
         Action::new(
             "AI Assistant",
             format!("Ask AI: \"{display_query}\""),
-            ActionKind::Launcher(crate::LauncherCommand::AiChatWithPrompt(
+            ActionKind::Launcher(crate::action::LauncherCommand::AiChatWithPrompt(
                 query_trimmed.to_string(),
             )),
             100,
@@ -32,7 +32,7 @@ pub(crate) fn empty_state_fallback_actions(query: &str) -> Vec<Action> {
             format!("Search Web for \"{display_query}\""),
             ActionKind::OpenUrl(format!(
                 "https://www.google.com/search?q={}",
-                crate::percent_encode(query_trimmed)
+                crate::action::percent_encode(query_trimmed)
             )),
             90,
         )
@@ -41,7 +41,7 @@ pub(crate) fn empty_state_fallback_actions(query: &str) -> Vec<Action> {
         Action::new(
             "Snippets",
             format!("Create Snippet with \"{display_query}\""),
-            ActionKind::Launcher(crate::LauncherCommand::CreateSnippet(
+            ActionKind::Launcher(crate::action::LauncherCommand::CreateSnippet(
                 query_trimmed.to_string(),
             )),
             80,
@@ -224,7 +224,7 @@ pub(crate) fn with_calc_row_first(calc: Option<Action>, actions: Vec<Action>) ->
 /// expression back, so `=2+2` displayed `2+2` instead of `4`.
 pub(crate) fn calc_row_action(query: &str) -> Option<Action> {
     let expr = query.strip_prefix('=')?.trim();
-    crate::calc_action(expr)
+    crate::search::calculator::calc_action(expr)
 }
 
 fn append_grouped_root_actions(

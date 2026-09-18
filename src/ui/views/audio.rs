@@ -1,4 +1,6 @@
-use crate::{AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot};
+use crate::services::audio::{
+    AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot,
+};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Image, Label, ListBox, Orientation, ProgressBar};
@@ -327,7 +329,7 @@ fn populate_audio_device_list(view: &AudioView, list: &ListBox, devices: &[Audio
                     let _ = std::process::Command::new("wpctl")
                         .args(["set-default", &id.to_string()])
                         .status();
-                    let _ = sender.send(crate::audio_snapshot());
+                    let _ = sender.send(crate::services::audio::audio_snapshot());
                 });
                 let view = view.clone();
                 glib::timeout_add_local(

@@ -1,4 +1,6 @@
-use crate::{Action, ActionKind, NotificationAction, fuzzy_score};
+use crate::action::{Action, ActionKind};
+use crate::search::fuzzy_score;
+use crate::services::notifications::NotificationAction;
 
 #[derive(Debug, Clone)]
 struct NotificationActionEntry {

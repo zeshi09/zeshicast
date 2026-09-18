@@ -11,7 +11,7 @@ impl Zeshicast {
                     id: r.id,
                     name: r.title,
                     prefix: r.prefix,
-                    preview: crate::clipboard_preview(&r.content),
+                    preview: crate::search::clipboard::clipboard_preview(&r.content),
                     value: r.content,
                     tags: r.tags,
                 })
@@ -24,7 +24,7 @@ impl Zeshicast {
                     id: (i + 1) as i64,
                     name: snippet.name.clone(),
                     prefix: String::new(),
-                    preview: crate::clipboard_preview(&snippet.value),
+                    preview: crate::search::clipboard::clipboard_preview(&snippet.value),
                     value: snippet.value.clone(),
                     tags: snippet.tags.clone(),
                 })

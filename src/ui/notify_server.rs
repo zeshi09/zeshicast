@@ -63,10 +63,10 @@ pub fn install_notification_server() {
         NAME,
         gio::BusNameOwnerFlags::REPLACE,
         |connection, _name| register_object(&connection),
-        |_connection, _name| crate::mark_server_active(),
+        |_connection, _name| crate::services::notifications::mark_server_active(),
         |_connection, _name| {
             eprintln!("notifications: name lost — another daemon owns {NAME}");
-            crate::mark_server_inactive();
+            crate::services::notifications::mark_server_inactive();
         },
     );
     OWNER.with(|cell| *cell.borrow_mut() = Some(owner));
@@ -112,9 +112,14 @@ fn handle_method_call(
             let summary = params.child_value(3).get::<String>().unwrap_or_default();
             let body = params.child_value(4).get::<String>().unwrap_or_default();
             let expire_timeout = params.child_value(7).get::<i32>().unwrap_or(-1);
-            let id = crate::push_notification(&app_name, &summary, &body, replaces_id);
+            let id = crate::services::notifications::push_notification(
+                &app_name,
+                &summary,
+                &body,
+                replaces_id,
+            );
 
-            if !crate::is_dnd_enabled() {
+            if !crate::services::notifications::is_dnd_enabled() {
                 super::osd::show_notification_osd(
                     None,
                     &app_name,
@@ -129,7 +134,7 @@ fn handle_method_call(
         }
         "CloseNotification" => {
             let id = params.child_value(0).get::<u32>().unwrap_or(0);
-            crate::close_notification(id);
+            crate::services::notifications::close_notification(id);
             super::osd::dismiss_notification_osd();
             // reason 3 = closed by a call to CloseNotification.
             let _ = connection.emit_signal(

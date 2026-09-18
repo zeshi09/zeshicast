@@ -82,7 +82,7 @@ pub(crate) fn execute_script_action(
 ) {
     let mode = action
         .script_mode()
-        .unwrap_or(crate::ScriptMode::FullOutput);
+        .unwrap_or(crate::action::ScriptMode::FullOutput);
 
     if args.is_empty() && action.risk.requires_confirmation() {
         let title = action.risk.label().to_string();
@@ -134,12 +134,12 @@ fn dispatch_script_run(
     script_output_view: &crate::ui::ScriptOutputView,
     action: &Action,
     args: &[String],
-    mode: crate::ScriptMode,
+    mode: crate::action::ScriptMode,
 ) {
     let _ = launcher.borrow_mut().record_recent(action);
 
     match mode {
-        crate::ScriptMode::Silent => {
+        crate::action::ScriptMode::Silent => {
             let worker_action = action.clone();
             let worker_args = args.to_vec();
             std::thread::spawn(move || {
@@ -147,7 +147,7 @@ fn dispatch_script_run(
             });
             finish_interaction(window, hold);
         }
-        crate::ScriptMode::Compact => {
+        crate::action::ScriptMode::Compact => {
             let worker_action = action.clone();
             let worker_args = args.to_vec();
             let script_title = action.title.clone();
@@ -159,8 +159,13 @@ fn dispatch_script_run(
                         let script_title = script_title.clone();
                         let text = trimmed.to_string();
                         glib::idle_add_once(move || {
-                            crate::push_notification(&script_title, &text, "", 0);
-                            if !crate::is_dnd_enabled() {
+                            crate::services::notifications::push_notification(
+                                &script_title,
+                                &text,
+                                "",
+                                0,
+                            );
+                            if !crate::services::notifications::is_dnd_enabled() {
                                 crate::ui::show_notification_osd(
                                     None,
                                     &script_title,
@@ -176,7 +181,7 @@ fn dispatch_script_run(
             });
             finish_interaction(window, hold);
         }
-        crate::ScriptMode::FullOutput | crate::ScriptMode::Inline => {
+        crate::action::ScriptMode::FullOutput | crate::action::ScriptMode::Inline => {
             let (sender, receiver) = std::sync::mpsc::channel();
             let worker_action = action.clone();
             let worker_args = args.to_vec();

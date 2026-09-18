@@ -1,9 +1,10 @@
 use std::path::Path;
 
-use crate::{
-    Action, ActionKind, PlaceholderContext, clipboard_preview, expand_placeholders, fuzzy_score,
-    load_lines,
-};
+use crate::action::{Action, ActionKind};
+use crate::config::load_lines;
+use crate::placeholders::{PlaceholderContext, expand_placeholders};
+use crate::search::clipboard::clipboard_preview;
+use crate::search::fuzzy_score;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NamedValue {

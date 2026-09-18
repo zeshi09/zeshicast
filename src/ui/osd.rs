@@ -251,7 +251,7 @@ fn schedule_dismiss(generation: u64, delay_ms: Option<u64>) {
 
 /// Icon directories an `app_icon` *path* may live in (M-14).
 fn icon_search_dirs() -> Vec<std::path::PathBuf> {
-    let home = crate::home_dir();
+    let home = crate::config::home_dir();
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.join(".local/share"));

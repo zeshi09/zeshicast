@@ -1,4 +1,4 @@
-use crate::ClipboardSummary;
+use crate::services::clipboard_store::ClipboardSummary;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, DropDown, Label, ListBox, Orientation, StringList};
 
@@ -190,7 +190,7 @@ pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&Clipboard
 
     // Image entry → show the picture; otherwise the text label. Only a
     // validated cache path is ever loaded (M-15).
-    if let Some(path) = crate::validated_clipboard_image(&item.value) {
+    if let Some(path) = crate::services::clipboard_store::validated_clipboard_image(&item.value) {
         view.detail_preview.set_visible(false);
         view.detail_image.set_visible(true);
         match gtk::gdk::Texture::from_filename(&path) {
@@ -218,7 +218,8 @@ pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&Clipboard
     // Code/URL → monospace style
     let is_code = matches!(
         item.kind,
-        crate::ClipboardKind::Code | crate::ClipboardKind::Command
+        crate::services::clipboard_store::ClipboardKind::Code
+            | crate::services::clipboard_store::ClipboardKind::Command
     );
     if is_code {
         view.detail_preview.add_css_class("code");
@@ -250,7 +251,8 @@ fn clipboard_row(item: &ClipboardSummary) -> gtk::ListBoxRow {
     let title = Label::new(Some(first_line));
     let is_code = matches!(
         item.kind,
-        crate::ClipboardKind::Code | crate::ClipboardKind::Command
+        crate::services::clipboard_store::ClipboardKind::Code
+            | crate::services::clipboard_store::ClipboardKind::Command
     );
     if is_code {
         title.add_css_class("clipboard-text");

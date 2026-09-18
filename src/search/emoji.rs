@@ -1,4 +1,5 @@
-use crate::{Action, ActionKind, fuzzy_score};
+use crate::action::{Action, ActionKind};
+use crate::search::fuzzy_score;
 
 const EMOJI_DATA: &[(&str, &str, &str)] = &[
     // (emoji, name, category)
@@ -152,7 +153,7 @@ pub(crate) fn search_emoji(query: &str) -> Vec<Action> {
 }
 
 fn emoji_action(emoji: &str, name: &str, category: &str, score: i32) -> Action {
-    crate::Action::new("Emoji", emoji, ActionKind::Copy(emoji.to_string()), score)
+    crate::action::Action::new("Emoji", emoji, ActionKind::Copy(emoji.to_string()), score)
         .with_subtitle(format!("{name}  ·  {category}"))
         .with_icon("face-smile-symbolic")
 }

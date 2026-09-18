@@ -17,7 +17,7 @@ pub(crate) fn populate_ai_models(launcher: &Rc<RefCell<Zeshicast>>, view: &crate
 
     let (tx, rx) = std::sync::mpsc::channel::<Vec<String>>();
     std::thread::spawn(move || {
-        let _ = tx.send(crate::list_models(&endpoint));
+        let _ = tx.send(crate::services::local_ai::list_models(&endpoint));
     });
 
     let launcher = Rc::clone(launcher);
@@ -214,7 +214,7 @@ pub(crate) fn copy_selected_network_value(list: &ListBox, value: NetworkCopyValu
     let Some(name) = row_interface_name(&row) else {
         return;
     };
-    let snapshot = crate::cached_network_snapshot();
+    let snapshot = crate::services::poll_cache::cached_network_snapshot();
     let Some(interface) = snapshot
         .interfaces
         .iter()
@@ -234,7 +234,7 @@ pub(crate) fn copy_selected_network_value(list: &ListBox, value: NetworkCopyValu
     };
 
     if let Some(value) = value {
-        crate::copy_text(&value);
+        crate::action::copy_text(&value);
     }
 }
 
@@ -271,10 +271,11 @@ pub(crate) fn copy_clipboard_row(
     if let Some(item) = clipboard_items.borrow().get(index) {
         // M-15: only a validated cache path may be read as an image; anything
         // else (including forged `\x01zeshicast-image:` text) is plain text.
-        if let Some(path) = crate::validated_clipboard_image(&item.value) {
-            crate::copy_clipboard_image(&path.to_string_lossy());
+        if let Some(path) = crate::services::clipboard_store::validated_clipboard_image(&item.value)
+        {
+            crate::services::clipboard_store::copy_clipboard_image(&path.to_string_lossy());
         } else {
-            crate::copy_text(&item.value);
+            crate::action::copy_text(&item.value);
         }
     }
 }
@@ -309,7 +310,7 @@ pub(crate) fn refresh_snippet_view(
 
 pub(crate) fn copy_snippet_row(index: usize, snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>) {
     if let Some(item) = snippet_items.borrow().get(index) {
-        crate::copy_text(&item.value);
+        crate::action::copy_text(&item.value);
     }
 }
 

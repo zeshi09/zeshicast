@@ -3,7 +3,8 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use crate::{MAX_CLIPBOARD_ENTRIES, home_dir};
+use crate::config::home_dir;
+use crate::search::clipboard::MAX_CLIPBOARD_ENTRIES;
 
 /// Sentinel prefix marking a clipboard history entry as an image. The rest of
 /// the stored value is the path to the cached PNG. The leading SOH control char
@@ -58,6 +59,7 @@ pub fn clipboard_image_path(value: &str) -> Option<&str> {
 }
 
 /// The single image validator. Returns the path only when it is safe to read.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn validated_clipboard_image(value: &str) -> Option<PathBuf> {
     let raw = value.strip_prefix(CLIPBOARD_IMAGE_PREFIX)?;
     validated_image_path(raw)
@@ -315,6 +317,7 @@ pub fn classify_clipboard_text(text: &str) -> ClipboardKind {
 
 /// Save a PNG byte slice to the cache directory as content-addressed `<hash>.png`.
 /// Returns the absolute path string to the cached image.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn save_clipboard_image(bytes: &[u8]) -> io::Result<String> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -337,7 +340,7 @@ pub fn save_clipboard_image(bytes: &[u8]) -> io::Result<String> {
             log::warn!("could not create {}: {error}", dir.display());
         }
 
-        crate::write_file_atomic(&path, bytes, 0o600)?;
+        crate::config::write_file_atomic(&path, bytes, 0o600)?;
     }
     Ok(path.to_string_lossy().into_owned())
 }

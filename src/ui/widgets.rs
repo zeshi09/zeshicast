@@ -5,7 +5,7 @@ use gtk::{
     PolicyType, ProgressBar, ScrolledWindow,
 };
 
-use crate::Action;
+use crate::action::Action;
 
 pub fn action_panel(
     parent: &ApplicationWindow,

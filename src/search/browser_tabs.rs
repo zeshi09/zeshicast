@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::{Action, ActionKind, ActionRisk};
+use crate::action::{Action, ActionKind, ActionRisk};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserTab {
@@ -45,7 +45,7 @@ impl BrowserTab {
             kind: ActionKind::OpenUrl(self.url.clone()),
             script_mode: None,
             score,
-            capabilities: crate::CapabilitySet::trusted(),
+            capabilities: crate::action::CapabilitySet::trusted(),
         }
     }
 }

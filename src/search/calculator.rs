@@ -24,14 +24,14 @@ pub(crate) fn format_number(value: f64) -> String {
 ///
 /// Returns `None` when the expression does not parse, so callers can decide how
 /// loud to be about it.
-pub(crate) fn calc_action(expr: &str) -> Option<crate::Action> {
+pub(crate) fn calc_action(expr: &str) -> Option<crate::action::Action> {
     let value = Calculator::new(expr).parse().ok()?;
     let result = format_number(value);
     Some(
-        crate::Action::new(
+        crate::action::Action::new(
             "Calculator",
             format!("{expr} = {result}"),
-            crate::ActionKind::Copy(result),
+            crate::action::ActionKind::Copy(result),
             1000,
         )
         .with_subtitle("Copy result to clipboard")

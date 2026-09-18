@@ -11,127 +11,17 @@ mod services;
 #[cfg(feature = "gui")]
 pub mod ui;
 
-#[cfg(test)]
-pub(crate) use action::take_exec_count;
-pub use action::{
-    Action, ActionForm, ActionFormField, ActionPanelSection, ActionRisk, Capability,
-    CommandArgumentKind, ExecutionDecision, ExecutionPolicy, LauncherCommand, ScriptMode,
-    SecondaryAction, SecondaryActionKind, copy_text, percent_encode,
-};
-pub(crate) use action::{
-    ActionFormCommand, ActionKind, CapabilitySet, HttpRequest, JsonCommandAction, ProcessCommand,
-    ShellCommand,
-};
-pub(crate) use action::{ExecutionRequest, ExecutionTicket, execute, secondary_action_risk};
-pub use app::{
-    CLIPBOARD_IMAGE_PREFIX, CalcHistoryEntry, ClipboardKind, ClipboardSummary, CommandSummary,
-    SnippetSummary, Zeshicast, clipboard_cache_dir, clipboard_image_path, copy_clipboard_image,
-    save_clipboard_image, validated_clipboard_image,
-};
-#[cfg(feature = "gui")]
-pub(crate) use config::load_preferences_or_default;
-pub(crate) use config::{
-    append_alias, home_dir, load_aliases, load_frequencies, load_lines,
-    load_preferences_with_backup, normalize_alias, toml_value_string, unix_now, write_file_atomic,
-    write_lines, write_preferences,
-};
-pub use config::{
-    export_config_with_options, import_config, load_global_preferences, resolve_include_history,
-    resolve_include_secrets,
-};
-pub(crate) use extensions::{ExtensionManifest, ExtensionOrigin, load_extension_manifests};
-#[cfg(test)]
-pub(crate) use placeholders::format_local_time;
 /// Sweep finished fire-and-forget children (M-9). Safe to call from any loop.
 pub fn reap_finished_children() -> usize {
     process::reap_finished()
 }
-pub(crate) use placeholders::{PlaceholderContext, expand_placeholders, expand_placeholders_shell};
-#[cfg(test)]
-pub(crate) use search::apps::clean_desktop_exec;
-pub(crate) use search::apps::{AppEntry, app_action, load_apps, search_apps};
-pub(crate) use search::calculator::{
-    Calculator, calc_action, format_number, looks_like_expression,
-};
-pub(crate) use search::clipboard::{
-    MAX_CLIPBOARD_ENTRIES, clipboard_preview, load_clipboard_history, normalize_clipboard_text,
-    search_clipboard,
-};
-#[cfg(test)]
-pub(crate) use search::clipboard::{decode_clipboard_line, encode_clipboard_line};
-#[cfg(feature = "gui")]
-pub(crate) use search::commands::run_json_command_actions;
-pub(crate) use search::commands::{
-    CommandEntry, load_command_entries, load_extension_command_entries, search_commands,
-};
-#[cfg(test)]
-pub(crate) use search::commands::{
-    CommandMode, command_env, command_preferences, match_command_entry, parse_command_entry,
-    parse_json_actions,
-};
-pub(crate) use search::files::{FileEntry, load_file_index, search_files};
-pub(crate) use search::media::search_media_actions;
-#[cfg(test)]
-pub(crate) use search::named_values::parse_named_value;
-pub(crate) use search::named_values::{
-    ActionTarget, NamedValue, load_named_values, search_named_values, tagged_subtitle,
-};
-pub(crate) use search::notifications::search_notification_actions;
-pub(crate) use search::processes::search_processes;
-#[cfg(test)]
-pub(crate) use search::processes::{ProcessEntry, decode_cmdline, search_process_entries};
-pub(crate) use search::snapshot::SearchData;
-pub(crate) use search::system::{
-    SystemActionEntry, search_audio_actions, search_network_actions, search_system_actions,
-};
-pub(crate) use search::web::{execute_http_request, search_ai, search_translate};
-pub(crate) use search::windows::{
-    search_hyprland_actions, search_niri_actions, search_sway_actions, search_windows,
-};
-pub(crate) use search::{
-    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider,
-    EmojiProvider, ExtensionsProvider, FilesProvider, HyprlandProvider, MediaProvider,
-    NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, ProcessesProvider,
-    ScriptEntry, ScriptsProvider, SearchContext, SearchProvider, SwayProvider, SystemProvider,
-    WebProvider, WindowsProvider, fuzzy_score, load_extension_script_entries, load_script_entries,
-};
-pub use services::audio::{
-    AudioDeviceOption, AudioDeviceSnapshot, AudioSnapshot, AudioStreamSnapshot, audio_snapshot,
-};
-pub use services::battery::{BatteryDeviceSnapshot, BatterySnapshot, battery_snapshot};
-#[cfg(test)]
-pub(crate) use services::clipboard_store::with_clipboard_cache_dir;
-pub use services::compositor::{
-    WorkspaceSnapshot, keyboard_layout, layout_change_receiver, workspace_snapshot,
-};
-pub use services::extension_protocol;
-pub use services::local_ai::{
-    ChatMessage, LocalAiConfig, StreamChunk, ask_local_ai, ask_local_ai_streaming,
-    chat_local_ai_streaming, list_models,
-};
-pub use services::media::{MediaControl, MediaSnapshot, media_control, media_snapshot};
-pub use services::network::{
-    NetworkInterfaceSnapshot, NetworkSnapshot, VpnConnectionSnapshot, WifiNetworkSnapshot,
-    net_speed_mbps, network_snapshot, primary_interface_name,
-};
-pub use services::notifications::{
-    NotificationAction, NotificationEntrySnapshot, NotificationSnapshot, clear_notifications,
-    close_notification, is_dnd_enabled, mark_server_active, mark_server_inactive,
-    notification_snapshot, push_notification, toggle_dnd,
-};
-#[cfg(feature = "gui")]
-pub use services::poll_cache::{
-    cached_audio_snapshot, cached_battery_snapshot, cached_keyboard_layout, cached_media_snapshot,
-    cached_network_snapshot, cached_system_snapshot, cached_thermal_snapshot, cached_top_processes,
-    cached_workspace_snapshot, start as start_poll_cache,
-};
-pub use services::storage as storage_service;
-pub use services::system_stats::{
-    ProcessSummary, SystemSnapshot, system_snapshot, top_processes_by_memory,
-};
-pub use services::thermal::{ThermalSnapshot, ThermalZoneSnapshot, thermal_snapshot};
 
-const MAX_RESULTS: usize = 40;
+pub use action::{Action, ActionRisk, ExecutionDecision, SecondaryActionKind};
+pub use app::Zeshicast;
+pub use config::{
+    export_config_with_options, import_config, load_global_preferences, resolve_include_history,
+    resolve_include_secrets,
+};
 
 #[cfg(test)]
 mod tests {
@@ -143,49 +33,57 @@ mod tests {
 
     #[test]
     fn calculator_handles_precedence_and_parentheses() {
-        let result = Calculator::new("(12 + 8) / 5").parse().unwrap();
+        let result = crate::search::calculator::Calculator::new("(12 + 8) / 5")
+            .parse()
+            .unwrap();
         assert_eq!(result, 4.0);
     }
 
     #[test]
     fn calculator_rejects_division_by_zero() {
-        assert!(Calculator::new("4 / 0").parse().is_err());
+        assert!(
+            crate::search::calculator::Calculator::new("4 / 0")
+                .parse()
+                .is_err()
+        );
     }
 
     #[test]
     fn fuzzy_score_matches_subsequence() {
-        assert!(fuzzy_score("Visual Studio Code", "vsc").is_some());
+        assert!(crate::search::fuzzy_score("Visual Studio Code", "vsc").is_some());
     }
 
     #[test]
     fn desktop_exec_placeholders_are_removed() {
         assert_eq!(
-            clean_desktop_exec("firefox %u --new-window %F"),
+            crate::search::apps::clean_desktop_exec("firefox %u --new-window %F"),
             "firefox --new-window"
         );
     }
 
     #[test]
     fn expression_detection_is_conservative() {
-        assert!(looks_like_expression("1 + 2 * 3"));
-        assert!(!looks_like_expression("firefox"));
+        assert!(crate::search::calculator::looks_like_expression(
+            "1 + 2 * 3"
+        ));
+        assert!(!crate::search::calculator::looks_like_expression("firefox"));
     }
 
     #[test]
     fn aliases_are_normalized_like_raycast() {
-        assert_eq!(normalize_alias("  FF!!  "), "ff");
-        assert_eq!(normalize_alias("Go   Compose"), "go compose");
+        assert_eq!(crate::config::normalize_alias("  FF!!  "), "ff");
+        assert_eq!(crate::config::normalize_alias("Go   Compose"), "go compose");
     }
 
     #[test]
     fn file_search_uses_index_without_explicit_prefix() {
-        let files = vec![FileEntry::new(
+        let files = vec![crate::search::files::FileEntry::new(
             "notes.txt",
             PathBuf::from("/home/user/notes.txt"),
             false,
         )];
 
-        let results = search_files(&files, "notes", false);
+        let results = crate::search::files::search_files(&files, "notes", false);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].category, "File");
     }
@@ -193,13 +91,17 @@ mod tests {
     #[test]
     fn clipboard_lines_roundtrip_multiline_text() {
         let text = "hello\nworld\t\\\\";
-        let encoded = encode_clipboard_line(text);
-        assert_eq!(decode_clipboard_line(&encoded).as_deref(), Some(text));
+        let encoded = crate::search::clipboard::encode_clipboard_line(text);
+        assert_eq!(
+            crate::search::clipboard::decode_clipboard_line(&encoded).as_deref(),
+            Some(text)
+        );
     }
 
     #[test]
     fn clipboard_search_returns_copy_actions() {
-        let results = search_clipboard(&["alpha beta".to_string()], "beta", true);
+        let results =
+            crate::search::clipboard::search_clipboard(&["alpha beta".to_string()], "beta", true);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].category, "Clipboard");
         assert_eq!(results[0].value(), "alpha beta");
@@ -214,16 +116,25 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test.png");
         std::fs::write(&path, b"png").unwrap();
-        let image_entry = format!("{}{}", CLIPBOARD_IMAGE_PREFIX, path.display());
+        let image_entry = format!(
+            "{}{}",
+            crate::services::clipboard_store::CLIPBOARD_IMAGE_PREFIX,
+            path.display()
+        );
 
-        with_clipboard_cache_dir(&dir, || {
-            let results = search_clipboard(std::slice::from_ref(&image_entry), "", true);
+        crate::services::clipboard_store::with_clipboard_cache_dir(&dir, || {
+            let results = crate::search::clipboard::search_clipboard(
+                std::slice::from_ref(&image_entry),
+                "",
+                true,
+            );
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].title, "Image");
             assert_eq!(results[0].icon_name, "image-x-generic-symbolic");
             assert_eq!(results[0].value(), image_entry);
 
-            let query_results = search_clipboard(&[image_entry], "png", true);
+            let query_results =
+                crate::search::clipboard::search_clipboard(&[image_entry], "png", true);
             assert_eq!(query_results.len(), 1);
             assert_eq!(query_results[0].title, "Image");
         });
@@ -235,14 +146,20 @@ mod tests {
     fn spoofed_image_entry_is_rejected_and_stored_as_text() {
         // A forged sentinel prefix pointing outside the cache must stay text:
         // no file read, no image classification (M-15).
-        let spoof = format!("{CLIPBOARD_IMAGE_PREFIX}/etc/passwd");
+        let spoof = format!(
+            "{}/etc/passwd",
+            crate::services::clipboard_store::CLIPBOARD_IMAGE_PREFIX
+        );
         assert_eq!(app::clipboard_image_path(&spoof), None);
         assert_eq!(app::validated_clipboard_image(&spoof), None);
-        assert_eq!(app::classify_clipboard_text(&spoof), ClipboardKind::Text);
+        assert_eq!(
+            app::classify_clipboard_text(&spoof),
+            crate::services::clipboard_store::ClipboardKind::Text
+        );
         // The sentinel control character is stripped, so the forged value lands
         // in the history as ordinary text.
         assert_eq!(
-            normalize_clipboard_text(&spoof),
+            crate::search::clipboard::normalize_clipboard_text(&spoof),
             "zeshicast-image:/etc/passwd"
         );
     }
@@ -256,12 +173,19 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("real.png");
         std::fs::write(&path, b"png").unwrap();
-        let entry = format!("{}{}", CLIPBOARD_IMAGE_PREFIX, path.display());
+        let entry = format!(
+            "{}{}",
+            crate::services::clipboard_store::CLIPBOARD_IMAGE_PREFIX,
+            path.display()
+        );
 
         // No cache override: the file exists and is a PNG, but it is not in the
         // clipboard cache, so it is rejected.
         assert_eq!(app::clipboard_image_path(&entry), None);
-        assert_eq!(app::classify_clipboard_text(&entry), ClipboardKind::Text);
+        assert_eq!(
+            app::classify_clipboard_text(&entry),
+            crate::services::clipboard_store::ClipboardKind::Text
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -270,25 +194,25 @@ mod tests {
     fn clipboard_history_classifies_common_entry_types() {
         assert_eq!(
             app::classify_clipboard_text("https://tokio.rs/tokio/tutorial"),
-            ClipboardKind::Url
+            crate::services::clipboard_store::ClipboardKind::Url
         );
         assert_eq!(
             app::classify_clipboard_text("cargo check --features gui"),
-            ClipboardKind::Command
+            crate::services::clipboard_store::ClipboardKind::Command
         );
         assert_eq!(
             app::classify_clipboard_text("let msg = String::from(\"ok\");"),
-            ClipboardKind::Code
+            crate::services::clipboard_store::ClipboardKind::Code
         );
         assert_eq!(
             app::classify_clipboard_text("plain note"),
-            ClipboardKind::Text
+            crate::services::clipboard_store::ClipboardKind::Text
         );
     }
 
     #[test]
     fn placeholders_expand_query_clipboard_and_calc() {
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: "rust gtk".to_string(),
             clipboard: "token".to_string(),
             args: HashMap::new(),
@@ -297,14 +221,17 @@ mod tests {
         };
 
         assert_eq!(
-            expand_placeholders("q={{query}} c={{clipboard}} n={{calc:2 + 3}}", &context),
+            crate::placeholders::expand_placeholders(
+                "q={{query}} c={{clipboard}} n={{calc:2 + 3}}",
+                &context
+            ),
             "q=rust gtk c=token n=5"
         );
     }
 
     #[test]
     fn placeholders_expand_local_date_time() {
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -313,22 +240,22 @@ mod tests {
         };
 
         assert_eq!(
-            expand_placeholders("{{date}}", &context),
-            format_local_time(UNIX_EPOCH, "%Y-%m-%d")
+            crate::placeholders::expand_placeholders("{{date}}", &context),
+            crate::placeholders::format_local_time(UNIX_EPOCH, "%Y-%m-%d")
         );
         assert_eq!(
-            expand_placeholders("{{time:%H:%M}}", &context),
-            format_local_time(UNIX_EPOCH, "%H:%M")
+            crate::placeholders::expand_placeholders("{{time:%H:%M}}", &context),
+            crate::placeholders::format_local_time(UNIX_EPOCH, "%H:%M")
         );
         assert_eq!(
-            expand_placeholders("{{datetime:%Y}}", &context),
-            format_local_time(UNIX_EPOCH, "%Y")
+            crate::placeholders::expand_placeholders("{{datetime:%Y}}", &context),
+            crate::placeholders::format_local_time(UNIX_EPOCH, "%Y")
         );
     }
 
     #[test]
     fn unknown_placeholders_are_preserved() {
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -336,12 +263,15 @@ mod tests {
             now: UNIX_EPOCH,
         };
 
-        assert_eq!(expand_placeholders("{{unknown}}", &context), "{{unknown}}");
+        assert_eq!(
+            crate::placeholders::expand_placeholders("{{unknown}}", &context),
+            "{{unknown}}"
+        );
     }
 
     #[test]
     fn placeholders_expand_preferences() {
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -353,14 +283,14 @@ mod tests {
         };
 
         assert_eq!(
-            expand_placeholders("cd ~/Code/{{pref:workspace}}", &context),
+            crate::placeholders::expand_placeholders("cd ~/Code/{{pref:workspace}}", &context),
             "cd ~/Code/zeshicast"
         );
     }
 
     #[test]
     fn secondary_actions_include_pin_for_unpinned_action() {
-        let app = Zeshicast {
+        let app = crate::app::Zeshicast {
             apps: Vec::new(),
             quicklinks: Vec::new(),
             snippets: Vec::new(),
@@ -379,23 +309,26 @@ mod tests {
             files: Vec::new(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
-        let action = Action::new(
+        let action = crate::action::Action::new(
             "App",
             "Firefox",
-            ActionKind::Command(ProcessCommand::new("firefox", Vec::new())),
+            crate::action::ActionKind::Command(crate::action::ProcessCommand::new(
+                "firefox",
+                Vec::new(),
+            )),
             1,
         );
         let actions = app.available_secondary_actions(&action);
         assert!(
             actions
                 .iter()
-                .any(|action| action.kind == SecondaryActionKind::Pin)
+                .any(|action| action.kind == crate::action::SecondaryActionKind::Pin)
         );
     }
 
     #[test]
     fn clipboard_secondary_actions_include_delete_and_clear() {
-        let app = Zeshicast {
+        let app = crate::app::Zeshicast {
             apps: Vec::new(),
             quicklinks: Vec::new(),
             snippets: Vec::new(),
@@ -414,28 +347,31 @@ mod tests {
             files: Vec::new(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
-        let action = Action::new(
+        let action = crate::action::Action::new(
             "Clipboard",
             "secret",
-            ActionKind::Copy("secret".to_string()),
+            crate::action::ActionKind::Copy("secret".to_string()),
             1,
         );
         let actions = app.available_secondary_actions(&action);
         assert!(
-            actions
-                .iter()
-                .any(|action| action.kind == SecondaryActionKind::DeleteClipboardItem)
+            actions.iter().any(
+                |action| action.kind == crate::action::SecondaryActionKind::DeleteClipboardItem
+            )
         );
         assert!(
             actions
                 .iter()
-                .any(|action| action.kind == SecondaryActionKind::ClearClipboardHistory)
+                .any(|action| action.kind
+                    == crate::action::SecondaryActionKind::ClearClipboardHistory)
         );
     }
 
     #[test]
     fn named_values_parse_tags() {
-        let item = parse_named_value("Deploy | work, devops = kubectl apply").unwrap();
+        let item =
+            crate::search::named_values::parse_named_value("Deploy | work, devops = kubectl apply")
+                .unwrap();
         assert_eq!(item.name, "Deploy");
         assert_eq!(item.tags, vec!["work", "devops"]);
         assert_eq!(item.value, "kubectl apply");
@@ -443,19 +379,22 @@ mod tests {
 
     #[test]
     fn named_values_search_by_tag() {
-        let entries = vec![parse_named_value("Deploy | work, devops = kubectl apply").unwrap()];
-        let context = PlaceholderContext {
+        let entries = vec![
+            crate::search::named_values::parse_named_value("Deploy | work, devops = kubectl apply")
+                .unwrap(),
+        ];
+        let context = crate::placeholders::PlaceholderContext {
             query: "devops".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
             preferences: Cow::Owned(HashMap::new()),
             now: UNIX_EPOCH,
         };
-        let results = search_named_values(
+        let results = crate::search::named_values::search_named_values(
             "Snippet",
             &entries,
             "devops",
-            ActionTarget::CopyText,
+            crate::search::named_values::ActionTarget::CopyText,
             &context,
         );
         assert_eq!(results.len(), 1);
@@ -464,7 +403,7 @@ mod tests {
 
     #[test]
     fn command_entries_parse_toml() {
-        let command = parse_command_entry(
+        let command = crate::search::commands::parse_command_entry(
             r#"
 name = "Open Notes"
 mode = "json"
@@ -486,7 +425,7 @@ NOTES_ROOT = "{{pref:notes_root}}"
         .unwrap();
 
         assert_eq!(command.name, "Open Notes");
-        assert_eq!(command.mode, CommandMode::Json);
+        assert_eq!(command.mode, crate::search::commands::CommandMode::Json);
         assert_eq!(command.command, "xdg-open ~/Notes");
         assert_eq!(command.category, "Workspace");
         assert_eq!(command.icon_name, "folder-symbolic");
@@ -494,7 +433,10 @@ NOTES_ROOT = "{{pref:notes_root}}"
         assert_eq!(command.argument_hint, "<path>");
         assert_eq!(command.arguments.len(), 1);
         assert_eq!(command.arguments[0].name, "path");
-        assert_eq!(command.arguments[0].kind, CommandArgumentKind::Path);
+        assert_eq!(
+            command.arguments[0].kind,
+            crate::action::CommandArgumentKind::Path
+        );
         assert!(command.arguments[0].required);
         assert_eq!(
             command.env.get("NOTES_ROOT").map(String::as_str),
@@ -504,23 +446,23 @@ NOTES_ROOT = "{{pref:notes_root}}"
         assert_eq!(
             command.capabilities,
             vec![
-                Capability::Shell,
-                Capability::Filesystem,
-                Capability::OpenUrl,
-                Capability::ClipboardWrite
+                crate::action::Capability::Shell,
+                crate::action::Capability::Filesystem,
+                crate::action::Capability::OpenUrl,
+                crate::action::Capability::ClipboardWrite
             ]
         );
     }
 
     #[test]
     fn extension_manifest_caps_command_capabilities() {
-        let origin = ExtensionOrigin {
+        let origin = crate::extensions::ExtensionOrigin {
             id: "example.git-tools".to_string(),
             name: "Git Tools".to_string(),
             version: "0.1.0".to_string(),
             capabilities: vec!["shell".to_string(), "filesystem".to_string()],
         };
-        let command = parse_command_entry(
+        let command = crate::search::commands::parse_command_entry(
             r#"
 name = "Git Log"
 command = "git log --oneline"
@@ -534,13 +476,16 @@ permissions = ["shell", "filesystem"]
         // P1.8: the manifest is a ceiling, the command narrows it further.
         assert_eq!(
             command.capabilities,
-            vec![Capability::Shell, Capability::Filesystem]
+            vec![
+                crate::action::Capability::Shell,
+                crate::action::Capability::Filesystem
+            ]
         );
         assert_eq!(command.permissions, vec!["shell", "filesystem"]);
 
         // A command that declares nothing gets nothing, no matter what the
         // manifest grants (it cannot self-grant).
-        let silent = parse_command_entry(
+        let silent = crate::search::commands::parse_command_entry(
             r#"
 name = "Sneaky"
 command = "rm -rf ~"
@@ -554,7 +499,7 @@ command = "rm -rf ~"
 
     #[test]
     fn argv_command_entries_parse_without_shell_command() {
-        let command = parse_command_entry(
+        let command = crate::search::commands::parse_command_entry(
             r#"
 name = "Git Log"
 mode = "argv"
@@ -568,7 +513,7 @@ arguments = [
         )
         .unwrap();
 
-        assert_eq!(command.mode, CommandMode::Argv);
+        assert_eq!(command.mode, crate::search::commands::CommandMode::Argv);
         assert_eq!(command.command, "");
         assert_eq!(command.program.as_deref(), Some("git"));
         assert_eq!(
@@ -580,7 +525,7 @@ arguments = [
     #[test]
     fn argv_placeholders_expand_without_shell_quoting() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Safe Echo"
 mode = "argv"
@@ -594,7 +539,7 @@ arguments = [
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: String::new(),
             clipboard: "$(wl-paste); reboot".to_string(),
             args: HashMap::new(),
@@ -606,13 +551,17 @@ arguments = [
         };
 
         let payload = "$(rm -rf ~); reboot";
-        let results = search_commands(&entries, &format!("safe {payload}"), &context);
+        let results = crate::search::commands::search_commands(
+            &entries,
+            &format!("safe {payload}"),
+            &context,
+        );
         assert_eq!(results.len(), 1);
         // P1.4: argv execution is not a confirmation-free loophole — a user
         // argv command runs directly (no `sh -c`) but still asks first.
-        assert_eq!(results[0].risk, ActionRisk::Shell);
+        assert_eq!(results[0].risk, crate::action::ActionRisk::Shell);
         assert!(results[0].risk.requires_confirmation());
-        let ActionKind::Command(command) = &results[0].kind else {
+        let crate::action::ActionKind::Command(command) = &results[0].kind else {
             panic!("expected argv command");
         };
         assert_eq!(command.program, "printf");
@@ -634,7 +583,7 @@ arguments = [
     #[test]
     fn command_search_matches_tags_and_expands_placeholders() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Search Man"
 command = "man -k {{query}}"
@@ -647,7 +596,7 @@ permissions = ["shell"]
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: "printf".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -655,7 +604,7 @@ permissions = ["shell"]
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "docs", &context);
+        let results = crate::search::commands::search_commands(&entries, "docs", &context);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].category, "Command");
         // Placeholder values are shell-quoted, so authors omit their own quotes.
@@ -666,7 +615,7 @@ permissions = ["shell"]
     #[test]
     fn shell_command_without_shell_permission_is_blocked() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Unsafe"
 mode = "shell"
@@ -676,7 +625,7 @@ command = "rm -rf /tmp/example"
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: "unsafe".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -684,9 +633,9 @@ command = "rm -rf /tmp/example"
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "unsafe", &context);
+        let results = crate::search::commands::search_commands(&entries, "unsafe", &context);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].risk, ActionRisk::Normal);
+        assert_eq!(results[0].risk, crate::action::ActionRisk::Normal);
         assert_eq!(results[0].value(), "Unsafe");
         assert!(results[0].subtitle.contains("lacks permissions"));
     }
@@ -694,7 +643,7 @@ command = "rm -rf /tmp/example"
     #[test]
     fn json_command_search_returns_deferred_action() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Docs"
 mode = "json"
@@ -705,7 +654,7 @@ permissions = ["shell", "network"]
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: "docs gtk".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -713,18 +662,18 @@ permissions = ["shell", "network"]
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "docs gtk", &context);
+        let results = crate::search::commands::search_commands(&entries, "docs gtk", &context);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Docs");
         assert!(results[0].json_command_data().is_some());
-        assert_eq!(results[0].risk, ActionRisk::Shell);
+        assert_eq!(results[0].risk, crate::action::ActionRisk::Shell);
         assert!(!results[0].title.contains("Invalid JSON"));
     }
 
     #[test]
     fn command_keyword_uses_trailing_query_as_argument() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "GitHub Search"
 command = "xdg-open https://github.com/search?q={{query}}"
@@ -738,7 +687,7 @@ arguments = [
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: "gh rust gtk".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -746,7 +695,7 @@ arguments = [
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "gh rust gtk", &context);
+        let results = crate::search::commands::search_commands(&entries, "gh rust gtk", &context);
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].value(),
@@ -758,7 +707,7 @@ arguments = [
     #[test]
     fn command_arguments_expand_named_placeholders() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Deploy"
 command = "deploy --env {{arg:env}} --service {{arg:service}} --force {{arg:force}}"
@@ -774,7 +723,7 @@ arguments = [
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: "deploy prod api worker".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -782,7 +731,8 @@ arguments = [
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "deploy prod api worker", &context);
+        let results =
+            crate::search::commands::search_commands(&entries, "deploy prod api worker", &context);
         assert_eq!(results.len(), 1);
         assert_eq!(
             results[0].value(),
@@ -793,7 +743,7 @@ arguments = [
     #[test]
     fn command_placeholders_neutralize_shell_injection() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Echo"
 command = "echo {{query}}"
@@ -804,7 +754,7 @@ permissions = ["shell"]
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -812,7 +762,11 @@ permissions = ["shell"]
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "echo $(rm -rf ~); reboot", &context);
+        let results = crate::search::commands::search_commands(
+            &entries,
+            "echo $(rm -rf ~); reboot",
+            &context,
+        );
         assert_eq!(results.len(), 1);
         // The malicious payload is contained inside a single shell-quoted token,
         // so `sh -c` treats it as literal text rather than commands to run.
@@ -825,7 +779,7 @@ permissions = ["shell"]
     #[test]
     fn command_placeholders_neutralize_apostrophe_injection() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Echo"
 command = "echo {{query}}"
@@ -836,7 +790,7 @@ permissions = ["shell"]
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -844,7 +798,8 @@ permissions = ["shell"]
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "echo it'; rm -rf ~", &context);
+        let results =
+            crate::search::commands::search_commands(&entries, "echo it'; rm -rf ~", &context);
         assert_eq!(results.len(), 1);
         // The embedded apostrophe is re-quoted (`'it'\''; rm -rf ~'`), so the
         // whole payload remains one literal argument to `echo`.
@@ -854,7 +809,7 @@ permissions = ["shell"]
     #[test]
     fn command_placeholders_neutralize_shell_injection_inside_double_quotes() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Echo Quoted"
 command = "echo \"{{query}}\""
@@ -865,7 +820,7 @@ permissions = ["shell"]
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: String::new(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -873,7 +828,11 @@ permissions = ["shell"]
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "echo $(rm -rf ~); reboot", &context);
+        let results = crate::search::commands::search_commands(
+            &entries,
+            "echo $(rm -rf ~); reboot",
+            &context,
+        );
         assert_eq!(results.len(), 1);
         // Inside the author's own double quotes single-quote wrapping would be
         // inert, so the payload is backslash-escaped instead and stays literal
@@ -884,7 +843,7 @@ permissions = ["shell"]
     #[test]
     fn command_arguments_disable_action_when_required_value_missing() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Deploy"
 command = "deploy --env {{arg:env}}"
@@ -897,7 +856,7 @@ arguments = [
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: "deploy".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -905,7 +864,7 @@ arguments = [
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "deploy", &context);
+        let results = crate::search::commands::search_commands(&entries, "deploy", &context);
         assert_eq!(results.len(), 1);
         assert!(results[0].form_data().is_some());
         assert!(results[0].subtitle.contains("Missing argument: env"));
@@ -914,7 +873,7 @@ arguments = [
     #[test]
     fn command_preferences_use_defaults_and_global_overrides() {
         let entries = vec![
-            parse_command_entry(
+            crate::search::commands::parse_command_entry(
                 r#"
 name = "Open Workspace"
 command = "xdg-open {{pref:workspace}}/{{arg:project}}"
@@ -930,7 +889,7 @@ workspace = "~/Code"
             )
             .unwrap(),
         ];
-        let context = PlaceholderContext {
+        let context = crate::placeholders::PlaceholderContext {
             query: "ws zeshicast".to_string(),
             clipboard: String::new(),
             args: HashMap::new(),
@@ -941,7 +900,7 @@ workspace = "~/Code"
             now: UNIX_EPOCH,
         };
 
-        let results = search_commands(&entries, "ws zeshicast", &context);
+        let results = crate::search::commands::search_commands(&entries, "ws zeshicast", &context);
         assert_eq!(results.len(), 1);
         // Each value is independently quoted; shell concatenates the tokens.
         assert_eq!(results[0].value(), "xdg-open '/src'/'zeshicast'");
@@ -949,7 +908,7 @@ workspace = "~/Code"
 
     #[test]
     fn command_env_expands_arguments_and_preferences() {
-        let entry = parse_command_entry(
+        let entry = crate::search::commands::parse_command_entry(
             r#"
 name = "Deploy"
 command = "deploy"
@@ -967,19 +926,20 @@ DEPLOY_TOKEN = "{{pref:token}}"
 "#,
         )
         .unwrap();
-        let command_match = match_command_entry(&entry, "deploy prod").unwrap();
-        let context = PlaceholderContext {
+        let command_match =
+            crate::search::commands::match_command_entry(&entry, "deploy prod").unwrap();
+        let context = crate::placeholders::PlaceholderContext {
             query: command_match.argument,
             clipboard: String::new(),
             args: command_match.args,
-            preferences: Cow::Owned(command_preferences(
+            preferences: Cow::Owned(crate::search::commands::command_preferences(
                 &entry,
                 &HashMap::from([("token".to_string(), "user-token".to_string())]),
             )),
             now: UNIX_EPOCH,
         };
 
-        let env = command_env(&entry, &context);
+        let env = crate::search::commands::command_env(&entry, &context);
         assert_eq!(env.get("DEPLOY_ENV").map(String::as_str), Some("prod"));
         assert_eq!(
             env.get("DEPLOY_TOKEN").map(String::as_str),
@@ -989,7 +949,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
 
     #[test]
     fn json_actions_parse_result_arrays() {
-        let actions = parse_json_actions(
+        let actions = crate::search::commands::parse_json_actions(
             r#"
 [
   {
@@ -1006,19 +966,22 @@ DEPLOY_TOKEN = "{{pref:token}}"
 "#,
             "Extension",
             900,
-            &[Capability::Network, Capability::ClipboardWrite],
+            &[
+                crate::action::Capability::Network,
+                crate::action::Capability::ClipboardWrite,
+            ],
         );
 
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0].title, "Rust");
         assert_eq!(actions[0].value(), "https://www.rust-lang.org");
-        assert_eq!(actions[0].risk, ActionRisk::Normal);
+        assert_eq!(actions[0].risk, crate::action::ActionRisk::Normal);
         assert_eq!(actions[1].value(), "gtk4");
     }
 
     #[test]
     fn json_shell_actions_are_marked_shell_risk() {
-        let actions = parse_json_actions(
+        let actions = crate::search::commands::parse_json_actions(
             r#"
 [
   { "title": "Stop service", "action": { "type": "shell", "value": "systemctl stop demo" } }
@@ -1026,17 +989,17 @@ DEPLOY_TOKEN = "{{pref:token}}"
 "#,
             "Extension",
             900,
-            &[Capability::Shell],
+            &[crate::action::Capability::Shell],
         );
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].risk, ActionRisk::Shell);
+        assert_eq!(actions[0].risk, crate::action::ActionRisk::Shell);
         assert!(actions[0].risk.requires_confirmation());
     }
 
     #[test]
     fn json_shell_actions_without_shell_permission_are_blocked() {
-        let actions = parse_json_actions(
+        let actions = crate::search::commands::parse_json_actions(
             r#"
 [
   { "title": "Stop service", "action": { "type": "shell", "value": "systemctl stop demo" } }
@@ -1048,14 +1011,14 @@ DEPLOY_TOKEN = "{{pref:token}}"
         );
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].risk, ActionRisk::Normal);
+        assert_eq!(actions[0].risk, crate::action::ActionRisk::Normal);
         assert_eq!(actions[0].value(), "Stop service");
         assert!(actions[0].subtitle.contains("requires permissions"));
     }
 
     #[test]
     fn json_actions_parse_results_object() {
-        let actions = parse_json_actions(
+        let actions = crate::search::commands::parse_json_actions(
             r#"
 {
   "results": [
@@ -1065,7 +1028,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
 "#,
             "Extension",
             900,
-            &[Capability::Filesystem],
+            &[crate::action::Capability::Filesystem],
         );
 
         assert_eq!(actions.len(), 1);
@@ -1074,44 +1037,44 @@ DEPLOY_TOKEN = "{{pref:token}}"
 
     #[test]
     fn system_actions_hide_hazardous_entries_without_explicit_prefix() {
-        let regular = search_system_actions("power");
+        let regular = crate::search::system::search_system_actions("power");
         assert!(regular.iter().all(|action| action.title != "Power Off"));
 
-        let explicit = search_system_actions("system power");
+        let explicit = crate::search::system::search_system_actions("system power");
         assert!(explicit.iter().any(|action| action.title == "Power Off"));
         assert_eq!(
             explicit
                 .iter()
                 .find(|action| action.title == "Power Off")
                 .map(|action| action.risk),
-            Some(ActionRisk::SystemPower)
+            Some(crate::action::ActionRisk::SystemPower)
         );
     }
 
     #[test]
     fn audio_actions_show_on_vol_prefix() {
-        let results = search_audio_actions("vol");
+        let results = crate::search::system::search_audio_actions("vol");
         assert!(!results.is_empty());
         assert!(results.iter().all(|a| a.category == "Audio"));
     }
 
     #[test]
     fn audio_actions_fuzzy_match_without_prefix() {
-        let results = search_audio_actions("mute");
+        let results = crate::search::system::search_audio_actions("mute");
         assert!(!results.is_empty());
         assert!(results.iter().any(|a| a.title.contains("Mute")));
     }
 
     #[test]
     fn network_actions_show_on_wifi_prefix() {
-        let results = search_network_actions("wifi");
+        let results = crate::search::system::search_network_actions("wifi");
         assert!(!results.is_empty());
         assert!(results.iter().all(|a| a.category == "Network"));
     }
 
     #[test]
     fn media_actions_show_on_media_prefix() {
-        let results = search_media_actions("media");
+        let results = crate::search::media::search_media_actions("media");
         assert!(!results.is_empty());
         assert!(results.iter().any(|a| a.title == "Play/Pause"));
         assert!(results.iter().any(|a| a.title == "Next Track"));
@@ -1119,13 +1082,13 @@ DEPLOY_TOKEN = "{{pref:token}}"
 
     #[test]
     fn media_actions_fuzzy_match_without_prefix() {
-        let results = search_media_actions("pause");
+        let results = crate::search::media::search_media_actions("pause");
         assert!(results.iter().any(|a| a.title == "Play/Pause"));
     }
 
     #[test]
     fn notification_actions_show_on_notify_prefix() {
-        let results = search_notification_actions("notify");
+        let results = crate::search::notifications::search_notification_actions("notify");
         assert!(!results.is_empty());
         assert!(results.iter().all(|a| a.category == "Notifications"));
         assert!(results.iter().any(|a| a.title == "Toggle Do Not Disturb"));
@@ -1133,13 +1096,13 @@ DEPLOY_TOKEN = "{{pref:token}}"
 
     #[test]
     fn notification_actions_match_dnd_prefix() {
-        let results = search_notification_actions("dnd");
+        let results = crate::search::notifications::search_notification_actions("dnd");
         assert!(results.iter().any(|a| a.title == "Toggle Do Not Disturb"));
     }
 
     #[test]
     fn launcher_commands_are_searchable() {
-        let app = Zeshicast {
+        let app = crate::app::Zeshicast {
             apps: Vec::new(),
             quicklinks: Vec::new(),
             snippets: Vec::new(),
@@ -1162,38 +1125,39 @@ DEPLOY_TOKEN = "{{pref:token}}"
         assert!(
             app.search("dashboard")
                 .iter()
-                .any(|action| action.launcher_command() == Some(LauncherCommand::Dashboard))
+                .any(|action| action.launcher_command()
+                    == Some(crate::action::LauncherCommand::Dashboard))
         );
-        assert!(
-            app.search("network")
-                .iter()
-                .any(|action| action.launcher_command() == Some(LauncherCommand::Network))
-        );
+        assert!(app.search("network").iter().any(
+            |action| action.launcher_command() == Some(crate::action::LauncherCommand::Network)
+        ));
         assert!(
             app.search("audio")
                 .iter()
-                .any(|action| action.launcher_command() == Some(LauncherCommand::Audio))
+                .any(|action| action.launcher_command()
+                    == Some(crate::action::LauncherCommand::Audio))
         );
         assert!(
             app.search("media")
                 .iter()
-                .any(|action| action.launcher_command() == Some(LauncherCommand::Media))
+                .any(|action| action.launcher_command()
+                    == Some(crate::action::LauncherCommand::Media))
         );
         assert!(
             app.search("system monitor")
                 .iter()
-                .any(|action| action.launcher_command() == Some(LauncherCommand::SystemMonitor))
+                .any(|action| action.launcher_command()
+                    == Some(crate::action::LauncherCommand::SystemMonitor))
         );
         assert!(
             app.search("notifications")
                 .iter()
-                .any(|action| action.launcher_command() == Some(LauncherCommand::Notifications))
+                .any(|action| action.launcher_command()
+                    == Some(crate::action::LauncherCommand::Notifications))
         );
-        assert!(
-            app.search("ai chat")
-                .iter()
-                .any(|action| action.launcher_command() == Some(LauncherCommand::AiChat))
-        );
+        assert!(app.search("ai chat").iter().any(
+            |action| action.launcher_command() == Some(crate::action::LauncherCommand::AiChat)
+        ));
     }
 
     #[test]
@@ -1203,7 +1167,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
         preferences.insert("notifications_enabled".to_string(), "false".to_string());
         preferences.insert("ai_enabled".to_string(), "false".to_string());
 
-        let app = Zeshicast {
+        let app = crate::app::Zeshicast {
             apps: Vec::new(),
             quicklinks: Vec::new(),
             snippets: Vec::new(),
@@ -1226,35 +1190,32 @@ DEPLOY_TOKEN = "{{pref:token}}"
         assert!(
             app.search("media")
                 .iter()
-                .all(
-                    |action| action.launcher_command() != Some(LauncherCommand::Media)
-                        && action.category != "Media"
-                )
+                .all(|action| action.launcher_command()
+                    != Some(crate::action::LauncherCommand::Media)
+                    && action.category != "Media")
         );
         assert!(
             app.search("notifications")
                 .iter()
-                .all(
-                    |action| action.launcher_command() != Some(LauncherCommand::Notifications)
-                        && action.category != "Notifications"
-                )
+                .all(|action| action.launcher_command()
+                    != Some(crate::action::LauncherCommand::Notifications)
+                    && action.category != "Notifications")
         );
         assert!(
             app.search("ai chat")
                 .iter()
-                .all(
-                    |action| action.launcher_command() != Some(LauncherCommand::AiChat)
-                        && action.category != "AI"
-                )
+                .all(|action| action.launcher_command()
+                    != Some(crate::action::LauncherCommand::AiChat)
+                    && action.category != "AI")
         );
     }
 
     #[test]
     fn quick_ai_defaults_to_ollama_generate() {
-        let actions = search_ai("ai explain gtk-rs", &HashMap::new());
+        let actions = crate::search::web::search_ai("ai explain gtk-rs", &HashMap::new());
         assert_eq!(actions.len(), 1);
         match &actions[0].kind {
-            ActionKind::HttpCopy(HttpRequest::LocalAiGenerate {
+            crate::action::ActionKind::HttpCopy(crate::action::HttpRequest::LocalAiGenerate {
                 endpoint,
                 model,
                 query,
@@ -1269,116 +1230,124 @@ DEPLOY_TOKEN = "{{pref:token}}"
 
     #[test]
     fn niri_actions_only_on_explicit_prefix() {
-        assert!(search_niri_actions("screenshot").is_empty());
-        assert!(search_niri_actions("workspace").is_empty());
-        let with_prefix = search_niri_actions("niri screenshot");
+        assert!(crate::search::windows::search_niri_actions("screenshot").is_empty());
+        assert!(crate::search::windows::search_niri_actions("workspace").is_empty());
+        let with_prefix = crate::search::windows::search_niri_actions("niri screenshot");
         assert!(!with_prefix.is_empty());
         assert!(with_prefix.iter().all(|a| a.category == "Niri"));
     }
 
     #[test]
     fn niri_actions_show_all_on_bare_niri() {
-        let results = search_niri_actions("niri");
+        let results = crate::search::windows::search_niri_actions("niri");
         assert!(!results.is_empty());
     }
 
     #[test]
     fn hyprland_actions_only_on_explicit_prefix() {
-        assert!(search_hyprland_actions("screenshot").is_empty());
-        assert!(search_hyprland_actions("workspace").is_empty());
-        let with_hypr = search_hyprland_actions("hypr screenshot");
+        assert!(crate::search::windows::search_hyprland_actions("screenshot").is_empty());
+        assert!(crate::search::windows::search_hyprland_actions("workspace").is_empty());
+        let with_hypr = crate::search::windows::search_hyprland_actions("hypr screenshot");
         assert!(!with_hypr.is_empty());
         assert!(with_hypr.iter().all(|a| a.category == "Hyprland"));
-        let with_hyprland = search_hyprland_actions("hyprland fullscreen");
+        let with_hyprland = crate::search::windows::search_hyprland_actions("hyprland fullscreen");
         assert!(!with_hyprland.is_empty());
         assert!(with_hyprland.iter().all(|a| a.category == "Hyprland"));
     }
 
     #[test]
     fn hyprland_actions_show_all_on_bare_prefix() {
-        let results_hypr = search_hyprland_actions("hypr");
+        let results_hypr = crate::search::windows::search_hyprland_actions("hypr");
         assert!(!results_hypr.is_empty());
-        let results_hyprland = search_hyprland_actions("hyprland");
+        let results_hyprland = crate::search::windows::search_hyprland_actions("hyprland");
         assert!(!results_hyprland.is_empty());
     }
 
     #[test]
     fn sway_actions_only_on_explicit_prefix() {
-        assert!(search_sway_actions("screenshot").is_empty());
-        assert!(search_sway_actions("workspace").is_empty());
-        let with_prefix = search_sway_actions("sway screenshot");
+        assert!(crate::search::windows::search_sway_actions("screenshot").is_empty());
+        assert!(crate::search::windows::search_sway_actions("workspace").is_empty());
+        let with_prefix = crate::search::windows::search_sway_actions("sway screenshot");
         assert!(!with_prefix.is_empty());
         assert!(with_prefix.iter().all(|a| a.category == "Sway"));
     }
 
     #[test]
     fn sway_actions_show_all_on_bare_sway() {
-        let results = search_sway_actions("sway");
+        let results = crate::search::windows::search_sway_actions("sway");
         assert!(!results.is_empty());
     }
 
     #[test]
     fn process_search_builds_kill_actions() {
-        let processes = vec![ProcessEntry {
+        let processes = vec![crate::search::processes::ProcessEntry {
             pid: 4242,
             name: "zeshicast".to_string(),
             command: "target/debug/zeshicast-gtk --daemon".to_string(),
         }];
 
-        let actions = search_process_entries(&processes, "zesh");
+        let actions = crate::search::processes::search_process_entries(&processes, "zesh");
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].category, "Process");
         assert_eq!(actions[0].value(), "kill 4242");
-        assert_eq!(actions[0].risk, ActionRisk::ProcessKill);
+        assert_eq!(actions[0].risk, crate::action::ActionRisk::ProcessKill);
         assert!(actions[0].subtitle.contains("target/debug/zeshicast-gtk"));
     }
 
     #[test]
     fn executor_requests_confirmation_for_power_action() {
-        let action = Action::new(
+        let action = crate::action::Action::new(
             "System",
             "Power Off",
-            ActionKind::Shell(ShellCommand::new("systemctl poweroff")),
+            crate::action::ActionKind::Shell(crate::action::ShellCommand::new(
+                "systemctl poweroff",
+            )),
             0,
         )
-        .with_risk(ActionRisk::SystemPower);
+        .with_risk(crate::action::ActionRisk::SystemPower);
 
         assert_eq!(
             action.execution_decision(),
-            ExecutionDecision::NeedsConfirmation(ActionRisk::SystemPower)
+            crate::action::ExecutionDecision::NeedsConfirmation(
+                crate::action::ActionRisk::SystemPower
+            )
         );
         assert_eq!(
-            ExecutionPolicy::confirmed().decide(&action),
-            ExecutionDecision::RunNow
+            crate::action::ExecutionPolicy::confirmed().decide(&action),
+            crate::action::ExecutionDecision::RunNow
         );
     }
 
     #[test]
     fn executor_allows_copy_without_confirmation() {
-        let action = Action::new(
+        let action = crate::action::Action::new(
             "Clipboard",
             "Copy",
-            ActionKind::Copy("value".to_string()),
+            crate::action::ActionKind::Copy("value".to_string()),
             0,
         );
 
-        assert_eq!(action.execution_decision(), ExecutionDecision::RunNow);
+        assert_eq!(
+            action.execution_decision(),
+            crate::action::ExecutionDecision::RunNow
+        );
     }
 
     #[test]
     fn executor_denies_non_executable_action() {
-        let action = Action::new("Command", "Deferred", ActionKind::None, 0);
+        let action =
+            crate::action::Action::new("Command", "Deferred", crate::action::ActionKind::None, 0);
 
         assert!(matches!(
             action.execution_decision(),
-            ExecutionDecision::Denied(_)
+            crate::action::ExecutionDecision::Denied(_)
         ));
     }
 
     #[test]
     fn cmdline_decodes_nul_separated_arguments() {
         assert_eq!(
-            decode_cmdline(b"zeshicast-gtk\0--daemon\0"),
+            crate::search::processes::decode_cmdline(b"zeshicast-gtk\0--daemon\0"),
             "zeshicast-gtk --daemon"
         );
     }

@@ -9,7 +9,7 @@ use gtk::{
     Orientation, StringList,
 };
 
-use crate::{Action, ActionFormField, CommandArgumentKind};
+use crate::action::{Action, ActionFormField, CommandArgumentKind};
 
 pub fn show_form_panel<F>(parent: &ApplicationWindow, action: Action, on_submit: F)
 where

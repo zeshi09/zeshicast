@@ -170,7 +170,7 @@ fn populate_emoji_flow(flow: &gtk::FlowBox, category: &str, query: &str, confirm
         let emoji_s = emoji.to_string();
         let name_s = name.to_string();
         btn.connect_clicked(move |_| {
-            crate::copy_text(&emoji_s);
+            crate::action::copy_text(&emoji_s);
             confirm_c.set_text(&format!("Copied  {emoji_s}  {name_s}"));
             confirm_c.set_visible(true);
         });

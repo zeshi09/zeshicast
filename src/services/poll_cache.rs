@@ -12,12 +12,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use crate::{
-    AudioSnapshot, BatterySnapshot, MediaSnapshot, NetworkSnapshot, ProcessSummary, SystemSnapshot,
-    ThermalSnapshot, WorkspaceSnapshot, audio_snapshot, battery_snapshot, keyboard_layout,
-    media_snapshot, network_snapshot, system_snapshot, thermal_snapshot, top_processes_by_memory,
-    workspace_snapshot,
+use crate::services::audio::{AudioSnapshot, audio_snapshot};
+use crate::services::battery::{BatterySnapshot, battery_snapshot};
+use crate::services::compositor::{WorkspaceSnapshot, keyboard_layout, workspace_snapshot};
+use crate::services::media::{MediaSnapshot, media_snapshot};
+use crate::services::network::{NetworkSnapshot, network_snapshot};
+use crate::services::system_stats::{
+    ProcessSummary, SystemSnapshot, system_snapshot, top_processes_by_memory,
 };
+use crate::services::thermal::{ThermalSnapshot, thermal_snapshot};
 
 /// How many processes the cached snapshot keeps; the views ask for 8.
 const CACHED_PROCESSES: usize = 8;

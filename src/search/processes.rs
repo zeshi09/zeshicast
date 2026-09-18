@@ -3,9 +3,9 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::{
-    Action, ActionKind, ActionRisk, MAX_RESULTS, ShellCommand, clipboard_preview, fuzzy_score,
-};
+use crate::action::{Action, ActionKind, ActionRisk, ShellCommand};
+use crate::search::clipboard::clipboard_preview;
+use crate::search::{MAX_RESULTS, fuzzy_score};
 
 const PROCESS_CACHE_TTL: Duration = Duration::from_secs(2);
 

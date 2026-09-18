@@ -93,13 +93,19 @@ pub(crate) fn build_ui(
     let extension_view = crate::ui::extension_browser_view(&launcher.borrow().list_commands());
     let action_panel_view = crate::ui::action_panel_view();
     let ai_chat_view = crate::ui::ai_chat_view();
-    let audio_view = crate::ui::audio_view(&crate::AudioSnapshot::default());
-    let dashboard_view = crate::ui::dashboard_view(&crate::SystemSnapshot::default());
-    let system_monitor_view =
-        crate::ui::system_monitor_view(&crate::SystemSnapshot::default(), &[]);
-    let media_view = crate::ui::media_view(&crate::MediaSnapshot::default());
-    let network_view = crate::ui::network_view(&crate::NetworkSnapshot::default());
-    let notifications_view = crate::ui::notifications_view(&crate::NotificationSnapshot::default());
+    let audio_view = crate::ui::audio_view(&crate::services::audio::AudioSnapshot::default());
+    let dashboard_view =
+        crate::ui::dashboard_view(&crate::services::system_stats::SystemSnapshot::default());
+    let system_monitor_view = crate::ui::system_monitor_view(
+        &crate::services::system_stats::SystemSnapshot::default(),
+        &[],
+    );
+    let media_view = crate::ui::media_view(&crate::services::media::MediaSnapshot::default());
+    let network_view =
+        crate::ui::network_view(&crate::services::network::NetworkSnapshot::default());
+    let notifications_view = crate::ui::notifications_view(
+        &crate::services::notifications::NotificationSnapshot::default(),
+    );
     let current_clipboard = launcher.borrow().list_clipboard_history();
     *clipboard_items.borrow_mut() = current_clipboard.clone();
     let clipboard_view = crate::ui::clipboard_history_view(&current_clipboard);
@@ -167,10 +173,10 @@ pub(crate) fn build_ui(
 
     let status_strip = crate::ui::StatusStrip::new();
     apply_status_strip_preferences(&status_strip, &launcher);
-    status_strip.set_network_snapshot(&crate::NetworkSnapshot::default());
-    status_strip.set_battery_snapshot(&crate::cached_battery_snapshot());
-    status_strip.set_audio_snapshot(&crate::AudioSnapshot::default());
-    status_strip.set_media_snapshot(&crate::MediaSnapshot::default());
+    status_strip.set_network_snapshot(&crate::services::network::NetworkSnapshot::default());
+    status_strip.set_battery_snapshot(&crate::services::poll_cache::cached_battery_snapshot());
+    status_strip.set_audio_snapshot(&crate::services::audio::AudioSnapshot::default());
+    status_strip.set_media_snapshot(&crate::services::media::MediaSnapshot::default());
 
     let search_shell = GtkBox::new(Orientation::Horizontal, 8);
     search_shell.add_css_class("search-bar");
@@ -238,7 +244,7 @@ pub(crate) fn build_ui(
                 // The snapshot is taken on the main thread (cheap clones)...
                 move || snapshot_source.borrow().search_data(),
                 // ...the search runs on a worker thread (providers fork processes)...
-                |data: &crate::SearchData, query| data.search(query),
+                |data: &crate::search::snapshot::SearchData, query| data.search(query),
                 // ...and the result is rendered back on the main thread.
                 move |actions| {
                     render_results(
@@ -294,7 +300,7 @@ pub(crate) fn build_ui(
             if let Some(action) = action_for_row(&results, row) {
                 if let Some(command) = action.launcher_command() {
                     match command {
-                        crate::LauncherCommand::CreateSnippet(content) => {
+                        crate::action::LauncherCommand::CreateSnippet(content) => {
                             crate::ui::show_snippet_editor_panel(
                                 &window,
                                 &launcher,
@@ -305,9 +311,9 @@ pub(crate) fn build_ui(
                                 || {},
                             );
                         }
-                        crate::LauncherCommand::AiChatWithPrompt(prompt) => {
+                        crate::action::LauncherCommand::AiChatWithPrompt(prompt) => {
                             run_launcher_command(
-                                crate::LauncherCommand::AiChatWithPrompt(prompt),
+                                crate::action::LauncherCommand::AiChatWithPrompt(prompt),
                                 &navigation,
                                 &entry,
                                 &action_bar,
@@ -495,7 +501,7 @@ pub(crate) fn build_ui(
         ai_chat_view.copy.clone().connect_clicked(move |_| {
             let answer = ai_chat_view.output.text();
             if !answer.is_empty() {
-                crate::copy_text(answer.as_str());
+                crate::action::copy_text(answer.as_str());
             }
         });
     }
@@ -557,13 +563,13 @@ pub(crate) fn build_ui(
 
     // Poll the subprocess-heavy network/audio snapshots on a background thread
     // so the per-second UI timers below never fork on the main loop.
-    crate::start_poll_cache();
+    crate::services::poll_cache::start();
 
     // Flash a centered pill when the keyboard layout changes (works while the
     // launcher is hidden — it's a separate layer-shell surface). The watcher
     // pushes from niri's event stream; we drain it on the main loop.
     {
-        let layout_rx = crate::layout_change_receiver();
+        let layout_rx = crate::services::compositor::layout_change_receiver();
         let app = app.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(120), move || {
             while let Ok(code) = layout_rx.try_recv() {
@@ -582,22 +588,33 @@ pub(crate) fn build_ui(
         let launcher = Rc::clone(&launcher);
         // Re-render the audio device list only when it actually changed, so the
         // 1s tick doesn't rebuild (and visibly flicker) the list every second.
-        let last_audio = Rc::new(RefCell::new(crate::AudioSnapshot::default()));
+        let last_audio = Rc::new(RefCell::new(
+            crate::services::audio::AudioSnapshot::default(),
+        ));
         glib::timeout_add_seconds_local(1, move || {
             if crate::ui::hidden() {
                 return glib::ControlFlow::Continue;
             }
             if preference_enabled(&launcher, "show_status_strip", true) {
-                status_strip.set_network_snapshot(&crate::cached_network_snapshot());
-                status_strip.set_battery_snapshot(&crate::cached_battery_snapshot());
-                status_strip.set_audio_snapshot(&crate::cached_audio_snapshot());
-                status_strip.set_media_snapshot(&crate::cached_media_snapshot());
-                status_strip.set_keyboard_layout(crate::cached_keyboard_layout().as_deref());
+                status_strip
+                    .set_network_snapshot(&crate::services::poll_cache::cached_network_snapshot());
+                status_strip
+                    .set_battery_snapshot(&crate::services::poll_cache::cached_battery_snapshot());
+                status_strip
+                    .set_audio_snapshot(&crate::services::poll_cache::cached_audio_snapshot());
+                status_strip
+                    .set_media_snapshot(&crate::services::poll_cache::cached_media_snapshot());
+                status_strip.set_keyboard_layout(
+                    crate::services::poll_cache::cached_keyboard_layout().as_deref(),
+                );
             }
             if navigation.current() == crate::ui::LauncherView::Media {
-                crate::ui::set_media_snapshot(&media_view, &crate::cached_media_snapshot());
+                crate::ui::set_media_snapshot(
+                    &media_view,
+                    &crate::services::poll_cache::cached_media_snapshot(),
+                );
             } else if navigation.current() == crate::ui::LauncherView::Audio {
-                let snapshot = crate::cached_audio_snapshot();
+                let snapshot = crate::services::poll_cache::cached_audio_snapshot();
                 if *last_audio.borrow() != snapshot {
                     *last_audio.borrow_mut() = snapshot.clone();
                     crate::ui::set_audio_snapshot(&audio_view, &snapshot);
@@ -605,7 +622,7 @@ pub(crate) fn build_ui(
             } else if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_media_snapshot(
                     &dashboard_view,
-                    &crate::cached_media_snapshot(),
+                    &crate::services::poll_cache::cached_media_snapshot(),
                 );
             }
             glib::ControlFlow::Continue
@@ -618,14 +635,18 @@ pub(crate) fn build_ui(
         let dashboard_view = dashboard_view.clone();
         let notifications_view = notifications_view.clone();
         // Only rebuild these lists when their data changed (no per-second flicker).
-        let last_network = Rc::new(RefCell::new(crate::NetworkSnapshot::default()));
-        let last_notifications = Rc::new(RefCell::new(crate::NotificationSnapshot::default()));
+        let last_network = Rc::new(RefCell::new(
+            crate::services::network::NetworkSnapshot::default(),
+        ));
+        let last_notifications = Rc::new(RefCell::new(
+            crate::services::notifications::NotificationSnapshot::default(),
+        ));
         glib::timeout_add_seconds_local(1, move || {
             if crate::ui::hidden() {
                 return glib::ControlFlow::Continue;
             }
             if navigation.current() == crate::ui::LauncherView::Network {
-                let snapshot = crate::cached_network_snapshot();
+                let snapshot = crate::services::poll_cache::cached_network_snapshot();
                 if *last_network.borrow() != snapshot {
                     *last_network.borrow_mut() = snapshot.clone();
                     crate::ui::set_network_snapshot(&network_list, &snapshot);
@@ -633,22 +654,22 @@ pub(crate) fn build_ui(
             } else if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_network_snapshot(
                     &dashboard_view,
-                    &crate::cached_network_snapshot(),
+                    &crate::services::poll_cache::cached_network_snapshot(),
                 );
                 crate::ui::set_dashboard_battery_snapshot(
                     &dashboard_view,
-                    &crate::cached_battery_snapshot(),
+                    &crate::services::poll_cache::cached_battery_snapshot(),
                 );
                 crate::ui::set_dashboard_audio_snapshot(
                     &dashboard_view,
-                    &crate::cached_audio_snapshot(),
+                    &crate::services::poll_cache::cached_audio_snapshot(),
                 );
                 crate::ui::set_dashboard_notification_snapshot(
                     &dashboard_view,
-                    &crate::notification_snapshot(),
+                    &crate::services::notifications::notification_snapshot(),
                 );
             } else if navigation.current() == crate::ui::LauncherView::Notifications {
-                let snapshot = crate::notification_snapshot();
+                let snapshot = crate::services::notifications::notification_snapshot();
                 if *last_notifications.borrow() != snapshot {
                     *last_notifications.borrow_mut() = snapshot.clone();
                     crate::ui::set_notification_snapshot(&notifications_view, &snapshot);
@@ -671,19 +692,19 @@ pub(crate) fn build_ui(
             if navigation.current() == crate::ui::LauncherView::Dashboard {
                 crate::ui::set_dashboard_snapshot(
                     &dashboard_view,
-                    &crate::cached_system_snapshot(),
+                    &crate::services::poll_cache::cached_system_snapshot(),
                 );
                 crate::ui::set_dashboard_thermal(
                     &dashboard_view,
-                    crate::cached_thermal_snapshot()
+                    crate::services::poll_cache::cached_thermal_snapshot()
                         .hottest_zone()
                         .map(|z| z.temperature_c),
                 );
             } else if navigation.current() == crate::ui::LauncherView::SystemMonitor {
                 crate::ui::set_system_monitor_snapshot(
                     &system_monitor_view,
-                    &crate::cached_system_snapshot(),
-                    &crate::cached_top_processes(),
+                    &crate::services::poll_cache::cached_system_snapshot(),
+                    &crate::services::poll_cache::cached_top_processes(),
                 );
             }
             glib::ControlFlow::Continue
@@ -761,7 +782,7 @@ pub(crate) fn build_ui(
 
     {
         dashboard_view.toggle_dnd.clone().connect_clicked(move |_| {
-            crate::toggle_dnd();
+            crate::services::notifications::toggle_dnd();
         });
     }
 
@@ -808,7 +829,7 @@ pub(crate) fn build_ui(
         let audio_view = audio_view.clone();
         audio_view.mute_output.clone().connect_clicked(move |_| {
             run_command_request("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
-            crate::ui::set_audio_snapshot(&audio_view, &crate::audio_snapshot());
+            crate::ui::set_audio_snapshot(&audio_view, &crate::services::audio::audio_snapshot());
         });
     }
 
@@ -816,7 +837,7 @@ pub(crate) fn build_ui(
         let audio_view = audio_view.clone();
         audio_view.mute_input.clone().connect_clicked(move |_| {
             run_command_request("wpctl", ["set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"]);
-            crate::ui::set_audio_snapshot(&audio_view, &crate::audio_snapshot());
+            crate::ui::set_audio_snapshot(&audio_view, &crate::services::audio::audio_snapshot());
         });
     }
 
@@ -872,10 +893,10 @@ pub(crate) fn build_ui(
             .toggle_dnd
             .clone()
             .connect_clicked(move |_| {
-                crate::toggle_dnd();
+                crate::services::notifications::toggle_dnd();
                 crate::ui::set_notification_snapshot(
                     &notifications_view,
-                    &crate::notification_snapshot(),
+                    &crate::services::notifications::notification_snapshot(),
                 );
             });
     }
@@ -886,10 +907,10 @@ pub(crate) fn build_ui(
             .close_all
             .clone()
             .connect_clicked(move |_| {
-                crate::clear_notifications();
+                crate::services::notifications::clear_notifications();
                 crate::ui::set_notification_snapshot(
                     &notifications_view,
-                    &crate::notification_snapshot(),
+                    &crate::services::notifications::notification_snapshot(),
                 );
             });
     }

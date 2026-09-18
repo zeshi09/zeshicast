@@ -4,7 +4,9 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::{Action, ActionKind, ProcessCommand, ShellCommand, SystemActionEntry, fuzzy_score};
+use crate::action::{Action, ActionKind, ProcessCommand, ShellCommand};
+use crate::search::fuzzy_score;
+use crate::search::system::SystemActionEntry;
 
 /// A cold compositor client (spawning `niri msg`/`hyprctl` for the first time)
 /// regularly needs more than 200 ms, which used to look like a hang (M-5).

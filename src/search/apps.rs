@@ -3,7 +3,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{Action, ActionKind, ProcessCommand, fuzzy_score};
+use crate::action::{Action, ActionKind, ProcessCommand};
+use crate::search::fuzzy_score;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AppEntry {

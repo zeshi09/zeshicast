@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::Zeshicast;
+use crate::app::Zeshicast;
 use crate::services::local_ai::{ChatMessage, StreamChunk, chat_local_ai_streaming};
 use gtk::glib;
 use gtk::prelude::*;
@@ -210,7 +210,7 @@ pub(super) fn preference_list(
         })
 }
 
-fn local_ai_config(launcher: &Rc<RefCell<Zeshicast>>) -> crate::LocalAiConfig {
+fn local_ai_config(launcher: &Rc<RefCell<Zeshicast>>) -> crate::services::local_ai::LocalAiConfig {
     let preferences = launcher.borrow().get_preferences().clone();
     let endpoint = preferences
         .get("ollama_endpoint")
@@ -223,7 +223,7 @@ fn local_ai_config(launcher: &Rc<RefCell<Zeshicast>>) -> crate::LocalAiConfig {
         .or_else(|| preferences.get("ai_model"))
         .cloned()
         .unwrap_or_default();
-    crate::LocalAiConfig { endpoint, model }
+    crate::services::local_ai::LocalAiConfig { endpoint, model }
 }
 
 fn parse_bool_preference(value: &str) -> Option<bool> {

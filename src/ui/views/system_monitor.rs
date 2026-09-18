@@ -1,6 +1,7 @@
 use super::dashboard::format_duration;
 use super::metric_graph::{MetricGraph, metric_graph, push_metric_graph};
-use crate::{ProcessSummary, SystemSnapshot, ThermalSnapshot};
+use crate::services::system_stats::{ProcessSummary, SystemSnapshot};
+use crate::services::thermal::ThermalSnapshot;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, DrawingArea, Label, ListBox, Orientation, ProgressBar};
 use std::cell::RefCell;
@@ -325,7 +326,10 @@ pub fn set_system_monitor_snapshot(
     let load_fraction = snapshot.load_average.map(load_fraction).unwrap_or_default();
     view.load_bar.set_fraction(load_fraction);
     push_metric_graph(&view.load_graph, load_fraction);
-    set_system_monitor_thermal_snapshot(view, &crate::cached_thermal_snapshot());
+    set_system_monitor_thermal_snapshot(
+        view,
+        &crate::services::poll_cache::cached_thermal_snapshot(),
+    );
     view.memory.set_text(
         &snapshot
             .memory_used_percent()
@@ -354,10 +358,10 @@ pub fn set_system_monitor_snapshot(
     // NET row speeds for the interface that is actually carrying traffic (M-8).
     // This reads the poll cache, not the network: a hardcoded "eth0" reported
     // 0 B/s on a Wi-Fi-only machine, and shelling out here would fork per refresh.
-    let net = crate::cached_network_snapshot();
-    let (rx_mbps, tx_mbps) = crate::primary_interface_name(&net)
+    let net = crate::services::poll_cache::cached_network_snapshot();
+    let (rx_mbps, tx_mbps) = crate::services::network::primary_interface_name(&net)
         .as_deref()
-        .map(crate::net_speed_mbps)
+        .map(crate::services::network::net_speed_mbps)
         .unwrap_or((0.0, 0.0));
     let fmt_speed = |v: f64| -> String {
         if v < 0.001 {

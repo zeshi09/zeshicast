@@ -23,7 +23,7 @@ pub struct AiChatView {
     pub model_list: GtkBox,
     /// Re-fetch the model list from Ollama.
     pub refresh_models: Button,
-    pub history: Rc<RefCell<Vec<crate::ChatMessage>>>,
+    pub history: Rc<RefCell<Vec<crate::services::local_ai::ChatMessage>>>,
     /// True while a reply is streaming (M-8): a second request would interleave
     /// two streams into the same labels and register a second stop handler.
     pub streaming: Rc<Cell<bool>>,

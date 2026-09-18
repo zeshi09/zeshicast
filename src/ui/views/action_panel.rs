@@ -1,4 +1,4 @@
-use crate::Action;
+use crate::action::Action;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Entry, Label, ListBox, Orientation};
 

@@ -7,18 +7,9 @@ pub struct WorkspaceSnapshot {
     pub active_idx: u32,
     pub active_name: Option<String>,
     pub window_count: usize,
-    pub total_workspaces: usize,
 }
 
-impl WorkspaceSnapshot {
-    pub fn label(&self) -> String {
-        if let Some(name) = &self.active_name {
-            format!("WS {} – {}", self.active_idx, name)
-        } else {
-            format!("WS {}", self.active_idx)
-        }
-    }
-}
+impl WorkspaceSnapshot {}
 
 pub fn workspace_snapshot() -> WorkspaceSnapshot {
     workspace_niri()
@@ -40,7 +31,6 @@ fn workspace_niri() -> Option<WorkspaceSnapshot> {
     let focused_id = focused["id"].as_u64()?;
     let active_idx = focused["idx"].as_u64().unwrap_or(1) as u32;
     let active_name = focused["name"].as_str().map(str::to_string);
-    let total_workspaces = workspaces.len();
 
     // Count windows on focused workspace
     let window_count = run("niri", &["msg", "--json", "windows"])
@@ -57,7 +47,6 @@ fn workspace_niri() -> Option<WorkspaceSnapshot> {
         active_idx,
         active_name,
         window_count,
-        total_workspaces,
     })
 }
 
@@ -74,17 +63,10 @@ fn workspace_hyprland() -> Option<WorkspaceSnapshot> {
         .map(str::to_string);
     let window_count = ws["windows"].as_u64().unwrap_or(0) as usize;
 
-    // Total workspaces from hyprctl workspaces
-    let total_workspaces = run("hyprctl", &["-j", "workspaces"])
-        .and_then(|j| serde_json::from_str::<Vec<serde_json::Value>>(&j).ok())
-        .map(|v| v.len())
-        .unwrap_or(1);
-
     Some(WorkspaceSnapshot {
         active_idx,
         active_name,
         window_count,
-        total_workspaces,
     })
 }
 
@@ -108,7 +90,6 @@ fn workspace_sway() -> Option<WorkspaceSnapshot> {
         active_idx,
         active_name,
         window_count: 0,
-        total_workspaces: workspaces.len(),
     })
 }
 

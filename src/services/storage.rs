@@ -117,10 +117,6 @@ fn now() -> i64 {
 
 // ── Clipboard ────────────────────────────────────────────────────────────────
 
-pub fn clipboard_load(config_dir: &Path) -> Vec<(String, i64)> {
-    clipboard_load_with_limit(config_dir, 100)
-}
-
 pub fn clipboard_load_with_limit(config_dir: &Path, limit: usize) -> Vec<(String, i64)> {
     let Ok(conn) = open(config_dir) else {
         return Vec::new();
@@ -136,10 +132,6 @@ pub fn clipboard_load_with_limit(config_dir: &Path, limit: usize) -> Vec<(String
     })
     .map(|rows| rows.flatten().collect())
     .unwrap_or_default()
-}
-
-pub fn clipboard_insert(config_dir: &Path, text: &str) -> Result<()> {
-    clipboard_insert_with_limit(config_dir, text, 100)
 }
 
 pub fn clipboard_insert_with_limit(config_dir: &Path, text: &str, limit: usize) -> Result<()> {
@@ -412,7 +404,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = test_dir("sqlite-mode");
-        clipboard_insert(&dir, "secret").unwrap();
+        clipboard_insert_with_limit(&dir, "secret", 100).unwrap();
 
         let mode = std::fs::metadata(dir.join("zeshicast.db"))
             .unwrap()
@@ -526,7 +518,7 @@ mod tests {
     #[test]
     fn clipboard_prune_with_limit_above_row_count_removes_nothing() {
         let dir = test_dir("prune-noop");
-        clipboard_insert(&dir, "only").unwrap();
+        clipboard_insert_with_limit(&dir, "only", 100).unwrap();
 
         clipboard_prune(&dir, 100).unwrap();
 

@@ -6,6 +6,11 @@ use super::keybindings::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::action::{
+    Action, ActionFormCommand, ActionKind, ActionRisk, SecondaryActionKind, secondary_action_risk,
+};
+use crate::app::{SnippetSummary, Zeshicast};
+use crate::services::clipboard_store::{ClipboardKind, ClipboardSummary};
 use crate::ui::launcher_helpers::{
     ai_snippet_name, ask_ai_from_view, preference_duration_ms, preference_enabled, preference_list,
 };
@@ -13,10 +18,6 @@ use crate::ui::launcher_views::{
     run_launcher_command, show_ai_chat_view, show_audio_view, show_dashboard_view, show_emoji_view,
     show_font_browser_view, show_media_view, show_network_view, show_notifications_view,
     show_script_output_view, show_system_monitor_view, show_window_grid_view,
-};
-use crate::{
-    Action, ActionFormCommand, ActionKind, ActionRisk, ClipboardKind, ClipboardSummary,
-    SecondaryActionKind, SnippetSummary, Zeshicast, secondary_action_risk,
 };
 use gtk::gio;
 use gtk::glib;
@@ -133,10 +134,12 @@ mod tests {
         calc_row_action, decode_clipboard_text, empty_state_fallback_actions, read_png_from_stream,
         run_script_capture, secondary_action_risk, watch_clipboard_text_with, with_calc_row_first,
     };
-    use crate::{
+    use crate::action::{
         Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
-        SecondaryActionKind, ShellCommand, Zeshicast, ui::ActionPanelDisplayItem,
+        SecondaryActionKind, ShellCommand,
     };
+    use crate::app::Zeshicast;
+    use crate::ui::ActionPanelDisplayItem;
 
     #[test]
     fn oversized_clipboard_record_is_truncated_without_killing_the_watcher() {
@@ -521,7 +524,7 @@ mod tests {
         assert_eq!(actions[0].title, "Ask AI: \"rust borrow checker\"");
         assert_eq!(
             actions[0].launcher_command(),
-            Some(crate::LauncherCommand::AiChatWithPrompt(
+            Some(crate::action::LauncherCommand::AiChatWithPrompt(
                 "rust borrow checker".to_string()
             ))
         );
@@ -536,7 +539,7 @@ mod tests {
         );
         assert_eq!(
             actions[2].launcher_command(),
-            Some(crate::LauncherCommand::CreateSnippet(
+            Some(crate::action::LauncherCommand::CreateSnippet(
                 "rust borrow checker".to_string()
             ))
         );
@@ -548,7 +551,7 @@ mod tests {
         assert!(long_actions[0].title.contains('…'));
         assert_eq!(
             long_actions[0].launcher_command(),
-            Some(crate::LauncherCommand::AiChatWithPrompt(
+            Some(crate::action::LauncherCommand::AiChatWithPrompt(
                 long_query.to_string()
             ))
         );

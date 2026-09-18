@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Action, ActionKind, HttpRequest};
+use crate::action::{Action, ActionKind, HttpRequest};
 
 pub(crate) fn execute_http_request(request: &HttpRequest) -> Option<String> {
     match request {
@@ -64,8 +64,8 @@ pub(crate) fn execute_http_request(request: &HttpRequest) -> Option<String> {
             endpoint,
             model,
             query,
-        } => crate::ask_local_ai(
-            &crate::LocalAiConfig {
+        } => crate::services::local_ai::ask_local_ai(
+            &crate::services::local_ai::LocalAiConfig {
                 endpoint: endpoint.clone(),
                 model: model.clone(),
             },

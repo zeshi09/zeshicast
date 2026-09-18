@@ -12,18 +12,27 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::action::{Action, ActionKind, LauncherCommand, ShellCommand};
+use crate::app::CalcHistoryEntry;
 use crate::app::preference_enabled_value;
+use crate::config::normalize_alias;
+use crate::extensions::ExtensionManifest;
+use crate::placeholders::PlaceholderContext;
+use crate::search::apps::{AppEntry, app_action};
+use crate::search::commands::CommandEntry;
 use crate::search::files;
-use crate::{
-    Action, ActionKind, ActionTarget, AppEntry, AppsProvider, AudioProvider, BrowserTabsProvider,
-    CalcHistoryEntry, ClipboardProvider, CommandEntry, CommandsProvider, EmojiProvider,
-    ExtensionManifest, ExtensionsProvider, FileEntry, FilesProvider, HyprlandProvider,
-    LauncherCommand, MAX_RESULTS, MediaProvider, NamedValue, NamedValuesProvider, NetworkProvider,
-    NiriProvider, NotificationsProvider, PlaceholderContext, ProcessesProvider, ScriptEntry,
-    ScriptsProvider, SearchContext, SearchProvider, ShellCommand, SwayProvider, SystemProvider,
-    WebProvider, WindowsProvider, app_action, fuzzy_score, normalize_alias, search_audio_actions,
-    search_media_actions, search_network_actions, search_notification_actions,
-    search_system_actions,
+use crate::search::files::FileEntry;
+use crate::search::media::search_media_actions;
+use crate::search::named_values::{ActionTarget, NamedValue};
+use crate::search::notifications::search_notification_actions;
+use crate::search::scripts::ScriptEntry;
+use crate::search::system::{search_audio_actions, search_network_actions, search_system_actions};
+use crate::search::{
+    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider,
+    EmojiProvider, ExtensionsProvider, FilesProvider, HyprlandProvider, MAX_RESULTS, MediaProvider,
+    NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, ProcessesProvider,
+    ScriptsProvider, SearchContext, SearchProvider, SwayProvider, SystemProvider, WebProvider,
+    WindowsProvider, fuzzy_score,
 };
 
 /// Everything `search` reads from the application.
@@ -79,10 +88,10 @@ impl SearchData {
 
         actions.extend(self.launcher_actions(trimmed));
 
-        if lower.starts_with("calc ") || crate::looks_like_expression(trimmed) {
+        if lower.starts_with("calc ") || crate::search::calculator::looks_like_expression(trimmed) {
             let expr = trimmed.strip_prefix("calc ").unwrap_or(trimmed).trim();
-            match crate::Calculator::new(expr).parse() {
-                Ok(_) => actions.extend(crate::calc_action(expr)),
+            match crate::search::calculator::Calculator::new(expr).parse() {
+                Ok(_) => actions.extend(crate::search::calculator::calc_action(expr)),
                 Err(error) if lower.starts_with("calc ") => actions.push(
                     Action::new(
                         "Calculator",
@@ -174,7 +183,7 @@ impl SearchData {
                     )
                     .with_subtitle("Run with sh -c")
                     .with_icon("utilities-terminal-symbolic")
-                    .with_risk(crate::ActionRisk::Shell),
+                    .with_risk(crate::action::ActionRisk::Shell),
                 );
             }
         }

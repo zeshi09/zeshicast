@@ -33,18 +33,36 @@ pub(super) fn show_dashboard_view(
     action_bar: &GtkBox,
     dashboard_view: &crate::ui::DashboardView,
 ) {
-    crate::ui::set_dashboard_snapshot(dashboard_view, &crate::cached_system_snapshot());
+    crate::ui::set_dashboard_snapshot(
+        dashboard_view,
+        &crate::services::poll_cache::cached_system_snapshot(),
+    );
     crate::ui::set_dashboard_thermal(
         dashboard_view,
-        crate::cached_thermal_snapshot()
+        crate::services::poll_cache::cached_thermal_snapshot()
             .hottest_zone()
             .map(|z| z.temperature_c),
     );
-    crate::ui::set_dashboard_network_snapshot(dashboard_view, &crate::network_snapshot());
-    crate::ui::set_dashboard_battery_snapshot(dashboard_view, &crate::cached_battery_snapshot());
-    crate::ui::set_dashboard_audio_snapshot(dashboard_view, &crate::audio_snapshot());
-    crate::ui::set_dashboard_media_snapshot(dashboard_view, &crate::cached_media_snapshot());
-    crate::ui::set_dashboard_notification_snapshot(dashboard_view, &crate::notification_snapshot());
+    crate::ui::set_dashboard_network_snapshot(
+        dashboard_view,
+        &crate::services::network::network_snapshot(),
+    );
+    crate::ui::set_dashboard_battery_snapshot(
+        dashboard_view,
+        &crate::services::poll_cache::cached_battery_snapshot(),
+    );
+    crate::ui::set_dashboard_audio_snapshot(
+        dashboard_view,
+        &crate::services::audio::audio_snapshot(),
+    );
+    crate::ui::set_dashboard_media_snapshot(
+        dashboard_view,
+        &crate::services::poll_cache::cached_media_snapshot(),
+    );
+    crate::ui::set_dashboard_notification_snapshot(
+        dashboard_view,
+        &crate::services::notifications::notification_snapshot(),
+    );
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Dashboard);
@@ -58,8 +76,8 @@ pub(super) fn show_system_monitor_view(
 ) {
     crate::ui::set_system_monitor_snapshot(
         system_monitor_view,
-        &crate::cached_system_snapshot(),
-        &crate::cached_top_processes(),
+        &crate::services::poll_cache::cached_system_snapshot(),
+        &crate::services::poll_cache::cached_top_processes(),
     );
     entry.set_visible(false);
     action_bar.set_visible(false);
@@ -88,7 +106,7 @@ pub(super) fn show_audio_view(
     action_bar: &GtkBox,
     audio_view: &crate::ui::AudioView,
 ) {
-    crate::ui::set_audio_snapshot(audio_view, &crate::audio_snapshot());
+    crate::ui::set_audio_snapshot(audio_view, &crate::services::audio::audio_snapshot());
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Audio);
@@ -101,7 +119,7 @@ pub(super) fn show_network_view(
     action_bar: &GtkBox,
     network_list: &ListBox,
 ) {
-    crate::ui::set_network_snapshot(network_list, &crate::network_snapshot());
+    crate::ui::set_network_snapshot(network_list, &crate::services::network::network_snapshot());
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Network);
@@ -117,7 +135,10 @@ pub(super) fn show_notifications_view(
     action_bar: &GtkBox,
     notifications_view: &crate::ui::NotificationsView,
 ) {
-    crate::ui::set_notification_snapshot(notifications_view, &crate::notification_snapshot());
+    crate::ui::set_notification_snapshot(
+        notifications_view,
+        &crate::services::notifications::notification_snapshot(),
+    );
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Notifications);
@@ -129,7 +150,10 @@ pub(super) fn show_media_view(
     action_bar: &GtkBox,
     media_view: &crate::ui::MediaView,
 ) {
-    crate::ui::set_media_snapshot(media_view, &crate::cached_media_snapshot());
+    crate::ui::set_media_snapshot(
+        media_view,
+        &crate::services::poll_cache::cached_media_snapshot(),
+    );
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Media);
@@ -161,7 +185,7 @@ pub(super) fn show_window_grid_view(
 }
 
 pub(super) fn run_launcher_command(
-    command: crate::LauncherCommand,
+    command: crate::action::LauncherCommand,
     navigation: &crate::ui::NavigationStack,
     entry: &Entry,
     action_bar: &GtkBox,
@@ -177,34 +201,40 @@ pub(super) fn run_launcher_command(
     window_grid_view: &crate::ui::WindowGridView,
 ) {
     match command {
-        crate::LauncherCommand::AiChat => {
+        crate::action::LauncherCommand::AiChat => {
             show_ai_chat_view(navigation, entry, action_bar, ai_chat_view)
         }
-        crate::LauncherCommand::AiChatWithPrompt(prompt) => {
+        crate::action::LauncherCommand::AiChatWithPrompt(prompt) => {
             show_ai_chat_view(navigation, entry, action_bar, ai_chat_view);
             ai_chat_view.input.set_text(&prompt);
         }
-        crate::LauncherCommand::Audio => show_audio_view(navigation, entry, action_bar, audio_view),
-        crate::LauncherCommand::Dashboard => {
+        crate::action::LauncherCommand::Audio => {
+            show_audio_view(navigation, entry, action_bar, audio_view)
+        }
+        crate::action::LauncherCommand::Dashboard => {
             show_dashboard_view(navigation, entry, action_bar, dashboard_view)
         }
-        crate::LauncherCommand::Emoji => show_emoji_view(navigation, entry, action_bar, emoji_view),
-        crate::LauncherCommand::Fonts => {
+        crate::action::LauncherCommand::Emoji => {
+            show_emoji_view(navigation, entry, action_bar, emoji_view)
+        }
+        crate::action::LauncherCommand::Fonts => {
             show_font_browser_view(navigation, entry, action_bar, font_view)
         }
-        crate::LauncherCommand::SystemMonitor => {
+        crate::action::LauncherCommand::SystemMonitor => {
             show_system_monitor_view(navigation, entry, action_bar, system_monitor_view)
         }
-        crate::LauncherCommand::Media => show_media_view(navigation, entry, action_bar, media_view),
-        crate::LauncherCommand::Network => {
+        crate::action::LauncherCommand::Media => {
+            show_media_view(navigation, entry, action_bar, media_view)
+        }
+        crate::action::LauncherCommand::Network => {
             show_network_view(navigation, entry, action_bar, network_list)
         }
-        crate::LauncherCommand::Notifications => {
+        crate::action::LauncherCommand::Notifications => {
             show_notifications_view(navigation, entry, action_bar, notifications_view)
         }
-        crate::LauncherCommand::WindowGrid => {
+        crate::action::LauncherCommand::WindowGrid => {
             show_window_grid_view(navigation, entry, action_bar, window_grid_view)
         }
-        crate::LauncherCommand::CreateSnippet(_) => {}
+        crate::action::LauncherCommand::CreateSnippet(_) => {}
     }
 }

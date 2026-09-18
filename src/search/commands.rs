@@ -9,12 +9,15 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "gui")]
 use std::process::Command;
 
-use crate::{
+use crate::action::{
     Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
-    CapabilitySet, CommandArgumentKind, ExtensionManifest, ExtensionOrigin, JsonCommandAction,
-    PlaceholderContext, ProcessCommand, ShellCommand, expand_placeholders,
-    expand_placeholders_shell, fuzzy_score, normalize_alias, tagged_subtitle, toml_value_string,
+    CapabilitySet, CommandArgumentKind, JsonCommandAction, ProcessCommand, ShellCommand,
 };
+use crate::config::{normalize_alias, toml_value_string};
+use crate::extensions::{ExtensionManifest, ExtensionOrigin};
+use crate::placeholders::{PlaceholderContext, expand_placeholders, expand_placeholders_shell};
+use crate::search::fuzzy_score;
+use crate::search::named_values::tagged_subtitle;
 
 #[derive(Debug, Clone)]
 pub(crate) struct CommandEntry {
@@ -659,7 +662,7 @@ pub(crate) fn parse_json_actions(
 
     values
         .iter()
-        .take(crate::MAX_RESULTS)
+        .take(crate::search::MAX_RESULTS)
         .enumerate()
         .filter_map(|(index, value)| {
             parse_json_action(value, category, base_score - index as i32, capabilities)
@@ -1095,7 +1098,8 @@ fn command_subtitle(entry: &CommandEntry, command: &str, missing: &[String]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ExecutionRequest, PlaceholderContext};
+    use crate::action::ExecutionRequest;
+    use crate::placeholders::PlaceholderContext;
 
     fn no_context() -> PlaceholderContext<'static> {
         PlaceholderContext::new("", None)

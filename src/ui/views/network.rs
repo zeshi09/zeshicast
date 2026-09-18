@@ -1,4 +1,4 @@
-use crate::{NetworkInterfaceSnapshot, NetworkSnapshot};
+use crate::services::network::{NetworkInterfaceSnapshot, NetworkSnapshot};
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, ListBox, Orientation};
 

@@ -10,7 +10,7 @@ impl Zeshicast {
         }
         // Incoming text is sanitized here: pasted text must never be able to
         // claim to be an image entry (M-15).
-        let text = crate::normalize_clipboard_text(text);
+        let text = crate::search::clipboard::normalize_clipboard_text(text);
         if text.is_empty() {
             return Ok(false);
         }
@@ -26,7 +26,7 @@ impl Zeshicast {
             .map_err(|e| io::Error::other(e.to_string()))?;
         self.clipboard_timestamps
             .entry(text.clone())
-            .or_insert_with(crate::unix_now);
+            .or_insert_with(crate::config::unix_now);
         self.clipboard_history.retain(|e| e != &text);
         self.clipboard_history.insert(0, text);
         self.clipboard_history.truncate(retention);
@@ -63,7 +63,7 @@ impl Zeshicast {
                 let preview = if kind == ClipboardKind::Image {
                     "Image".to_string()
                 } else {
-                    crate::clipboard_preview(entry)
+                    crate::search::clipboard::clipboard_preview(entry)
                 };
                 ClipboardSummary {
                     preview,

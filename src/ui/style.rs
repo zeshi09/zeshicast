@@ -1,6 +1,6 @@
 use gtk::{CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION, gdk};
 
-use crate::{home_dir, load_preferences_or_default};
+use crate::config::{home_dir, load_preferences_or_default};
 
 pub fn install_css() {
     super::fonts::ensure_fonts();

@@ -8,7 +8,8 @@ use gtk::{
     ApplicationWindow, Box as GtkBox, Button, Entry, EventControllerKey, Label, Orientation,
 };
 
-use crate::{Action, Zeshicast};
+use crate::action::Action;
+use crate::app::Zeshicast;
 
 pub fn show_confirmation_panel<F>(
     parent: &ApplicationWindow,

@@ -124,6 +124,21 @@ A row does not carry an index into `results`: it is tagged with the action it
 was built from (`ACTION_ROW_TAG`), so a stale or unregistered row runs nothing
 instead of a neighbour's action (B-4).
 
+## The Crate Root
+
+The crate root is not a prelude (P5.4). `src/lib.rs` declares the modules, keeps
+`reap_finished_children`, and re-exports exactly what the two binaries import:
+`Action`, `ActionRisk`, `ExecutionDecision`, `SecondaryActionKind`, `Zeshicast`,
+the export/import helpers and `logging`/`cli`/`ui`. Everything inside the crate
+names the module a thing lives in (`crate::search::apps::load_apps`), and the
+tests inside a module use those paths too instead of a `#[cfg(test)]`
+re-export.
+
+Nine service modules carry `#[cfg_attr(not(feature = "gui"), allow(dead_code))]`:
+the palette is their only consumer, so without the `gui` feature they are
+unreachable rather than dead. That attribute is a marker for the reader, not a
+license: gating those readers on the feature is what should replace it.
+
 ## Adding A Provider
 
 1. Put provider-specific parsing and search logic under `src/search/` or

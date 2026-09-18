@@ -1,4 +1,4 @@
-use crate::NotificationSnapshot;
+use crate::services::notifications::NotificationSnapshot;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, ListBox, ListBoxRow, Orientation};
 
@@ -188,7 +188,7 @@ fn notification_history_row(
     if let Some(id) = entry.id {
         let row_weak = row.downgrade();
         dismiss.connect_clicked(move |_| {
-            crate::close_notification(id);
+            crate::services::notifications::close_notification(id);
             if let Some(row) = row_weak.upgrade() {
                 row.set_visible(false);
             }

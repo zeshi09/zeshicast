@@ -99,7 +99,7 @@ fn present_form_panel(
                     .map(|f| {
                         let val = values.get(&f.name).cloned().unwrap_or_default();
                         if f.percent_encoded {
-                            crate::percent_encode(&val)
+                            crate::action::percent_encode(&val)
                         } else {
                             val
                         }
@@ -123,7 +123,7 @@ fn present_form_panel(
             let decision = launcher
                 .borrow_mut()
                 .run_form_action_confirmed(&action, values);
-            if let crate::ExecutionDecision::Denied(reason) = decision {
+            if let crate::action::ExecutionDecision::Denied(reason) = decision {
                 eprintln!("form action denied: {reason}");
             }
             update_results(
@@ -162,7 +162,7 @@ pub(crate) fn run_selected_with_views(
     if let Some(action) = selected_action(list, results) {
         if let Some(command) = action.launcher_command() {
             match command {
-                crate::LauncherCommand::CreateSnippet(content) => {
+                crate::action::LauncherCommand::CreateSnippet(content) => {
                     crate::ui::show_snippet_editor_panel(
                         window,
                         launcher,
@@ -173,9 +173,9 @@ pub(crate) fn run_selected_with_views(
                         || {},
                     );
                 }
-                crate::LauncherCommand::AiChatWithPrompt(prompt) => {
+                crate::action::LauncherCommand::AiChatWithPrompt(prompt) => {
                     run_launcher_command(
-                        crate::LauncherCommand::AiChatWithPrompt(prompt),
+                        crate::action::LauncherCommand::AiChatWithPrompt(prompt),
                         navigation,
                         entry,
                         action_bar,
@@ -294,7 +294,7 @@ fn run_json_command_action_async(
 
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = sender.send(crate::run_json_command_actions(&command));
+        let _ = sender.send(crate::search::commands::run_json_command_actions(&command));
     });
 
     let entry = entry.clone();
@@ -370,23 +370,23 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let _ = crate::execute(
-        crate::ExecutionRequest::Command(crate::ProcessCommand::new(
+    let _ = crate::action::execute(
+        crate::action::ExecutionRequest::Command(crate::action::ProcessCommand::new(
             program,
             args.into_iter()
                 .map(|arg| arg.as_ref().to_string())
                 .collect(),
         )),
-        &crate::ExecutionTicket::confirmed(),
+        &crate::action::ExecutionTicket::confirmed(),
     );
 }
 
 pub(crate) fn run_shell_request(command: &str) {
-    let _ = crate::execute(
-        crate::ExecutionRequest::Shell {
-            command: crate::ShellCommand::new(command),
+    let _ = crate::action::execute(
+        crate::action::ExecutionRequest::Shell {
+            command: crate::action::ShellCommand::new(command),
         },
-        &crate::ExecutionTicket::confirmed(),
+        &crate::action::ExecutionTicket::confirmed(),
     );
 }
 

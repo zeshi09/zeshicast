@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::execute_http_request;
+use crate::search::web::execute_http_request;
 
 #[cfg(test)]
 thread_local! {
@@ -35,6 +35,7 @@ pub enum ScriptMode {
     Inline,
 }
 
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn percent_encode(input: &str) -> String {
     let mut encoded = String::with_capacity(input.len());
     for byte in input.bytes() {
@@ -135,8 +136,8 @@ pub(crate) enum ExecutionRequest {
     OpenUrl(String),
     Copy(String),
     Http(HttpRequest),
-    Media(crate::MediaControl),
-    Notification(crate::NotificationAction),
+    Media(crate::services::media::MediaControl),
+    Notification(crate::services::notifications::NotificationAction),
     /// Run one item of an extension through that extension's own JSON-RPC
     /// `execute` method (P1.5c). The id names an item *in that extension*, so it
     /// is not a command line and never reaches a shell.
@@ -394,7 +395,7 @@ mod tests {
         Action::new(
             "Media",
             "Play/Pause",
-            ActionKind::Media(crate::MediaControl::PlayPause),
+            ActionKind::Media(crate::services::media::MediaControl::PlayPause),
             0,
         )
         .with_risk(risk)
@@ -449,7 +450,7 @@ mod tests {
 
         assert_eq!(
             execute(
-                ExecutionRequest::Media(crate::MediaControl::PlayPause),
+                ExecutionRequest::Media(crate::services::media::MediaControl::PlayPause),
                 &ExecutionTicket::confirmed()
             ),
             ExecutionDecision::RunNow
@@ -899,13 +900,13 @@ fn run_verified_request(request: ExecutionRequest) {
                 } else {
                     #[cfg(feature = "gui")]
                     glib::idle_add_once(move || {
-                        crate::push_notification(
+                        crate::services::notifications::push_notification(
                             "Zeshicast",
                             "HTTP Request Failed",
                             "Check AI or translation endpoint configuration",
                             0,
                         );
-                        if !crate::is_dnd_enabled() {
+                        if !crate::services::notifications::is_dnd_enabled() {
                             crate::ui::show_notification_osd(
                                 None,
                                 "Zeshicast",
@@ -929,12 +930,14 @@ fn run_verified_request(request: ExecutionRequest) {
             // caller's thread, like the HTTP round trips above.
             std::thread::spawn(move || run_extension_item(&binary, &id, &granted));
         }
-        ExecutionRequest::Media(control) => crate::media_control(control),
+        ExecutionRequest::Media(control) => crate::services::media::media_control(control),
         ExecutionRequest::Notification(action) => match action {
-            crate::NotificationAction::ToggleDnd => {
-                crate::toggle_dnd();
+            crate::services::notifications::NotificationAction::ToggleDnd => {
+                crate::services::notifications::toggle_dnd();
             }
-            crate::NotificationAction::ClearAll => crate::clear_notifications(),
+            crate::services::notifications::NotificationAction::ClearAll => {
+                crate::services::notifications::clear_notifications()
+            }
         },
     }
 }
@@ -976,7 +979,7 @@ fn run_extension_item(binary: &Path, id: &str, granted: &CapabilitySet) {
     }
 
     if let Some(message) = reply.output.clone().or_else(|| reply.notify.clone()) {
-        crate::push_notification("Zeshicast", "Extension", &message, 0);
+        crate::services::notifications::push_notification("Zeshicast", "Extension", &message, 0);
     }
 }
 
@@ -1029,7 +1032,12 @@ fn apply_extension_effect(effect: ActionKind) {
 /// as a shell command and whatever happened to stderr was invisible.
 fn report_extension_problem(detail: &str) {
     eprintln!("extension item {detail}");
-    crate::push_notification("Zeshicast", "Extension Item Failed", detail, 0);
+    crate::services::notifications::push_notification(
+        "Zeshicast",
+        "Extension Item Failed",
+        detail,
+        0,
+    );
 }
 
 #[derive(Debug, Clone)]
@@ -1044,9 +1052,9 @@ pub(crate) enum ActionKind {
     Form(ActionForm),
     JsonCommand(JsonCommandAction),
     /// Playback control routed to the active MPRIS player over D-Bus.
-    Media(crate::MediaControl),
+    Media(crate::services::media::MediaControl),
     /// Notification action routed to our own notification store.
-    Notification(crate::NotificationAction),
+    Notification(crate::services::notifications::NotificationAction),
     /// One item of an external extension, run over its own protocol.
     ExtensionItem {
         binary: PathBuf,
@@ -1136,8 +1144,8 @@ fn spawn_command(command: &ProcessCommand) {
 }
 
 fn copy_to_clipboard(text: &str) {
-    if let Some(path) = crate::clipboard_image_path(text) {
-        if crate::copy_clipboard_image(path) {
+    if let Some(path) = crate::services::clipboard_store::clipboard_image_path(text) {
+        if crate::services::clipboard_store::copy_clipboard_image(path) {
             log::info!("copied image to clipboard");
         } else {
             log::warn!("copy failed; install wl-clipboard or xclip to copy images");
@@ -1157,6 +1165,7 @@ fn copy_to_clipboard(text: &str) {
     }
 }
 
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn copy_text(text: &str) {
     copy_to_clipboard(text);
 }

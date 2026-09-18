@@ -48,7 +48,7 @@ fn save_calc_history(path: &std::path::Path, history: &[CalcHistoryEntry]) {
         .map(|e| serde_json::json!({"e": e.expr, "r": e.result}))
         .collect();
     if let Ok(json) = serde_json::to_string(&array) {
-        crate::write_file_atomic(path, json.as_bytes(), 0o600).ok();
+        crate::config::write_file_atomic(path, json.as_bytes(), 0o600).ok();
     }
 }
 

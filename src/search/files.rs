@@ -3,8 +3,9 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::action::{Action, ActionKind};
+use crate::search::MAX_RESULTS;
 use crate::search::fuzzy_score_lower;
-use crate::{Action, ActionKind, MAX_RESULTS};
 
 const MAX_FILE_DEPTH: usize = 5;
 const MAX_INDEXED_FILES: usize = 10_000;

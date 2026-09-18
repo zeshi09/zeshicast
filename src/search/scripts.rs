@@ -3,11 +3,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::commands::parse_capabilities;
-use crate::{
+use crate::action::{
     Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
-    CapabilitySet, CommandArgumentKind, ExtensionManifest, ExtensionOrigin, ProcessCommand,
-    ScriptMode, fuzzy_score,
+    CapabilitySet, CommandArgumentKind, ProcessCommand, ScriptMode,
 };
+use crate::extensions::{ExtensionManifest, ExtensionOrigin};
+use crate::search::fuzzy_score;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ScriptArgument {
@@ -435,7 +436,8 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ActionRisk, ExecutionRequest, ExecutionTicket, ExtensionManifest, execute};
+    use crate::action::{ActionRisk, ExecutionRequest, ExecutionTicket, execute};
+    use crate::extensions::ExtensionManifest;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -598,7 +600,7 @@ mod tests {
         // gateway spawns asynchronously, so wait briefly for the child.
         assert_eq!(
             execute(request, &ExecutionTicket::confirmed()),
-            crate::ExecutionDecision::RunNow
+            crate::action::ExecutionDecision::RunNow
         );
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !ran_marker.exists() && std::time::Instant::now() < deadline {
@@ -756,13 +758,16 @@ mod tests {
 
     #[test]
     fn percent_encoding_works() {
-        assert_eq!(crate::percent_encode("hello world"), "hello%20world");
         assert_eq!(
-            crate::percent_encode("foo+bar/baz?a=1&b=2"),
+            crate::action::percent_encode("hello world"),
+            "hello%20world"
+        );
+        assert_eq!(
+            crate::action::percent_encode("foo+bar/baz?a=1&b=2"),
             "foo%2Bbar%2Fbaz%3Fa%3D1%26b%3D2"
         );
         assert_eq!(
-            crate::percent_encode("unreserved-_.~123"),
+            crate::action::percent_encode("unreserved-_.~123"),
             "unreserved-_.~123"
         );
     }

@@ -35,7 +35,7 @@ impl Zeshicast {
     }
 
     pub fn available_secondary_actions(&self, action: &Action) -> Vec<SecondaryAction> {
-        use crate::ActionPanelSection as S;
+        use crate::action::ActionPanelSection as S;
         let can_type = is_wtype_available();
         let is_text_action = matches!(action.category.as_str(), "Snippet" | "Clipboard");
         let mut actions = vec![
@@ -145,7 +145,7 @@ impl Zeshicast {
         secondary: SecondaryActionKind,
         confirmed: bool,
     ) -> io::Result<ExecutionDecision> {
-        let risk = crate::secondary_action_risk(action, secondary);
+        let risk = crate::action::secondary_action_risk(action, secondary);
         if risk.requires_confirmation() && !confirmed {
             return Ok(ExecutionDecision::NeedsConfirmation(risk));
         }

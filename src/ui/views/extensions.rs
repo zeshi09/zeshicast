@@ -1,4 +1,4 @@
-use crate::CommandSummary;
+use crate::app::CommandSummary;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Label, ListBox, Orientation};
 

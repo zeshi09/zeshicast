@@ -17,12 +17,23 @@ pub(crate) mod system;
 pub(crate) mod web;
 pub(crate) mod windows;
 
-use crate::{
-    Action, ActionTarget, AppEntry, CommandEntry, FileEntry, NamedValue, PlaceholderContext,
-    search_ai, search_apps, search_audio_actions, search_clipboard, search_commands, search_files,
-    search_hyprland_actions, search_media_actions, search_named_values, search_network_actions,
-    search_niri_actions, search_notification_actions, search_processes, search_sway_actions,
-    search_system_actions, search_translate, search_windows,
+/// How many results a provider may contribute before the palette truncates.
+pub(crate) const MAX_RESULTS: usize = 40;
+
+use crate::action::Action;
+use crate::placeholders::PlaceholderContext;
+use crate::search::apps::{AppEntry, search_apps};
+use crate::search::clipboard::search_clipboard;
+use crate::search::commands::{CommandEntry, search_commands};
+use crate::search::files::{FileEntry, search_files};
+use crate::search::media::search_media_actions;
+use crate::search::named_values::{ActionTarget, NamedValue, search_named_values};
+use crate::search::notifications::search_notification_actions;
+use crate::search::processes::search_processes;
+use crate::search::system::{search_audio_actions, search_network_actions, search_system_actions};
+use crate::search::web::{search_ai, search_translate};
+use crate::search::windows::{
+    search_hyprland_actions, search_niri_actions, search_sway_actions, search_windows,
 };
 use emoji::search_emoji;
 use scripts::search_scripts;
@@ -235,8 +246,6 @@ impl SearchProvider for ScriptsProvider<'_> {
     }
 }
 
-pub(crate) use scripts::{ScriptEntry, load_extension_script_entries, load_script_entries};
-
 pub(crate) struct EmojiProvider;
 
 impl SearchProvider for EmojiProvider {
@@ -302,7 +311,7 @@ impl SearchProvider for BrowserTabsProvider {
 }
 
 pub(crate) struct ExtensionsProvider<'a> {
-    pub(crate) manifests: &'a [crate::ExtensionManifest],
+    pub(crate) manifests: &'a [crate::extensions::ExtensionManifest],
 }
 
 impl SearchProvider for ExtensionsProvider<'_> {

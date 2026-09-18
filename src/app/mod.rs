@@ -4,20 +4,27 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::action::{
+    Action, ActionFormCommand, ActionKind, ActionRisk, ExecutionDecision, ExecutionPolicy,
+    ExecutionRequest, ExecutionTicket, ProcessCommand, SecondaryAction, SecondaryActionKind,
+    ShellCommand, execute,
+};
+use crate::config::{
+    append_alias, home_dir, load_aliases, load_frequencies, load_lines,
+    load_preferences_with_backup, normalize_alias, write_lines, write_preferences,
+};
+use crate::extensions::{ExtensionManifest, load_extension_manifests};
+use crate::placeholders::{PlaceholderContext, expand_placeholders, expand_placeholders_shell};
+use crate::search::apps::{AppEntry, load_apps};
+use crate::search::clipboard::load_clipboard_history;
+use crate::search::commands::{CommandEntry, load_command_entries, load_extension_command_entries};
+use crate::search::files::{FileEntry, load_file_index};
+use crate::search::named_values::{NamedValue, load_named_values};
+use crate::search::scripts::{ScriptEntry, load_extension_script_entries, load_script_entries};
+use crate::search::snapshot::SearchData;
 pub use crate::services::clipboard_store::*;
 use crate::services::storage;
 use crate::services::text_input::{is_wtype_available, type_text_via_wtype};
-use crate::{
-    Action, ActionFormCommand, ActionKind, ActionRisk, AppEntry, CommandEntry, ExecutionDecision,
-    ExecutionPolicy, ExecutionRequest, ExecutionTicket, ExtensionManifest, FileEntry, NamedValue,
-    PlaceholderContext, ProcessCommand, ScriptEntry, SearchData, SecondaryAction,
-    SecondaryActionKind, ShellCommand, append_alias, execute, expand_placeholders,
-    expand_placeholders_shell, home_dir, load_aliases, load_apps, load_clipboard_history,
-    load_command_entries, load_extension_command_entries, load_extension_manifests,
-    load_extension_script_entries, load_file_index, load_frequencies, load_lines,
-    load_named_values, load_preferences_with_backup, load_script_entries, normalize_alias,
-    write_lines, write_preferences,
-};
 
 mod clipboard;
 mod launch;
@@ -184,7 +191,7 @@ pub struct ExtensionSummary {
 }
 
 impl ExtensionSummary {
-    pub(crate) fn from_origin(origin: &crate::ExtensionOrigin) -> Self {
+    pub(crate) fn from_origin(origin: &crate::extensions::ExtensionOrigin) -> Self {
         Self {
             id: origin.id.clone(),
             name: origin.name.clone(),
@@ -365,7 +372,7 @@ impl Zeshicast {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ActionForm;
+    use crate::action::ActionForm;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -459,7 +466,9 @@ mod tests {
             .cloned()
             .expect("entry stored");
         assert_eq!(
-            with_clipboard_cache_dir(&cache, || crate::clipboard_image_path(&entry)),
+            with_clipboard_cache_dir(&cache, || {
+                crate::services::clipboard_store::clipboard_image_path(&entry)
+            }),
             Some(image.to_string_lossy().as_ref())
         );
         assert_eq!(
@@ -490,7 +499,9 @@ mod tests {
                 preferences: HashMap::new(),
                 current_args: HashMap::new(),
                 partial_query: String::new(),
-                capabilities: crate::CapabilitySet::new(vec![crate::Capability::Shell]),
+                capabilities: crate::action::CapabilitySet::new(vec![
+                    crate::action::Capability::Shell,
+                ]),
                 risk: ActionRisk::Shell,
             }),
             0,
@@ -502,14 +513,14 @@ mod tests {
             app.run_form_action(&action, HashMap::new()),
             ExecutionDecision::NeedsConfirmation(ActionRisk::Shell)
         );
-        assert_eq!(crate::take_exec_count(), 0);
+        assert_eq!(crate::action::take_exec_count(), 0);
 
         // Confirmed policy runs it exactly once, through the gateway.
         assert_eq!(
             app.run_form_action_confirmed(&action, HashMap::new()),
             ExecutionDecision::RunNow
         );
-        assert_eq!(crate::take_exec_count(), 1);
+        assert_eq!(crate::action::take_exec_count(), 1);
     }
 
     #[test]
@@ -526,7 +537,7 @@ mod tests {
                 preferences: HashMap::new(),
                 current_args: HashMap::new(),
                 partial_query: String::new(),
-                capabilities: crate::CapabilitySet::empty(),
+                capabilities: crate::action::CapabilitySet::empty(),
                 risk: ActionRisk::Shell,
             }),
             0,
@@ -537,7 +548,7 @@ mod tests {
             matches!(decision, ExecutionDecision::Denied(_)),
             "expected denial, got {decision:?}"
         );
-        assert_eq!(crate::take_exec_count(), 0);
+        assert_eq!(crate::action::take_exec_count(), 0);
     }
 
     #[test]
@@ -571,10 +582,10 @@ mod tests {
             ActionKind::None,
             0,
         )
-        .with_capabilities(crate::CapabilitySet::empty());
+        .with_capabilities(crate::action::CapabilitySet::empty());
 
         assert_eq!(
-            crate::secondary_action_risk(&blocked, SecondaryActionKind::RunInTerminal),
+            crate::action::secondary_action_risk(&blocked, SecondaryActionKind::RunInTerminal),
             ActionRisk::Shell,
             "terminal launches always ask for confirmation"
         );
@@ -590,7 +601,7 @@ mod tests {
             matches!(decision, ExecutionDecision::Denied(_)),
             "expected denial, got {decision:?}"
         );
-        assert_eq!(crate::take_exec_count(), 0);
+        assert_eq!(crate::action::take_exec_count(), 0);
     }
 
     #[test]

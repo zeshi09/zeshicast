@@ -3,9 +3,9 @@
 use super::launcher::{
     run_secondary_action_or_confirm, selected_action, show_root_view, update_results,
 };
-use crate::{
-    Action, ActionPanelSection, SecondaryActionKind, Zeshicast, ui::ActionPanelDisplayItem,
-};
+use crate::action::{Action, ActionPanelSection, SecondaryActionKind};
+use crate::app::Zeshicast;
+use crate::ui::ActionPanelDisplayItem;
 use gtk::prelude::*;
 use gtk::{ApplicationWindow, Box as GtkBox, Entry, ListBox};
 use std::cell::RefCell;

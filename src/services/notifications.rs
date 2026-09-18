@@ -85,7 +85,7 @@ fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
 /// DND is the one piece of notification state that must survive daemon restarts,
 /// so we persist it to a tiny file next to the rest of the config.
 fn dnd_state_path() -> std::path::PathBuf {
-    crate::home_dir().join(".config/zeshicast/dnd")
+    crate::config::home_dir().join(".config/zeshicast/dnd")
 }
 
 fn load_persisted_dnd() -> bool {

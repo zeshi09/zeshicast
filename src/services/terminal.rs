@@ -101,16 +101,16 @@ pub fn build_terminal_command(
 /// Builds the terminal spawn for `shell_command` as a typed process command.
 ///
 /// Deliberately does **not** spawn: the caller must route the command through
-/// the execution gateway (`crate::execute`) so the capability ceiling and the
+/// the execution gateway (`crate::action::execute`) so the capability ceiling and the
 /// confirmation policy are enforced before anything starts.
 pub fn terminal_process_command(
     shell_command: &str,
     terminal_override: Option<&str>,
     hold_open: bool,
-) -> crate::ProcessCommand {
+) -> crate::action::ProcessCommand {
     let term = detect_terminal(terminal_override).unwrap_or_else(|| "xterm".to_string());
     let (bin, args) = build_terminal_command(&term, shell_command, hold_open);
-    crate::ProcessCommand::new(bin, args)
+    crate::action::ProcessCommand::new(bin, args)
 }
 
 #[cfg(test)]

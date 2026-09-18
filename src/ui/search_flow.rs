@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use gtk::glib;
 
-use crate::Action;
+use crate::action::Action;
 
 /// How long the entry has to stay unchanged before the search runs.
 pub(crate) const SEARCH_DEBOUNCE: Duration = Duration::from_millis(80);

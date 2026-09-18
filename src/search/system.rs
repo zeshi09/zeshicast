@@ -1,4 +1,5 @@
-use crate::{Action, ActionKind, ActionRisk, ShellCommand, fuzzy_score};
+use crate::action::{Action, ActionKind, ActionRisk, ShellCommand};
+use crate::search::fuzzy_score;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SystemActionEntry {

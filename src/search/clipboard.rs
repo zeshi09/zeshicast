@@ -2,7 +2,8 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-use crate::{Action, ActionKind, MAX_RESULTS, fuzzy_score};
+use crate::action::{Action, ActionKind};
+use crate::search::{MAX_RESULTS, fuzzy_score};
 
 pub(crate) const MAX_CLIPBOARD_ENTRIES: usize = 100;
 pub(crate) const MAX_CLIPBOARD_TEXT_BYTES: usize = 20_000;
@@ -115,7 +116,8 @@ pub(crate) fn search_clipboard(entries: &[String], query: &str, explicit: bool) 
             .take(6)
             .enumerate()
             .map(|(index, entry)| {
-                let is_image = crate::clipboard_image_path(entry).is_some();
+                let is_image =
+                    crate::services::clipboard_store::clipboard_image_path(entry).is_some();
                 let title = if is_image {
                     "Image".to_string()
                 } else {
@@ -146,7 +148,7 @@ pub(crate) fn search_clipboard(entries: &[String], query: &str, explicit: bool) 
         .iter()
         .enumerate()
         .filter_map(|(index, entry)| {
-            let is_image = crate::clipboard_image_path(entry).is_some();
+            let is_image = crate::services::clipboard_store::clipboard_image_path(entry).is_some();
             let score = if is_image {
                 fuzzy_score("image png screenshot", query)?
             } else {

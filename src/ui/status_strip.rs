@@ -6,7 +6,10 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use crate::{AudioSnapshot, BatterySnapshot, MediaSnapshot, NetworkSnapshot};
+use crate::services::audio::AudioSnapshot;
+use crate::services::battery::BatterySnapshot;
+use crate::services::media::MediaSnapshot;
+use crate::services::network::NetworkSnapshot;
 
 #[derive(Clone)]
 pub struct StatusStrip {

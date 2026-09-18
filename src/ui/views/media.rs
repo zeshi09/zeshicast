@@ -1,4 +1,4 @@
-use crate::MediaSnapshot;
+use crate::services::media::MediaSnapshot;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Image, Label, Orientation};
@@ -179,11 +179,25 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
     let next = media_ctrl_btn("media-skip-forward-symbolic", "Next", "media-btn-skip");
 
     // Wire MPRIS controls (direct D-Bus, no playerctl).
-    previous.connect_clicked(|_| crate::media_control(crate::MediaControl::Previous));
-    next.connect_clicked(|_| crate::media_control(crate::MediaControl::Next));
-    play_pause.connect_clicked(|_| crate::media_control(crate::MediaControl::PlayPause));
-    seek_back.connect_clicked(|_| crate::media_control(crate::MediaControl::SeekBy(-10_000_000)));
-    seek_fwd.connect_clicked(|_| crate::media_control(crate::MediaControl::SeekBy(10_000_000)));
+    previous.connect_clicked(|_| {
+        crate::services::media::media_control(crate::services::media::MediaControl::Previous)
+    });
+    next.connect_clicked(|_| {
+        crate::services::media::media_control(crate::services::media::MediaControl::Next)
+    });
+    play_pause.connect_clicked(|_| {
+        crate::services::media::media_control(crate::services::media::MediaControl::PlayPause)
+    });
+    seek_back.connect_clicked(|_| {
+        crate::services::media::media_control(crate::services::media::MediaControl::SeekBy(
+            -10_000_000,
+        ))
+    });
+    seek_fwd.connect_clicked(|_| {
+        crate::services::media::media_control(crate::services::media::MediaControl::SeekBy(
+            10_000_000,
+        ))
+    });
     let scrub_state = Rc::new(ScrubState::default());
     scrubber.connect_change_value({
         let state = Rc::clone(&scrub_state);
@@ -194,7 +208,9 @@ pub fn media_view(snapshot: &MediaSnapshot) -> MediaView {
             // delta cannot be measured against a position the user never saw.
             let offset = ((val - scale.value()) * 1_000_000.0).round() as i64;
             state.requested(Instant::now(), val);
-            crate::media_control(crate::MediaControl::SeekBy(offset));
+            crate::services::media::media_control(crate::services::media::MediaControl::SeekBy(
+                offset,
+            ));
             gtk::glib::Propagation::Proceed
         }
     });
