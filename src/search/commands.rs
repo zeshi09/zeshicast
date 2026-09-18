@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
+// The palette's own machinery: a JSON command's stdout becomes rows, so only a
+// build with a results list can consume it (P5.1).
 #[cfg(feature = "gui")]
 use std::io;
 use std::path::{Path, PathBuf};

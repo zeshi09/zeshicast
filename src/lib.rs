@@ -1,9 +1,9 @@
-pub mod logging;
 mod action;
 mod app;
 pub mod cli;
 mod config;
 mod extensions;
+pub mod logging;
 mod placeholders;
 mod process;
 mod search;
@@ -1380,6 +1380,95 @@ DEPLOY_TOKEN = "{{pref:token}}"
         assert_eq!(
             decode_cmdline(b"zeshicast-gtk\0--daemon\0"),
             "zeshicast-gtk --daemon"
+        );
+    }
+
+    /// `gui` must add widgets, not capability (P5.1).
+    ///
+    /// A service or an execution path that a headless build can use belongs to
+    /// `desktop`, which is what the CLI is built with. Gating one on `gui` is
+    /// how media actions came to do nothing outside the GTK build while looking
+    /// implemented, and `gui` is what the daemon needed for its D-Bus work.
+    #[test]
+    fn the_gui_feature_is_widgets_on_top_of_the_desktop_build() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest =
+            std::fs::read_to_string(root.join("Cargo.toml")).expect("readable Cargo.toml");
+        let features = manifest
+            .split("[features]")
+            .nth(1)
+            .expect("a [features] table")
+            .to_string();
+
+        let feature_line = |name: &str| {
+            features
+                .lines()
+                .find(|line| line.starts_with(&format!("{name} =")))
+                .unwrap_or_else(|| panic!("a {name} feature"))
+                .to_string()
+        };
+
+        let gui = feature_line("gui");
+        assert!(
+            gui.contains("\"desktop\""),
+            "gui must imply desktop, or the daemon is the only build that works: {gui}"
+        );
+
+        let desktop = feature_line("desktop");
+        for dependency in ["dep:gio", "dep:glib"] {
+            assert!(
+                desktop.contains(dependency),
+                "desktop provides the D-Bus services and needs {dependency}: {desktop}"
+            );
+        }
+        assert!(
+            !desktop.contains("dep:gtk"),
+            "desktop must not drag in the widgets: {desktop}"
+        );
+
+        // The second half of the rule: nothing outside the widget modules may
+        // reach for the toolkit, otherwise a service could not be built without
+        // it. `NEEDLE` is spelled in two pieces so this test's own source does
+        // not match the scan.
+        const NEEDLE: &str = concat!("gt", "k::");
+
+        // `root` is passed in so the helper stays a plain fn (no closure).
+        fn scan(root: &std::path::Path, directory: &std::path::Path, hits: &mut Vec<String>) {
+            for entry in std::fs::read_dir(directory).expect("readable source directory") {
+                let path = entry.expect("directory entry").path();
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if path.is_dir() {
+                    // `ui` is the widgets, `bin/zeshicast-gtk.rs` is their
+                    // entry point.
+                    if name != "ui" && name != "bin" {
+                        scan(root, &path, hits);
+                    }
+                    continue;
+                }
+                if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).expect("readable source file");
+                if text.contains(NEEDLE) {
+                    hits.push(
+                        path.strip_prefix(root)
+                            .unwrap_or(&path)
+                            .display()
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        let mut hits = Vec::new();
+        scan(root, &root.join("src"), &mut hits);
+        assert!(
+            hits.is_empty(),
+            "the widget toolkit leaked out of src/ui: {hits:?}"
         );
     }
 

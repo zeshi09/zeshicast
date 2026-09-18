@@ -209,7 +209,7 @@ fn parse_ip_addr_line(line: &str) -> Option<(String, String)> {
 }
 
 fn read_wifi_networks() -> io::Result<Vec<WifiNetworkSnapshot>> {
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "desktop")]
     {
         if let Some(networks) = nm_dbus::read_wifi_networks() {
             return Ok(networks);
@@ -299,7 +299,7 @@ fn parse_nmcli_wifi_list(output: &str) -> Vec<WifiNetworkSnapshot> {
 }
 
 fn read_vpn_connections() -> io::Result<Vec<VpnConnectionSnapshot>> {
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "desktop")]
     {
         if let Some(connections) = nm_dbus::read_vpn_connections() {
             return Ok(connections);
@@ -362,12 +362,11 @@ pub fn parse_security_flags(flags: u32, wpa_flags: u32, rsn_flags: u32) -> Optio
     }
 }
 
-#[cfg(feature = "gui")]
+#[cfg(feature = "desktop")]
 mod nm_dbus {
     use std::collections::HashMap;
 
-    use gtk::gio;
-    use gtk::glib::{self, variant::ToVariant};
+    use glib::variant::ToVariant;
 
     use super::{VpnConnectionSnapshot, WifiNetworkSnapshot, parse_security_flags};
 
@@ -707,7 +706,7 @@ nameserver 2001:4860:4860::8888
     }
 
     #[test]
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "desktop")]
     fn nm_dbus_queries_without_panic() {
         let _ = nm_dbus::read_vpn_connections();
         let _ = nm_dbus::read_wifi_networks();

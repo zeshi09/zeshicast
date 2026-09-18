@@ -59,6 +59,12 @@ jobs:
             command: nix develop --command cargo clippy --all-targets --features gui,layer-shell -- -D warnings
           - name: layer-shell-check
             command: nix develop --command cargo check --features gui,layer-shell
+          # `desktop` without `gui`: the headless build with the D-Bus services.
+          # Its tests are the ones the other legs skip (mpris, NetworkManager).
+          - name: desktop-test
+            command: nix develop --command cargo test --features desktop
+          - name: desktop-clippy
+            command: nix develop --command cargo clippy --all-targets --features desktop -- -D warnings
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

@@ -898,7 +898,7 @@ fn run_verified_request(request: ExecutionRequest) {
                     copy_to_clipboard(&result);
                 } else {
                     #[cfg(feature = "gui")]
-                    gtk::glib::idle_add_once(move || {
+                    glib::idle_add_once(move || {
                         crate::push_notification(
                             "Zeshicast",
                             "HTTP Request Failed",
@@ -916,7 +916,7 @@ fn run_verified_request(request: ExecutionRequest) {
                             );
                         }
                     });
-                    eprintln!("http request failed");
+                    log::warn!("HTTP request failed; there is no result to copy");
                 }
             });
         }

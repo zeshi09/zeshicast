@@ -5,7 +5,8 @@ The resident daemon is also a **self-contained service layer**: it is its own
 freedesktop **notification daemon** (no swaync/dunst needed), reads media via
 **MPRIS over D-Bus** (no playerctl), and records **text + image** clipboard
 history. The headless `zeshicast` CLI works without any GUI dependency; the
-GTK4 launcher and daemon are behind the `gui` feature.
+GTK4 launcher and daemon are behind the `gui` feature, and the D-Bus services
+they share with the CLI (MPRIS, NetworkManager) behind `desktop`.
 
 See [docs/README.md](docs/README.md) for the complete documentation sitemap and [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the roadmap. For threat model and local data handling, read [docs/security.md](docs/security.md) and [docs/privacy.md](docs/privacy.md).
 For contributor workflows, read [docs/development.md](docs/development.md).
@@ -258,7 +259,8 @@ systemctl --user add-wants default.target zeshicast-gtk.service
 The GTK launcher is a Wayland/GTK4 application. Build-time dependencies are
 provided by the Nix flake; non-Nix installs need GTK4, GLib, gdk-pixbuf, Pango,
 Cairo, Wayland, and optionally `gtk4-layer-shell` when building
-`--features gui,layer-shell`.
+`--features gui,layer-shell`. A headless build that keeps media control and the
+NetworkManager providers needs GLib and builds with `--features desktop`.
 
 Runtime integrations use session tools when present:
 

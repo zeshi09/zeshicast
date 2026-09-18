@@ -6,13 +6,18 @@ edition = "2024"
 # (used in a few `if let … && …` guards) need >= 1.88, and the dependency
 # floor is 1.86 (icu_* via idna/url). Measured/derived with `cargo metadata`
 # plus a feature audit.
-# NOTE: the optional `gui` feature raises the requirement to 1.92 (gtk4 0.11).
+# NOTE: the optional `desktop` feature (gio/glib 0.22) and `gui` (gtk4 0.11)
+# raise the requirement to 1.92.
 rust-version = "1.88"
 publish = false
 
 [features]
 default = []
-gui = ["dep:gtk"]
+# Desktop services: gio/glib D-Bus (MPRIS, NetworkManager), JSON commands and
+# script stdout capture. This is everything a headless build needs to do real
+# work; `gui` adds only the widgets on top (P5.1).
+desktop = ["dep:gio", "dep:glib"]
+gui = ["desktop", "dep:gtk"]
 layer-shell = ["gui"]
 
 [dependencies]
@@ -22,6 +27,8 @@ layer-shell = ["gui"]
 log = "0.4"
 chrono = "0.4.44"
 flate2 = "1.1"
+gio = { version = "0.22", optional = true }
+glib = { version = "0.22", optional = true }
 gtk = { package = "gtk4", version = "0.11.3", optional = true, features = ["v4_6"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rustix = { version = "1.1", features = ["fs", "process"] }

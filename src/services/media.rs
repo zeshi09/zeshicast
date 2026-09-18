@@ -28,40 +28,42 @@ pub enum MediaControl {
 }
 
 pub fn media_snapshot() -> MediaSnapshot {
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "desktop")]
     {
         mpris::snapshot().unwrap_or_default()
     }
-    #[cfg(not(feature = "gui"))]
+    #[cfg(not(feature = "desktop"))]
     {
+        // No gio in this build, so MPRIS is out of reach (P5.1). Silent: the
+        // poller asks every second, and a log line per second is noise.
         MediaSnapshot::default()
     }
 }
 
 pub fn media_control(control: MediaControl) {
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "desktop")]
     {
         mpris::control(control);
     }
-    #[cfg(not(feature = "gui"))]
+    #[cfg(not(feature = "desktop"))]
     {
-        let _ = control;
+        // A control that does nothing looks like a broken player, so say why
+        // instead of dropping it (P5.1).
+        log::warn!("cannot send {control:?}: media control needs the `desktop` feature (or `gui`)");
     }
 }
 
 /// Direct MPRIS (org.mpris.MediaPlayer2) access over the session bus via gio —
-/// no external `playerctl` dependency. Only built for the GTK (`gui`) feature,
-/// which is the sole consumer of media status.
-#[cfg(feature = "gui")]
+/// no external `playerctl` dependency. Part of the `desktop` feature, not of the
+/// widgets: the headless CLI controls players through this same path (P5.1).
+#[cfg(feature = "desktop")]
 mod mpris {
     use super::{MediaControl, MediaSnapshot};
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
-    use gtk::gio;
-    use gtk::glib;
-    use gtk::glib::variant::ToVariant;
+    use glib::variant::ToVariant;
 
     const PREFIX: &str = "org.mpris.MediaPlayer2.";
     const OBJECT_PATH: &str = "/org/mpris/MediaPlayer2";
@@ -334,13 +336,7 @@ mod mpris {
             dest
         };
 
-        let (method, params) = match control {
-            MediaControl::PlayPause => ("PlayPause", None),
-            MediaControl::Next => ("Next", None),
-            MediaControl::Previous => ("Previous", None),
-            MediaControl::Stop => ("Stop", None),
-            MediaControl::SeekBy(offset) => ("Seek", Some((offset,).to_variant())),
-        };
+        let (method, params) = control_call(control);
 
         let _ = conn.call_sync(
             Some(&dest),
@@ -355,9 +351,36 @@ mod mpris {
         );
     }
 
+    /// The D-Bus method a control maps to, and its arguments. Split out so the
+    /// mapping is tested without a session bus (P5.1).
+    fn control_call(control: MediaControl) -> (&'static str, Option<glib::Variant>) {
+        match control {
+            MediaControl::PlayPause => ("PlayPause", None),
+            MediaControl::Next => ("Next", None),
+            MediaControl::Previous => ("Previous", None),
+            MediaControl::Stop => ("Stop", None),
+            MediaControl::SeekBy(offset) => ("Seek", Some((offset,).to_variant())),
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn every_control_maps_to_the_mpris_method_it_claims() {
+            assert_eq!(control_call(MediaControl::PlayPause).0, "PlayPause");
+            assert_eq!(control_call(MediaControl::Next).0, "Next");
+            assert_eq!(control_call(MediaControl::Previous).0, "Previous");
+            assert_eq!(control_call(MediaControl::Stop).0, "Stop");
+
+            let (method, params) = control_call(MediaControl::SeekBy(-10_000_000));
+            assert_eq!(method, "Seek");
+            assert_eq!(
+                params.expect("Seek carries an offset").get::<(i64,)>(),
+                Some((-10_000_000,))
+            );
+        }
 
         #[test]
         fn stuck_player_is_skipped_after_two_timeouts() {

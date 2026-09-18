@@ -285,7 +285,8 @@ fn raycast_meta<'a>(comment: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
-/// Run a script with arguments and return its stdout.
+/// Run a script with arguments and return its stdout. `gui`, not `desktop`: the
+/// capture feeds a result view, which only the palette has (P5.1).
 #[cfg(feature = "gui")]
 pub(crate) fn run_script_stdout_with_args(
     path: &std::path::Path,

@@ -42,13 +42,31 @@ nix shell nixpkgs#cargo-deny -c cargo deny check
 
 ## Feature Flags
 
-- Default build: headless CLI, no GTK dependency.
-- `gui`: enables GTK UI, daemon mode, notification server, clipboard image
-  capture, and GUI-only integrations.
+- Default build: headless CLI, no GTK and no D-Bus services.
+- `desktop`: gio/glib services and execution — MPRIS media control, the
+  NetworkManager D-Bus providers. This is what a headless build needs to do real
+  work, and it is the build the CLI is meant to be built with.
+- `gui`: the GTK widgets, daemon mode, notification server, clipboard image
+  capture. Implies `desktop`.
 - `layer-shell`: enables the Wayland layer-shell integration and implies `gui`.
 
-Keep non-GUI logic outside `#[cfg(feature = "gui")]` where practical so the
-headless CLI remains a useful fast test target.
+`gui` adds widgets, not capability. Anything a headless build can use belongs to
+`desktop`: gating a service on `gui` meant the CLI silently could not do it
+(media actions did nothing, for one), and it made `gui` the feature the daemon
+needed for its D-Bus work. Two tests hold the line —
+`the_gui_feature_is_widgets_on_top_of_the_desktop_build` pins
+`gui = ["desktop", …]` and fails if the widget toolkit is reached for outside
+`src/ui`.
+
+The palette's own machinery is the documented exception: running a JSON command
+or capturing a script's stdout produces *rows*, so it stays behind `gui` even
+though it needs no widget.
+
+```sh
+# Headless build with the D-Bus services, no GTK:
+nix develop --command cargo test --features desktop
+nix develop --command cargo clippy --all-targets --features desktop -- -D warnings
+```
 
 ## Nix Dev Shell
 

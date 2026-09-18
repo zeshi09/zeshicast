@@ -73,9 +73,10 @@ fn migrate_legacy_storage_if_needed(config_dir: &Path) {
     if !storage::clipboard_has_data(config_dir) {
         let legacy = load_clipboard_history(&config_dir.join("clipboard.txt"));
         if !legacy.is_empty()
-            && let Err(error) = storage::migrate_clipboard(config_dir, &legacy) {
-                log::warn!("could not migrate the legacy clipboard history: {error}");
-            }
+            && let Err(error) = storage::migrate_clipboard(config_dir, &legacy)
+        {
+            log::warn!("could not migrate the legacy clipboard history: {error}");
+        }
     }
     if !storage::usage_has_data(config_dir) {
         let recent_legacy = load_lines(&config_dir.join("recent.txt"))
@@ -84,9 +85,10 @@ fn migrate_legacy_storage_if_needed(config_dir: &Path) {
             .collect::<Vec<_>>();
         let freq_legacy = load_frequencies(&config_dir.join("frequencies.txt"));
         if !recent_legacy.is_empty()
-            && let Err(error) = storage::migrate_usage(config_dir, &recent_legacy, &freq_legacy) {
-                log::warn!("could not migrate the legacy usage history: {error}");
-            }
+            && let Err(error) = storage::migrate_usage(config_dir, &recent_legacy, &freq_legacy)
+        {
+            log::warn!("could not migrate the legacy usage history: {error}");
+        }
     }
     if !storage::snippet_has_data(config_dir) {
         let legacy = load_named_values(&config_dir.join("snippets.txt"));
