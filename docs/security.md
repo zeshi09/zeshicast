@@ -105,11 +105,18 @@ This protects against user input like `$(...)` or `; reboot` being interpreted
 as extra shell syntax. In argv mode, placeholders are expanded as literal
 argument strings and are never passed through a shell.
 
-Not covered by the escaping (documented gap, tracked in the plan): a placeholder
-inside a **here-document body** (`cat <<EOF`), where the shell keeps expanding
-`$()` while treating quotes literally. A placeholder sitting inside a `#` comment
-is emitted literally instead of being substituted, since no escaping can make a
-multi-line value safe there.
+A placeholder inside a **here-document body** (`cat <<EOF`) is a fourth case,
+because a body is not a quoting context: quotes are literal there while `$`,
+backticks and backslashes keep expanding unless the delimiter was quoted. The
+body is detected, and the value is escaped for it -- `\`, `$` and a backtick get
+a backslash, and nothing else is special. With a quoted delimiter (`<<'EOF'`)
+nothing expands, so the value is inserted unchanged. One case cannot be made
+safe: a value containing a line equal to the delimiter would end the body and
+turn the rest into commands, so the placeholder is emitted literally instead of
+being substituted.
+
+A placeholder sitting inside a `#` comment is likewise emitted literally, since
+no escaping can make a multi-line value safe there.
 
 The command template itself is still executable shell code. Review the whole
 template before installing a command, especially when it uses `{{clipboard}}` or

@@ -82,6 +82,24 @@ fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) 
             ShellContext::Unquoted
         };
 
+        // A here-document body is not a quoting context: quotes are literal
+        // there while `$`, backticks and backslashes keep working unless the
+        // delimiter was quoted. Checked before the comment rule, because a `#`
+        // inside a body is just text (P1.3b).
+        if shell_escape && let Some(heredoc) = open_heredoc(&output) {
+            match render_placeholder(placeholder.trim(), context) {
+                Some(value) if heredoc_can_hold(&heredoc, &value) => {
+                    output.push_str(&heredoc_escape(&value, heredoc.quoted));
+                }
+                // Unknown placeholder, or a value that contains the delimiter
+                // line: no escaping can keep the body intact, so the template is
+                // emitted unchanged rather than silently truncating it.
+                _ => output.push_str(&format!("{{{{{}}}}}", placeholder.trim())),
+            }
+            rest = &after_end[2..];
+            continue;
+        }
+
         // Collapsing an author-written `'{{x}}'` wrapper is only correct in the
         // unquoted context: inside an open single-quoted run the closing quote
         // belongs to that run, and "collapsing" it would let the author's
@@ -185,6 +203,234 @@ fn starts_comment(previous: Option<char>) -> bool {
         None => true,
         Some(ch) => ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')' | '<' | '>'),
     }
+}
+
+/// A here-document whose body the scanned text ends inside of.
+struct OpenHeredoc {
+    delimiter: String,
+    /// The delimiter was quoted (`<<'EOF'`), so nothing expands in the body.
+    quoted: bool,
+    /// `<<-EOF`: leading tabs are stripped from the terminating line.
+    strip_tabs: bool,
+}
+
+/// Whether `text` ends inside a here-document body (P1.3b).
+///
+/// A here-document body is not a quoting context: quotes are literal there while
+/// `$`, backticks and backslashes keep working unless the delimiter was quoted.
+/// Escaping for it therefore means something different from the three quoting
+/// contexts, and getting it wrong means a `$(...)` inside a clipboard value
+/// runs as a command.
+///
+/// Deliberately conservative: when the scan cannot pair bodies with their
+/// operators (more than one here-document on the same line) it reports an
+/// *expanding* body, because escaping there is safe and not escaping is not.
+fn open_heredoc(text: &str) -> Option<OpenHeredoc> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut index = 0usize;
+    let mut single = false;
+    let mut double = false;
+    let mut comment = false;
+
+    while index < chars.len() {
+        let ch = chars[index];
+
+        if comment {
+            if ch == '\n' {
+                comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if single {
+            if ch == '\'' {
+                single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == '\\' {
+            // A backslash escapes the next character, so a `<<` after one is not
+            // an operator.
+            index += 2;
+            continue;
+        }
+        if ch == '\'' && !double {
+            single = true;
+            index += 1;
+            continue;
+        }
+        if ch == '"' {
+            double = !double;
+            index += 1;
+            continue;
+        }
+        if ch == '#' && !double && starts_comment(index.checked_sub(1).map(|i| chars[i])) {
+            comment = true;
+            index += 1;
+            continue;
+        }
+
+        if ch == '<' && chars.get(index + 1) == Some(&'<') && chars.get(index + 2) != Some(&'<') {
+            let operator = index + 2;
+            let strip_tabs = chars.get(operator) == Some(&'-');
+            let start = if strip_tabs { operator + 1 } else { operator };
+
+            let Some((delimiter, quoted, after_delimiter)) = parse_heredoc_delimiter(&chars, start)
+            else {
+                index += 2;
+                continue;
+            };
+
+            let line_rest: String = chars[after_delimiter..]
+                .iter()
+                .take_while(|c| **c != '\n')
+                .collect();
+            let multiple = line_rest.contains("<<");
+
+            let Some(line_break) = chars[after_delimiter..].iter().position(|c| *c == '\n') else {
+                // The body has not started: the cursor is still on the command
+                // line, where normal quoting rules apply.
+                return None;
+            };
+            let body_start = after_delimiter + line_break + 1;
+
+            match heredoc_body_end(&chars, body_start, &delimiter, strip_tabs) {
+                Some(after_body) => {
+                    index = after_body;
+                    continue;
+                }
+                None => {
+                    return Some(OpenHeredoc {
+                        delimiter,
+                        quoted: quoted && !multiple,
+                        strip_tabs,
+                    });
+                }
+            }
+        }
+
+        index += 1;
+    }
+
+    None
+}
+
+/// Read a here-document delimiter, honouring a quoted form and backslash
+/// escapes. Returns the delimiter, whether it was quoted, and where it ended.
+fn parse_heredoc_delimiter(chars: &[char], start: usize) -> Option<(String, bool, usize)> {
+    let mut index = start;
+    while matches!(chars.get(index), Some(c) if c.is_whitespace()) {
+        index += 1;
+    }
+
+    let mut delimiter = String::new();
+    let mut quoted = false;
+
+    match chars.get(index) {
+        Some('\'') | Some('"') => {
+            let quote = chars[index];
+            quoted = true;
+            index += 1;
+            while let Some(&ch) = chars.get(index) {
+                index += 1;
+                if ch == quote {
+                    break;
+                }
+                delimiter.push(ch);
+            }
+        }
+        Some(_) => {
+            while let Some(&ch) = chars.get(index) {
+                if ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '<' | '>' | '(' | ')') {
+                    break;
+                }
+                index += 1;
+                if ch == '\\' {
+                    if let Some(&escaped) = chars.get(index) {
+                        delimiter.push(escaped);
+                        index += 1;
+                    }
+                    continue;
+                }
+                delimiter.push(ch);
+            }
+        }
+        None => return None,
+    }
+
+    if delimiter.is_empty() {
+        return None;
+    }
+    Some((delimiter, quoted, index))
+}
+
+/// Where the here-document body ends, if it does: the index just past the line
+/// that holds nothing but the delimiter.
+fn heredoc_body_end(
+    chars: &[char],
+    body_start: usize,
+    delimiter: &str,
+    strip_tabs: bool,
+) -> Option<usize> {
+    let mut index = body_start;
+
+    while index <= chars.len() {
+        let line_end = chars[index..]
+            .iter()
+            .position(|c| *c == '\n')
+            .map(|offset| index + offset)
+            .unwrap_or(chars.len());
+        let line: String = chars[index..line_end].iter().collect();
+        let candidate = if strip_tabs {
+            line.trim_start_matches('\t')
+        } else {
+            line.as_str()
+        };
+
+        if candidate == delimiter {
+            return Some((line_end + 1).min(chars.len()));
+        }
+        if line_end >= chars.len() {
+            return None;
+        }
+        index = line_end + 1;
+    }
+
+    None
+}
+
+/// Escape `value` for a here-document body: a backslash escapes `\`, `$` and a
+/// backtick there. Quotes are literal in a body, so they are left alone.
+fn heredoc_escape(value: &str, quoted_delimiter: bool) -> String {
+    if quoted_delimiter {
+        // Nothing expands in such a body, so the value goes in as it is.
+        return value.to_string();
+    }
+
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '\\' | '$' | '`') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+/// Whether a value can be inserted into this body at all.
+///
+/// A value containing a line equal to the delimiter would end the here-document
+/// and turn the rest of it into commands, and no escaping prevents that.
+fn heredoc_can_hold(heredoc: &OpenHeredoc, value: &str) -> bool {
+    !value.lines().any(|line| {
+        let line = if heredoc.strip_tabs {
+            line.trim_start_matches('\t')
+        } else {
+            line
+        };
+        line == heredoc.delimiter
+    })
 }
 
 fn shell_context(text: &str) -> ShellContext {
@@ -576,5 +822,89 @@ mod tests {
         assert_eq!(result.len(), 3 + 36);
         assert_eq!(&result[11..12], "-");
         assert_eq!(&result[16..17], "-");
+    }
+
+    #[test]
+    fn a_placeholder_in_a_heredoc_body_is_escaped_for_that_body() {
+        let ctx = PlaceholderContext::new("", Some(&"$(touch /tmp/pwned)".to_string()));
+        let expanded = expand_placeholders_shell("cat <<EOF\n{{clipboard}}\nEOF\n", &ctx);
+
+        assert_eq!(expanded, "cat <<EOF\n\\$(touch /tmp/pwned)\nEOF\n");
+    }
+
+    #[test]
+    fn backslashes_dollars_and_backticks_are_escaped_in_a_body() {
+        let ctx = PlaceholderContext::new("", Some(&"a\\b $HOME `id`".to_string()));
+        let expanded = expand_placeholders_shell("cat <<-EOF\n\t{{clipboard}}\n\tEOF\n", &ctx);
+
+        assert_eq!(expanded, "cat <<-EOF\n\ta\\\\b \\$HOME \\`id\\`\n\tEOF\n");
+    }
+
+    #[test]
+    fn a_quoted_delimiter_keeps_the_body_literal() {
+        let ctx = PlaceholderContext::new("", Some(&"$(touch /tmp/pwned)".to_string()));
+        // `<<'EOF'`: nothing expands in such a body, so quoting the value would
+        // change it.
+        let expanded = expand_placeholders_shell("cat <<'EOF'\n{{clipboard}}\nEOF\n", &ctx);
+
+        assert_eq!(expanded, "cat <<'EOF'\n$(touch /tmp/pwned)\nEOF\n");
+    }
+
+    #[test]
+    fn a_value_that_would_end_the_body_is_not_substituted() {
+        let ctx = PlaceholderContext::new("", Some(&"ok\nEOF\nrm -rf /".to_string()));
+        let expanded = expand_placeholders_shell("cat <<EOF\n{{clipboard}}\nEOF\n", &ctx);
+
+        assert_eq!(
+            expanded, "cat <<EOF\n{{clipboard}}\nEOF\n",
+            "a value that ends the here-document must not be inserted"
+        );
+    }
+
+    #[test]
+    fn a_placeholder_on_the_command_line_is_not_a_body() {
+        let ctx = PlaceholderContext::new("", Some(&"$(x)".to_string()));
+        let expanded = expand_placeholders_shell("cat <<EOF | tee {{clipboard}}", &ctx);
+
+        assert_eq!(expanded, "cat <<EOF | tee '$(x)'");
+    }
+
+    #[test]
+    fn two_heredocs_on_one_line_are_treated_as_expanding() {
+        // Bodies arrive in order and this scan does not pair them with their
+        // operators, so it takes the safe direction: escape.
+        let ctx = PlaceholderContext::new("", Some(&"$(x)".to_string()));
+        let expanded = expand_placeholders_shell("cat <<'A' <<B\n{{clipboard}}\n", &ctx);
+
+        assert!(expanded.contains("\\$(x)"), "got {expanded}");
+    }
+
+    #[test]
+    fn open_heredoc_reports_the_body_it_ends_inside() {
+        assert!(open_heredoc("cat <<EOF\n").is_some(), "body is open");
+        assert!(open_heredoc("cat <<EOF\nbody\nEOF\n").is_none(), "closed");
+        assert!(
+            open_heredoc("cat <<EOF").is_none(),
+            "still on the command line"
+        );
+        // `<< b` really is a here-document with the delimiter `b`; an operator
+        // with nothing after it is not.
+        let spaced = open_heredoc("cat << b\n").expect("an unquoted delimiter");
+        assert_eq!(spaced.delimiter, "b");
+        assert!(!spaced.quoted);
+        assert!(open_heredoc("echo a <<\n").is_none(), "no delimiter word");
+        assert!(
+            open_heredoc("echo '<<EOF'\n").is_none(),
+            "quoted, not an operator"
+        );
+
+        let quoted = open_heredoc("cat <<'EOF'\n").expect("open body");
+        assert!(quoted.quoted, "a quoted delimiter means a literal body");
+        let plain = open_heredoc("cat <<EOF\n").expect("open body");
+        assert!(!plain.quoted);
+        assert_eq!(plain.delimiter, "EOF");
+
+        let stripped = open_heredoc("cat <<-EOF\n").expect("open body");
+        assert!(stripped.strip_tabs);
     }
 }
