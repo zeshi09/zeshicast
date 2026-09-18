@@ -33,67 +33,86 @@ pub(crate) fn latin_keyval(keycode: u32) -> Option<gdk::Key> {
         .map(|(keyval, _, _, _)| keyval)
 }
 
+/// Everything a key press can act on (P5.2).
+///
+/// These used to be 32 positional arguments on `handle_key`, re-listed in a
+/// different order for `handle_view_key`. A field per widget keeps that
+/// signature stable when a view is added, and the two functions take what they
+/// need with `let LauncherUi { .. } = *ui;`. `run_selected_with_views` keeps its
+/// own list: the "run" button lives inside the action bar, so its handler cannot
+/// construct a context that contains the bar it is building.
+#[derive(Clone, Copy)]
+pub(crate) struct LauncherUi<'a> {
+    pub(crate) window: &'a ApplicationWindow,
+    pub(crate) launcher: &'a Rc<RefCell<Zeshicast>>,
+    pub(crate) hold: &'a Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    pub(crate) entry: &'a Entry,
+    pub(crate) list: &'a ListBox,
+    pub(crate) results: &'a Rc<RefCell<Vec<Action>>>,
+    pub(crate) action_bar: &'a GtkBox,
+    pub(crate) navigation: &'a crate::ui::NavigationStack,
+    pub(crate) action_panel_view: &'a crate::ui::ActionPanelView,
+    pub(crate) ai_chat_view: &'a crate::ui::AiChatView,
+    pub(crate) audio_view: &'a crate::ui::AudioView,
+    pub(crate) dashboard_view: &'a crate::ui::DashboardView,
+    pub(crate) emoji_view: &'a crate::ui::EmojiPickerView,
+    pub(crate) font_view: &'a crate::ui::FontBrowserView,
+    pub(crate) system_monitor_view: &'a crate::ui::SystemMonitorView,
+    pub(crate) media_view: &'a crate::ui::MediaView,
+    pub(crate) network_list: &'a ListBox,
+    pub(crate) notifications_view: &'a crate::ui::NotificationsView,
+    pub(crate) window_grid_view: &'a crate::ui::WindowGridView,
+    pub(crate) current_action: &'a Rc<RefCell<Option<Action>>>,
+    pub(crate) action_panel_items: &'a Rc<RefCell<Vec<ActionPanelItem>>>,
+    pub(crate) filtered_action_panel_items: &'a Rc<RefCell<Vec<ActionPanelItem>>>,
+    pub(crate) displayed_action_panel_rows: &'a Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
+    pub(crate) clipboard_view: &'a crate::ui::ClipboardHistoryView,
+    pub(crate) clipboard_items: &'a Rc<RefCell<Vec<ClipboardSummary>>>,
+    pub(crate) extension_list: &'a ListBox,
+    pub(crate) snippet_list: &'a ListBox,
+    pub(crate) snippet_items: &'a Rc<RefCell<Vec<SnippetSummary>>>,
+    pub(crate) script_output_view: &'a crate::ui::ScriptOutputView,
+}
+
 pub(crate) fn handle_key(
-    window: &ApplicationWindow,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
-    entry: &Entry,
-    list: &ListBox,
-    results: &Rc<RefCell<Vec<Action>>>,
-    action_bar: &GtkBox,
-    navigation: &crate::ui::NavigationStack,
-    action_panel_view: &crate::ui::ActionPanelView,
-    ai_chat_view: &crate::ui::AiChatView,
-    audio_view: &crate::ui::AudioView,
-    dashboard_view: &crate::ui::DashboardView,
-    emoji_view: &crate::ui::EmojiPickerView,
-    font_view: &crate::ui::FontBrowserView,
-    system_monitor_view: &crate::ui::SystemMonitorView,
-    media_view: &crate::ui::MediaView,
-    network_list: &ListBox,
-    notifications_view: &crate::ui::NotificationsView,
-    window_grid_view: &crate::ui::WindowGridView,
-    current_action: &Rc<RefCell<Option<Action>>>,
-    action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
-    filtered_action_panel_items: &Rc<RefCell<Vec<ActionPanelItem>>>,
-    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
-    clipboard_view: &crate::ui::ClipboardHistoryView,
-    clipboard_items: &Rc<RefCell<Vec<ClipboardSummary>>>,
-    extension_list: &ListBox,
-    snippet_list: &ListBox,
-    snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>,
-    script_output_view: &crate::ui::ScriptOutputView,
+    ui: &LauncherUi<'_>,
     key: gdk::Key,
     state: gdk::ModifierType,
 ) -> glib::Propagation {
+    let LauncherUi {
+        window,
+        launcher,
+        hold,
+        entry,
+        list,
+        results,
+        action_bar,
+        navigation,
+        action_panel_view,
+        ai_chat_view,
+        audio_view,
+        dashboard_view,
+        emoji_view,
+        font_view,
+        system_monitor_view,
+        media_view,
+        network_list,
+        notifications_view,
+        window_grid_view,
+        current_action,
+        action_panel_items,
+        filtered_action_panel_items,
+        displayed_action_panel_rows,
+        clipboard_view,
+        clipboard_items,
+        extension_list,
+        snippet_list,
+        snippet_items,
+        script_output_view,
+    } = *ui;
+
     if navigation.current() != crate::ui::LauncherView::Root {
-        return handle_view_key(
-            window,
-            launcher,
-            list,
-            results,
-            navigation,
-            entry,
-            action_bar,
-            &action_panel_view.list,
-            ai_chat_view,
-            audio_view,
-            dashboard_view,
-            system_monitor_view,
-            media_view,
-            network_list,
-            notifications_view,
-            window_grid_view,
-            current_action,
-            displayed_action_panel_rows,
-            clipboard_view,
-            clipboard_items,
-            extension_list,
-            snippet_list,
-            snippet_items,
-            key,
-            state,
-        );
+        return handle_view_key(ui, key, state);
     }
 
     match key {
@@ -224,32 +243,38 @@ pub(crate) fn handle_key(
 }
 
 fn handle_view_key(
-    window: &ApplicationWindow,
-    launcher: &Rc<RefCell<Zeshicast>>,
-    list: &ListBox,
-    results: &Rc<RefCell<Vec<Action>>>,
-    navigation: &crate::ui::NavigationStack,
-    entry: &Entry,
-    action_bar: &GtkBox,
-    action_panel_list: &ListBox,
-    ai_chat_view: &crate::ui::AiChatView,
-    audio_view: &crate::ui::AudioView,
-    dashboard_view: &crate::ui::DashboardView,
-    system_monitor_view: &crate::ui::SystemMonitorView,
-    media_view: &crate::ui::MediaView,
-    network_list: &ListBox,
-    notifications_view: &crate::ui::NotificationsView,
-    window_grid_view: &crate::ui::WindowGridView,
-    current_action: &Rc<RefCell<Option<Action>>>,
-    displayed_action_panel_rows: &Rc<RefCell<Vec<DisplayedActionPanelRow>>>,
-    clipboard_view: &crate::ui::ClipboardHistoryView,
-    clipboard_items: &Rc<RefCell<Vec<ClipboardSummary>>>,
-    extension_list: &ListBox,
-    snippet_list: &ListBox,
-    snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>,
+    ui: &LauncherUi<'_>,
     key: gdk::Key,
     state: gdk::ModifierType,
 ) -> glib::Propagation {
+    let LauncherUi {
+        window,
+        launcher,
+        list,
+        results,
+        navigation,
+        entry,
+        action_bar,
+        action_panel_view,
+        ai_chat_view,
+        audio_view,
+        dashboard_view,
+        system_monitor_view,
+        media_view,
+        network_list,
+        notifications_view,
+        window_grid_view,
+        current_action,
+        displayed_action_panel_rows,
+        clipboard_view,
+        clipboard_items,
+        extension_list,
+        snippet_list,
+        snippet_items,
+        ..
+    } = *ui;
+    let action_panel_list = &action_panel_view.list;
+
     match key {
         gdk::Key::Escape => {
             if navigation.pop().is_some() {

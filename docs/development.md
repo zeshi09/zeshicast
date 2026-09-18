@@ -110,7 +110,9 @@ rest of `ui` uses:
 - `ui/launcher/results.rs` — actions into rows, and a row back into its action;
 - `ui/launcher/views.rs` — switching to and filling the sub-views;
 - `ui/launcher/run.rs` — running a selected action, confirmations, the form panel;
-- `ui/launcher/scripts.rs` — script actions and their stdout capture.
+- `ui/launcher/scripts.rs` — script actions and their stdout capture;
+- `ui/keybindings.rs` — key handling, which takes a `LauncherUi` context (the
+  window, the shared state and every view) instead of 32 positional arguments.
 
 A row does not carry an index into `results`: it is tagged with the action it
 was built from (`ACTION_ROW_TAG`), so a stale or unregistered row runs nothing
