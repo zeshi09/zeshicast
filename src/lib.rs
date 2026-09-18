@@ -1482,12 +1482,13 @@ DEPLOY_TOKEN = "{{pref:token}}"
         }
     }
 
-    /// Every test `docs/security.md` names must exist (P5.6).
+    /// Every test named by a document must exist (P5.6).
     ///
-    /// The document states the security model and, beside each claim, the test
-    /// that keeps it true -- an HTML comment, invisible when rendered:
-    /// `<!-- test: name -->`. Without this check a renamed or deleted test would
-    /// leave the document asserting something nothing verifies.
+    /// `docs/security.md` states the security model and `docs/remediation-
+    /// acceptance.md` maps every review finding to its step and its test; both
+    /// name the test that keeps a claim true in an HTML comment, invisible when
+    /// rendered: `<!-- test: name -->`. Without this check a renamed or deleted
+    /// test would leave a document asserting something nothing verifies.
     #[test]
     fn documented_invariants_have_the_tests_they_name() {
         fn collect_sources(dir: &std::path::Path, out: &mut String) {
@@ -1503,26 +1504,57 @@ DEPLOY_TOKEN = "{{pref:token}}"
         }
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let doc =
-            std::fs::read_to_string(root.join("docs/security.md")).expect("read docs/security.md");
         let mut sources = String::new();
         collect_sources(&root.join("src"), &mut sources);
 
-        let mut named = 0;
-        for line in doc.lines() {
-            let Some(rest) = line.trim().strip_prefix("<!-- test:") else {
+        // Every `#[test] fn name` in the tree, however deeply indented (a test
+        // that lives in a nested module is indented with it) and whatever
+        // attributes follow the `#[test]`.
+        let lines: Vec<&str> = sources.lines().collect();
+        let mut tests = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            if line.trim() != "#[test]" {
                 continue;
-            };
-            let name = rest.trim().trim_end_matches("-->").trim();
-            assert!(
-                sources.contains(&format!("#[test]\n    fn {name}(")),
-                "docs/security.md names the test `{name}`, which no longer exists"
-            );
-            named += 1;
+            }
+            for next in lines[index + 1..].iter().take(4) {
+                let trimmed = next.trim();
+                if let Some(rest) = trimmed.strip_prefix("fn ")
+                    && let Some(name) = rest.split('(').next()
+                {
+                    tests.push(name.to_string());
+                    break;
+                }
+                if !trimmed.starts_with('#') && !trimmed.starts_with("///") {
+                    break;
+                }
+            }
         }
-        assert!(
-            named >= 30,
-            "docs/security.md should point at the tests behind its claims; found {named}"
-        );
+
+        // A document that names nothing is a document nobody checks.
+        for (document, minimum) in [
+            ("docs/security.md", 30),
+            ("docs/remediation-acceptance.md", 45),
+        ] {
+            let text = std::fs::read_to_string(root.join(document))
+                .unwrap_or_else(|error| panic!("cannot read {document}: {error}"));
+            let mut named = 0;
+            // The marker can sit anywhere in a line: `docs/security.md` puts it
+            // under a claim, the acceptance table inside a row.
+            for chunk in text.split("<!-- test:").skip(1) {
+                let Some(end) = chunk.find("-->") else {
+                    continue;
+                };
+                let name = chunk[..end].trim();
+                assert!(
+                    tests.contains(&name.to_string()),
+                    "{document} names the test `{name}`, which no longer exists"
+                );
+                named += 1;
+            }
+            assert!(
+                named >= minimum,
+                "{document} should point at the tests behind its claims; found {named}"
+            );
+        }
     }
 }

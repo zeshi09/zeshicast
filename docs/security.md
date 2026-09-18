@@ -4,7 +4,7 @@ This document describes the security model for zeshicast's local launcher,
 daemon, and custom command system.
 
 The claims below carry the test that holds them up, in an HTML comment
-(`<!-- test: name -->`) so it is invisible when rendered. `cargo test` runs
+(`&lt;!-- test: name --&gt;`) so it is invisible when rendered. `cargo test` runs
 `documented_invariants_have_the_tests_they_name` (`src/lib.rs`), which fails if a
 named test does not exist: a renamed test cannot leave this document quietly
 asserting something nothing verifies.
