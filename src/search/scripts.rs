@@ -589,17 +589,23 @@ mod tests {
         }
 
         // Run it for real: the file itself executes (its own marker appears),
-        // while the `;` in its name is never seen by a shell (M-16). The
-        // gateway spawns asynchronously, so wait briefly for the child.
+        // while the `;` in its name is never seen by a shell (M-16). The gateway
+        // spawns detached and fire-and-forget, so the marker is not what proves
+        // the claim -- the file is run synchronously here, with the same argv the
+        // gateway would use. A poll for a detached child's side effect is a race
+        // against machine load, not a property of the code (#46).
         assert_eq!(
             execute(request, &ExecutionTicket::confirmed()),
             crate::action::ExecutionDecision::RunNow
         );
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !ran_marker.exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(ran_marker.exists(), "script did not run as a file");
+        let status = std::process::Command::new(&path)
+            .status()
+            .expect("run the script the gateway would run");
+        assert!(status.success(), "script exited with {status}");
+        assert!(
+            ran_marker.exists(),
+            "script did not run as a file: {status} from {path:?}, expected {ran_marker:?}"
+        );
         assert!(!Path::new("pwned.sh").exists());
         assert!(!root.join("pwned.sh").exists());
 
