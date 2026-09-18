@@ -33,30 +33,28 @@ where
         return CliCommand::Help;
     }
 
-    if let Some(pos) = args.iter().position(|a| a == "--export") {
-        let dest = args
-            .get(pos + 1)
-            .filter(|a| !a.starts_with('-'))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("zeshicast-config.tar.gz"));
-        let include_secrets = parse_bool_flag(&args, "--include-secrets");
-        let include_history = parse_bool_flag(&args, "--include-history");
-        return CliCommand::Export {
-            dest,
-            include_secrets,
-            include_history,
-        };
-    }
-
-    if let Some(pos) = args.iter().position(|a| a == "--import") {
-        if let Some(src) = args.get(pos + 1).map(PathBuf::from) {
-            return CliCommand::Import { src };
-        } else {
-            return CliCommand::Help;
+    // P4.3: `--export`/`--import` act only as the *first* argument. Searching
+    // the whole list turned a query that merely contains the word into an
+    // export: `zeshicast shell --export x` exported instead of searching.
+    match args.first().map(String::as_str) {
+        Some("--export") => {
+            let dest = args
+                .get(1)
+                .filter(|a| !a.starts_with('-'))
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("zeshicast-config.tar.gz"));
+            CliCommand::Export {
+                dest,
+                include_secrets: parse_bool_flag(&args, "--include-secrets"),
+                include_history: parse_bool_flag(&args, "--include-history"),
+            }
         }
+        Some("--import") => match args.get(1).map(PathBuf::from) {
+            Some(src) => CliCommand::Import { src },
+            None => CliCommand::Help,
+        },
+        _ => CliCommand::Query(args.join(" ")),
     }
-
-    CliCommand::Query(args.join(" "))
 }
 
 /// Parse a tri-state boolean flag into an explicit value:
@@ -133,6 +131,20 @@ mod tests {
         assert_eq!(
             parse_cli_args(vec!["firefox", "search"]),
             CliCommand::Query("firefox search".to_string())
+        );
+    }
+
+    #[test]
+    fn query_with_export_substring_is_a_query() {
+        // `--export` was searched for anywhere in the argument list, so this
+        // exported instead of searching for the words (P4.3).
+        assert_eq!(
+            parse_cli_args(vec!["shell", "--export", "x"]),
+            CliCommand::Query("shell --export x".to_string())
+        );
+        assert_eq!(
+            parse_cli_args(vec!["notes", "--import", "file"]),
+            CliCommand::Query("notes --import file".to_string())
         );
     }
 }

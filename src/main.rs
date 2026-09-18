@@ -2,15 +2,24 @@ use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use zeshicast::cli::{parse_cli_args, CliCommand};
+use zeshicast::cli::{CliCommand, parse_cli_args};
 use zeshicast::{Action, ExecutionDecision, SecondaryActionKind, Zeshicast};
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
+    std::process::exit(run_cli(parse_cli_args(args)));
+}
 
-    match parse_cli_args(args) {
+/// Run one CLI invocation and return its exit code (P4.3).
+///
+/// Non-interactive commands report failure through the exit code: a scripted
+/// `--export` that did not export anything used to exit 0, so `&&`-chains and
+/// `set -e` scripts carried on as if it had worked.
+fn run_cli(command: CliCommand) -> i32 {
+    match command {
         CliCommand::Help => {
             print_help();
+            0
         }
         CliCommand::Export {
             dest,
@@ -36,24 +45,66 @@ fn main() {
                 include_history,
             ) {
                 Ok(()) => println!("exported to {}", dest.display()),
-                Err(err) => eprintln!("export failed: {err}"),
+                Err(err) => {
+                    eprintln!("export failed: {err}");
+                    return 1;
+                }
             }
+            0
         }
         CliCommand::Import { src } => {
             let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
             let config_dir = home.join(".config/zeshicast");
             match zeshicast::import_config(&src, &config_dir) {
                 Ok(()) => println!("imported from {}", src.display()),
-                Err(err) => eprintln!("import failed: {err}"),
+                Err(err) => {
+                    eprintln!("import failed: {err}");
+                    return 1;
+                }
             }
+            0
         }
         CliCommand::Query(query) => {
             let app = Zeshicast::load();
             run_once(&app, &query);
+            0
         }
         CliCommand::Repl => {
             let mut app = Zeshicast::load();
             run_repl(&mut app);
+            0
+        }
+    }
+}
+
+/// Describe an execution decision the CLI could not carry out, if any.
+///
+/// Returns whether the note belongs on stderr: a refusal is a failure, a pending
+/// confirmation is not. `None` means the action ran.
+fn decision_note(decision: &ExecutionDecision) -> Option<(bool, String)> {
+    match decision {
+        ExecutionDecision::RunNow => None,
+        ExecutionDecision::NeedsConfirmation(risk) => Some((
+            false,
+            format!(
+                "confirmation required ({}); use the GTK UI to run this action.",
+                risk.label()
+            ),
+        )),
+        ExecutionDecision::Denied(reason) => Some((true, format!("blocked: {reason}"))),
+    }
+}
+
+/// Print the note for a decision the CLI could not act on (P4.3).
+///
+/// `run_action`'s result used to be dropped, so an action that needed a
+/// confirmation -- or was blocked outright -- looked exactly like one that ran.
+fn report_execution_decision(decision: &ExecutionDecision) {
+    if let Some((to_stderr, note)) = decision_note(decision) {
+        if to_stderr {
+            eprintln!("{note}");
+        } else {
+            println!("{note}");
         }
     }
 }
@@ -147,7 +198,7 @@ fn run_action_menu(app: &mut Zeshicast, action: &Action) {
 
     let choice = choice.trim();
     if choice.is_empty() {
-        app.run_action(action);
+        report_execution_decision(&app.run_action(action));
         return;
     }
 
@@ -156,11 +207,8 @@ fn run_action_menu(app: &mut Zeshicast, action: &Action) {
             let secondary = secondary_actions[number - 1].kind;
             match app.run_secondary_action(action, secondary) {
                 Err(error) => eprintln!("failed to run action: {error}"),
-                Ok(ExecutionDecision::NeedsConfirmation(risk)) => println!(
-                    "confirmation required ({}); use the GTK UI to run this action.",
-                    risk.label()
-                ),
-                Ok(_) => {
+                Ok(decision) => {
+                    report_execution_decision(&decision);
                     if matches!(secondary, SecondaryActionKind::Pin) {
                         println!("pinned");
                     } else if matches!(secondary, SecondaryActionKind::Unpin) {
@@ -286,5 +334,48 @@ fn print_actions(actions: &[Action]) {
 fn flush_stdout() {
     if let Err(error) = io::stdout().flush() {
         eprintln!("failed to flush stdout: {error}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zeshicast::ActionRisk;
+
+    #[test]
+    fn a_pending_confirmation_is_reported_but_is_not_a_failure() {
+        let (to_stderr, note) =
+            decision_note(&ExecutionDecision::NeedsConfirmation(ActionRisk::Shell))
+                .expect("a note");
+
+        assert!(!to_stderr, "waiting for the GTK UI is not an error");
+        assert!(note.contains("confirmation required"), "got {note}");
+    }
+
+    #[test]
+    fn a_denial_is_reported_on_stderr() {
+        let (to_stderr, note) =
+            decision_note(&ExecutionDecision::Denied("no shell".to_string())).expect("a note");
+
+        assert!(to_stderr, "a refusal is a failure and belongs on stderr");
+        assert!(note.contains("no shell"), "got {note}");
+    }
+
+    #[test]
+    fn a_run_now_action_needs_no_note() {
+        assert!(decision_note(&ExecutionDecision::RunNow).is_none());
+    }
+
+    #[test]
+    fn export_failure_exits_nonzero() {
+        // `/dev/null/x` is not a directory, so the archive cannot be written --
+        // and it cannot succeed just because the tests happen to run as root.
+        let code = run_cli(CliCommand::Export {
+            dest: PathBuf::from("/dev/null/zeshicast-test.tar.gz"),
+            include_secrets: Some(false),
+            include_history: Some(false),
+        });
+
+        assert_ne!(code, 0, "a failed export must not report success");
     }
 }
