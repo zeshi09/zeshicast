@@ -114,6 +114,12 @@ rest of `ui` uses:
 - `ui/keybindings.rs` — key handling, which takes a `LauncherUi` context (the
   window, the shared state and every view) instead of 32 positional arguments.
 
+`src/app.rs` followed the same treatment (P5.3): `app/mod.rs` holds the types,
+loading and search, and the model's own behaviours live in `app/clipboard.rs`,
+`app/preferences.rs`, `app/snippets.rs` and `app/launch.rs`. `launch.rs` is where
+an action's consequences are applied (policy from preferences, confirmation,
+history recording); the execution point itself stays in `action.rs`.
+
 A row does not carry an index into `results`: it is tagged with the action it
 was built from (`ACTION_ROW_TAG`), so a stale or unregistered row runs nothing
 instead of a neighbour's action (B-4).
