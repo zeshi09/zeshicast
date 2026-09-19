@@ -7,6 +7,12 @@ Companion product plan: `docs/linux-command-center-plan.md` covers the broader
 Linux command-center direction: status strip, dashboard, network/media/system
 views, notifications, and local AI.
 
+> **Update (2026-09-19):** this roadmap is the *starting-point* analysis and is
+almost entirely implemented -- see the status notes below. Vicinae has since
+become a cross-platform extension platform (Raycast compatibility, two stores,
+macOS/Windows). The current product comparison, including where we are stronger
+and what to do next, lives in `docs/vicinae-comparison-2026-09-19.md`.
+
 ## Current State
 
 Zeshicast already has a useful launcher core:
