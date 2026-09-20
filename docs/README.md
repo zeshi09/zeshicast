@@ -7,16 +7,20 @@
 ## 📚 Актуальная документация (Active Documentation)
 
 ### 🏗 Архитектура и Разработка
+
 - [📄 Master Plan (`MASTER_PLAN.md`)](MASTER_PLAN.md) — Общий продуктовый план: командный центр для Wayland/GTK4, стек и вехи.
 - [📄 Architecture & UI Design (`DESIGN.md`)](DESIGN.md) — Описание архитектурных решений ядра лаунчера, обработчиков действий и GTK4 UI.
 - [📄 Developer Guide (`development.md`)](development.md) — Инструкция по сборке, тестированию (`cargo test --features gui`), линтингу и локальной разработке.
 - [📄 GTK4 Design System (`design-system-plan.md`)](design-system-plan.md) — Полный план дизайн-системы, токенов CSS и компонентов UI.
 
 ### 🔒 Безопасность и Приватность
+
 - [📄 Security Policy & Threat Model (`security.md`)](security.md) — Модель угроз, безопасное ограничение прав расширений и защита атомарных файлов.
 - [📄 Privacy & Data Retention (`privacy.md`)](privacy.md) — Политики сохранения истории буфера обмена, фильтрация приватного режима и маскирование секрета.
 
 ### 🗺 План развития (Roadmaps & Features)
+
+- [📄 Product Plan 2026-09-19 (`product-plan-2026-09-19.md`)](product-plan-2026-09-19.md) — План развития по итогам сравнения: фазы P0–P5, non-goals, критерии приёмки и решения владельца.
 - [📄 Vicinae Product Comparison 2026-09-19 (`vicinae-comparison-2026-09-19.md`)](vicinae-comparison-2026-09-19.md) — Продуктовое сравнение с Vicinae v0.29.0: матрица возможностей, где мы сильнее, цены догоняния, три стратегии и приоритизированный бэклог.
 - [📄 Vicinae Parity Roadmap (`vicinae-parity-roadmap.md`)](vicinae-parity-roadmap.md) — Дорожная карта паритета с командными центрами (Vicinae/Raycast), метрики покрытия тестами.
 - [📄 Linux Command Center Vision (`linux-command-center-plan.md`)](linux-command-center-plan.md) — Концепция превращения Zeshicast в полноценный системный командный центр.
