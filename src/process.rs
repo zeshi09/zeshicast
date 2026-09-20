@@ -15,6 +15,14 @@
 //! option: the kernel reaps the children itself, after which `wait()`/
 //! `wait_with_output()` fail with `ECHILD` and the output-capturing paths
 //! (script stdout, JSON commands, `wl-copy`) lose their exit status.
+//!
+//! A third problem is handled here as well, found by a flaky test: Linux
+//! refuses to `execve` a file that any process has open for writing
+//! (`ETXTBSY`, "Text file busy"). A user script is *normally* in that state --
+//! an editor is saving it, a download just finished, or the file was written a
+//! moment ago -- and the exec is not going to fail forever, because the writer
+//! closes its handle. [`spawn_detached`] therefore retries that one error for a
+//! bounded time instead of turning the launch into a silent no-op.
 
 use std::io;
 use std::process::{Child, Command};
@@ -23,6 +31,17 @@ use std::time::{Duration, Instant};
 
 /// How long a child may take to exit on its own once we are done with it.
 pub(crate) const CHILD_EXIT_GRACE: Duration = Duration::from_millis(500);
+
+/// `ETXTBSY` — the file to execute is open for writing somewhere. Hand-written
+/// instead of pulled from a crate: the project is Linux-only and this is the
+/// value on every Linux architecture (the arm64/x86_64 ABI shares it).
+const ETXTBSY: i32 = 26;
+
+/// How long a spawn refused with `ETXTBSY` is retried.
+const EXEC_BUSY_GRACE: Duration = Duration::from_millis(250);
+
+/// Delay between `ETXTBSY` retries.
+const EXEC_BUSY_STEP: Duration = Duration::from_millis(10);
 
 /// Owns a child process and guarantees it is gone when dropped.
 pub(crate) struct ChildGuard(Child);
@@ -82,13 +101,39 @@ fn registry() -> &'static Mutex<Vec<Child>> {
 ///
 /// A lock poisoned by a panic elsewhere must not stop the reaper, hence the
 /// `unwrap_or_else(PoisonError::into_inner)`.
+///
+/// A spawn refused with `ETXTBSY` (the program is open for writing) is retried
+/// for [`EXEC_BUSY_GRACE`], because that state is temporary and common for user
+/// scripts. Every other error, and a writer that never lets go, is returned to
+/// the caller -- fail-closed: no launch, and the caller logs why.
 pub(crate) fn spawn_detached(command: &mut Command) -> io::Result<DetachedChild> {
-    let child = command.spawn()?;
+    let child = spawn_retrying_text_file_busy(command)?;
     let handle = DetachedChild { pid: child.id() };
     let mut children = registry().lock().unwrap_or_else(|e| e.into_inner());
     reap_locked(&mut children);
     children.push(child);
     Ok(handle)
+}
+
+/// `Command::spawn` with a bounded retry on `ETXTBSY`.
+///
+/// `pub(crate)` so the tests that run a just-written script use the same
+/// retrying exec as production instead of a second copy of the loop.
+pub(crate) fn spawn_retrying_text_file_busy(command: &mut Command) -> io::Result<Child> {
+    let deadline = Instant::now() + EXEC_BUSY_GRACE;
+    loop {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if error.raw_os_error() == Some(ETXTBSY) && Instant::now() < deadline => {
+                log::debug!(
+                    "spawn refused with ETXTBSY (program open for writing); retrying: {:?}",
+                    command.get_program()
+                );
+                std::thread::sleep(EXEC_BUSY_STEP);
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// Reap every remembered child that has already exited.
@@ -218,5 +263,91 @@ mod tests {
         drop(guard);
 
         assert!(!pid_is_present(pid));
+    }
+
+    /// Write an executable script that touches `marker`, plus a directory to
+    /// hold both. The caller decides who keeps the file busy.
+    ///
+    /// The directory name deliberately avoids parentheses and spaces: the path
+    /// is interpolated into a shell script, and a `ThreadId(2)`-style name would
+    /// be a syntax error for `/bin/sh`.
+    fn script_that_touches(
+        dir_name: &str,
+    ) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before the epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "zeshicast-{dir_name}-{}-{nanos}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let script = dir.join("busy.sh");
+        let marker = dir.join("ran");
+        std::fs::write(&script, format!("#!/bin/sh\ntouch {}\n", marker.display()))
+            .expect("write script");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod script");
+        (dir, script, marker)
+    }
+
+    /// The kernel refuses to `execve` a file that some process holds open for
+    /// writing (`ETXTBSY`). An editor saving a script is exactly that, and it
+    /// lasts milliseconds -- so the spawn is retried instead of dropping the
+    /// launch on the floor.
+    #[test]
+    fn a_script_open_for_writing_is_retried_until_it_runs() {
+        let (dir, script, marker) = script_that_touches("execbusy-retry");
+
+        // Rust opens files with `O_CLOEXEC`, so the child does not inherit this
+        // handle; the parent holds it for a moment, which is what makes the
+        // first exec fail.
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&script)
+            .expect("open for writing");
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(60));
+            drop(held);
+        });
+
+        let child = spawn_detached(&mut Command::new(&script))
+            .expect("a temporary writer must not stop the spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            marker.exists(),
+            "pid {} never ran the script after the retry",
+            child.pid()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Fail-closed: a writer that never lets go gives an error after the grace
+    /// period, not an unbounded retry loop and not a silent success.
+    #[test]
+    fn a_writer_that_never_lets_go_fails_within_the_grace() {
+        let (dir, script, _marker) = script_that_touches("execbusy-giveup");
+        let _held = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&script)
+            .expect("open for writing");
+
+        let started = Instant::now();
+        let error = spawn_detached(&mut Command::new(&script))
+            .expect_err("a permanently busy program must not spawn");
+        assert_eq!(error.raw_os_error(), Some(ETXTBSY), "got {error:?}");
+        assert!(
+            started.elapsed() >= EXEC_BUSY_STEP,
+            "the exec must have been retried at least once"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

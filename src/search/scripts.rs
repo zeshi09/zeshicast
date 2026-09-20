@@ -589,18 +589,18 @@ mod tests {
         }
 
         // Run it for real: the file itself executes (its own marker appears),
-        // while the `;` in its name is never seen by a shell (M-16). The gateway
-        // spawns detached and fire-and-forget, so the marker is not what proves
-        // the claim -- the file is run synchronously here, with the same argv the
-        // gateway would use. A poll for a detached child's side effect is a race
-        // against machine load, not a property of the code (#46).
+        // while the `;` in its name is never seen by a shell (M-16). The exec
+        // goes through the production retry helper because the kernel refuses to
+        // execute a file that is open for writing (`ETXTBSY`), which is what
+        // made this test flaky before it was diagnosed (#46).
         assert_eq!(
             execute(request, &ExecutionTicket::confirmed()),
             crate::action::ExecutionDecision::RunNow
         );
-        let status = std::process::Command::new(&path)
-            .status()
-            .expect("run the script the gateway would run");
+        let mut child =
+            crate::process::spawn_retrying_text_file_busy(&mut std::process::Command::new(&path))
+                .expect("run the script the gateway would run");
+        let status = child.wait().expect("wait for the script");
         assert!(status.success(), "script exited with {status}");
         assert!(
             ran_marker.exists(),

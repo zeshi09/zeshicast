@@ -28,8 +28,8 @@ cargo test                                     # no features
 CI runs those six through `nix-shell` (`.github/workflows/rust.yml`), plus
 `cargo-deny` for advisories and licences.
 
-Counts at HEAD: **316** GUI tests (311 library + 4 CLI + 1 gtk binary), **254**
-without features (250 + 4 CLI), **258** with `desktop` (254 + 4 CLI); all three
+Counts at HEAD: **318** GUI tests (313 library + 4 CLI + 1 gtk binary), **256**
+without features (252 + 4 CLI), **260** with `desktop` (256 + 4 CLI); all three
 clippy configurations clean.
 
 ## Findings
@@ -91,10 +91,17 @@ again:
   documents' prose as a reference to a test called `name`, and it looked for
   four-space-indented `fn`s, so a test inside a nested module was reported
   missing. Fixed in `60ec459`.
-- **#46**: the flake was in the test, not the code -- it waited five seconds for
-  a marker written by a detached child, which is a race against machine load. The
-  claim is structural (the `;` in the script's name never reaches a shell) and the
-  run-for-real tail is synchronous now. Fixed in `fce6258`.
+- **#46**: first diagnosed as a five-second wait on a detached child, which was
+  wrong. The real cause was in the code: Linux refuses to `execve` a file that any
+  process holds open for writing (`ETXTBSY`), and a user script is normally in
+  that state (an editor saving it, a file just written). The spawn failed, so the
+  marker was never written and the test waited out its deadline. `spawn_detached`
+  now retries that one error for 250 ms and then reports it -- fail-closed, no
+  unbounded retry, and the launch of a script that is being saved is no longer
+  silently dropped. Held up by
+  `process::tests::a_script_open_for_writing_is_retried_until_it_runs` and
+  `process::tests::a_writer_that_never_lets_go_fails_within_the_grace`.
+  Fixed in `fce6258` (test shape) and this commit (root cause).
 
 ## Still owed by a human
 
