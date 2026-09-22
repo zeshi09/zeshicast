@@ -108,7 +108,9 @@ pub fn terminal_process_command(
     terminal_override: Option<&str>,
     hold_open: bool,
 ) -> crate::action::ProcessCommand {
-    let term = detect_terminal(terminal_override).unwrap_or_else(|| "xterm".to_string());
+    let term = detect_terminal(terminal_override)
+        .or_else(|| terminal_override.map(ToString::to_string))
+        .unwrap_or_else(|| "xterm".to_string());
     let (bin, args) = build_terminal_command(&term, shell_command, hold_open);
     crate::action::ProcessCommand::new(bin, args)
 }

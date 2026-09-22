@@ -71,12 +71,12 @@ fn tab_cache() -> &'static TabCache {
 /// modern profile this usually returns nothing. Fixing that needs an lz4 decoder
 /// and is deliberately left as its own step; caching keeps a dead branch from
 /// costing anything on the hot path in the meantime.
-fn open_tabs_cached_with<F>(collect: F) -> Vec<BrowserTab>
+fn open_tabs_cached_with_cache<F>(cache_mutex: &TabCache, collect: F) -> Vec<BrowserTab>
 where
     F: FnOnce() -> Vec<BrowserTab>,
 {
     let now = Instant::now();
-    if let Ok(cache) = tab_cache().lock()
+    if let Ok(cache) = cache_mutex.lock()
         && let Some((captured_at, tabs)) = cache.as_ref()
         && now.duration_since(*captured_at) <= TAB_CACHE_TTL
     {
@@ -84,10 +84,17 @@ where
     }
 
     let tabs = collect();
-    if let Ok(mut cache) = tab_cache().lock() {
+    if let Ok(mut cache) = cache_mutex.lock() {
         *cache = Some((now, tabs.clone()));
     }
     tabs
+}
+
+fn open_tabs_cached_with<F>(collect: F) -> Vec<BrowserTab>
+where
+    F: FnOnce() -> Vec<BrowserTab>,
+{
+    open_tabs_cached_with_cache(tab_cache(), collect)
 }
 
 fn open_tabs_cached() -> Vec<BrowserTab> {
@@ -353,8 +360,9 @@ mod tests {
     }
     #[test]
     fn tab_collection_is_cached_between_queries() {
+        let cache = Mutex::new(None);
         let calls = std::cell::Cell::new(0usize);
-        let first = open_tabs_cached_with(|| {
+        let first = open_tabs_cached_with_cache(&cache, || {
             calls.set(calls.get() + 1);
             vec![BrowserTab {
                 title: "cached".to_string(),
@@ -363,8 +371,8 @@ mod tests {
                 icon: String::new(),
             }]
         });
-        // The cache is process-wide, so the second call must not collect again.
-        let second = open_tabs_cached_with(|| {
+        // The cache is reused within TTL, so the second call must not collect again.
+        let second = open_tabs_cached_with_cache(&cache, || {
             calls.set(calls.get() + 1);
             Vec::new()
         });
