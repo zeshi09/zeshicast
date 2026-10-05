@@ -303,7 +303,11 @@ fn update_media_art(view: &MediaView, art_url: Option<&str>) {
     };
 
     if url.starts_with("file://") {
-        match gtk::gdk::Texture::from_file(&gtk::gio::File::for_uri(url)) {
+        let Some(path) = crate::services::media::confine_art_path(url) else {
+            show_placeholder(view);
+            return;
+        };
+        match gtk::gdk::Texture::from_file(&gtk::gio::File::for_path(&path)) {
             Ok(texture) => set_texture(view, &texture),
             Err(_) => show_placeholder(view),
         }
@@ -315,16 +319,24 @@ fn update_media_art(view: &MediaView, art_url: Option<&str>) {
         return;
     }
 
-    // Remote art: fetch off-thread, deliver bytes back to the UI thread.
+    // Remote art: fetch off-thread under a deadline and a size cap (N-7), then
+    // deliver bytes back to the UI thread.
     let (tx, rx) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
     let fetch_url = url.to_string();
     std::thread::spawn(move || {
-        let bytes = ureq::get(&fetch_url).call().ok().and_then(|resp| {
-            let mut buf = Vec::new();
-            std::io::Read::read_to_end(&mut resp.into_reader(), &mut buf)
-                .ok()
-                .map(|_| buf)
-        });
+        let bytes = ureq::get(&fetch_url)
+            .timeout(crate::services::media::ART_TIMEOUT)
+            .call()
+            .ok()
+            .and_then(|resp| {
+                let mut reader = resp.into_reader();
+                let buf = crate::services::media::read_capped(
+                    &mut reader,
+                    crate::services::media::ART_MAX_BYTES,
+                )
+                .ok()?;
+                (buf.len() as u64 <= crate::services::media::ART_MAX_BYTES).then_some(buf)
+            });
         let _ = tx.send(bytes);
     });
 

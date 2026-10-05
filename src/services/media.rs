@@ -16,6 +16,45 @@ impl MediaSnapshot {
     }
 }
 
+/// Cap and deadline for a remote artwork download (N-7).
+pub(crate) const ART_MAX_BYTES: u64 = 5 * 1024 * 1024;
+pub(crate) const ART_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Resolve a `file://` artwork URI to a readable path, or `None`.
+///
+/// A session-bus peer chooses `mpris:artUrl`, so reading it must not block the
+/// main loop on a FIFO, follow a symlink out of the user's own storage, or read
+/// files outside it (N-7).
+pub(crate) fn confine_art_path(uri: &str) -> Option<std::path::PathBuf> {
+    let raw = uri.strip_prefix("file://")?;
+    let canonical = std::path::Path::new(raw).canonicalize().ok()?;
+    if !std::fs::metadata(&canonical).ok()?.is_file() {
+        return None;
+    }
+    let roots = [crate::config::home_dir(), std::env::temp_dir()];
+    roots
+        .iter()
+        .any(|root| canonical.starts_with(root))
+        .then_some(canonical)
+}
+
+/// Read at most `cap + 1` bytes, so the caller can tell an over-cap response
+/// from a complete one. Works on a boxed trait object, which `Read::take`
+/// cannot (its `Self` must be `Sized`).
+pub(crate) fn read_capped(reader: &mut dyn std::io::Read, cap: u64) -> std::io::Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    while (buf.len() as u64) <= cap {
+        let want = ((cap + 1) - buf.len() as u64).min(chunk.len() as u64) as usize;
+        let read = std::io::Read::read(reader, &mut chunk[..want])?;
+        if read == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..read]);
+    }
+    Ok(buf)
+}
+
 /// A playback control routed to the active MPRIS player over D-Bus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaControl {
@@ -428,5 +467,43 @@ mod mpris {
 
             assert!(book.entries.is_empty());
         }
+    }
+}
+
+#[cfg(test)]
+mod art_tests {
+    use super::*;
+
+    #[test]
+    fn art_path_is_confined_to_local_storage() {
+        assert!(confine_art_path("file:///etc/passwd").is_none());
+        assert!(confine_art_path("https://example.com/a.png").is_none());
+
+        let dir = std::env::temp_dir().join(format!("zeshicast-art-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("cover.png");
+        std::fs::write(&file, b"png").unwrap();
+        let uri = format!("file://{}", file.display());
+        assert_eq!(confine_art_path(&uri), Some(file.canonicalize().unwrap()));
+
+        // A symlink pointing outside the allowed roots is rejected.
+        #[cfg(unix)]
+        {
+            let link = dir.join("escape.png");
+            std::os::unix::fs::symlink("/etc/passwd", &link).unwrap();
+            assert!(confine_art_path(&format!("file://{}", link.display())).is_none());
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_capped_stops_at_the_cap() {
+        let mut large = std::io::Cursor::new(vec![b'a'; 100]);
+        let buf = read_capped(&mut large, 10).unwrap();
+        assert_eq!(buf.len(), 11, "reads cap + 1 so overflow is detectable");
+
+        let mut small = std::io::Cursor::new(vec![b'a'; 5]);
+        assert_eq!(read_capped(&mut small, 10).unwrap().len(), 5);
     }
 }
