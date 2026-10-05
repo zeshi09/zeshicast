@@ -342,8 +342,10 @@ pub(crate) fn import_config_with_limits(
     }
     reject_symlinks(&imported)?;
 
-    // Swap into place: move the old config aside, promote the import, drop
-    // the backup. On failure, restore the backup.
+    // Swap into place: move the old config aside and promote the import. The
+    // old config is kept as a `.zeshicast-backup-*` sibling: a "safe" export
+    // carries no history, so deleting it here used to destroy `zeshicast.db`
+    // and the rest of the local state (N-8). On failure, restore it.
     let backup = parent.join(format!(".zeshicast-backup-{}", unix_now()));
     let had_old = config_dir.exists();
     if had_old {
@@ -352,7 +354,7 @@ pub(crate) fn import_config_with_limits(
     match fs::rename(&imported, config_dir) {
         Ok(()) => {
             if had_old {
-                let _ = fs::remove_dir_all(&backup);
+                restore_local_history(&backup, config_dir);
             }
             Ok(())
         }
@@ -361,6 +363,25 @@ pub(crate) fn import_config_with_limits(
                 let _ = fs::rename(&backup, config_dir);
             }
             Err(err)
+        }
+    }
+}
+
+/// Copy back the history files the import did not carry.
+///
+/// A safe export excludes history by design, so importing one left the user
+/// with an empty clipboard history even though their old one was right there in
+/// the backup. If the archive *did* include history, that explicit choice wins.
+fn restore_local_history(backup: &Path, config_dir: &Path) {
+    if config_dir.join("zeshicast.db").exists() {
+        return;
+    }
+    for name in HISTORY_FILES {
+        let source = backup.join(name);
+        if source.exists()
+            && let Err(error) = fs::copy(&source, config_dir.join(name))
+        {
+            log::warn!("could not restore {name} from the import backup: {error}");
         }
     }
 }
@@ -1174,6 +1195,51 @@ mod tests {
         }
         assert!(member_is_extractable(Path::new("zeshicast/link"), EntryType::Symlink).is_err());
         assert!(member_is_extractable(Path::new("zeshicast/link"), EntryType::Link).is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_safe_import_keeps_the_local_history() {
+        let dir = test_dir("import-history");
+        let config = dir.join("zeshicast");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(config.join("zeshicast.db"), b"local history").unwrap();
+        fs::write(config.join("preferences.toml"), "ai_model = \"old\"\n").unwrap();
+
+        // A safe export carries preferences but no history (N-8).
+        let src = dir.join("safe.tar.gz");
+        write_archive(
+            &src,
+            &[("zeshicast/preferences.toml", b"ai_model = \"imported\"\n")],
+        );
+
+        import_config(&src, &config).unwrap();
+
+        assert_eq!(
+            fs::read(config.join("zeshicast.db")).unwrap(),
+            b"local history",
+            "a safe import must not wipe the local clipboard history"
+        );
+        assert_eq!(
+            fs::read_to_string(config.join("preferences.toml")).unwrap(),
+            "ai_model = \"imported\"\n"
+        );
+
+        // The replaced config is kept as a backup, not deleted.
+        let backup = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".zeshicast-backup-")
+            })
+            .expect("the replaced config must be kept as a backup");
+        assert_eq!(
+            fs::read(backup.path().join("zeshicast.db")).unwrap(),
+            b"local history"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

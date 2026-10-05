@@ -6,8 +6,6 @@ use std::fs;
 #[cfg(feature = "gui")]
 use std::io;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "gui")]
-use std::process::Command;
 
 use crate::action::{
     Action, ActionForm, ActionFormCommand, ActionFormField, ActionKind, ActionRisk, Capability,
@@ -580,8 +578,7 @@ const JSON_STDERR_LIMIT_BYTES: u64 = 8 * 1024;
 
 #[cfg(feature = "gui")]
 fn run_json_command(command: &ShellCommand) -> io::Result<String> {
-    let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(&command.command).envs(&command.env);
+    let mut cmd = crate::process::shell_command(&command.command, &command.env);
 
     // Drain the pipes while waiting (N-4): a command that writes more than the
     // ~64 KiB pipe buffer used to block in `write` until the 1 s deadline killed

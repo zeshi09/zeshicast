@@ -1,4 +1,5 @@
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -100,6 +101,9 @@ pub fn call_json_rpc_with_args(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        // Its own process group so a timeout can kill grandchildren that
+        // inherited stdout (N-5).
+        .process_group(0)
         .spawn()
         .map_err(|e| format!("Failed to spawn {}: {}", executable.display(), e))?;
     // From here on every exit path goes through the guard (see `crate::process`).
@@ -136,14 +140,14 @@ pub fn call_json_rpc_with_args(
     let line = match line_result {
         Ok(Ok(line)) => line,
         Ok(Err(e)) => {
-            // Kill first, then join: the reader only finishes once the pipe is
-            // closed, which the child's death guarantees.
-            drop(child);
+            // Kill the whole group, then join: the reader only finishes once
+            // every writer of the pipe (including grandchildren) is gone.
+            child.kill_group();
             let _ = reader_handle.join();
             return Err(format!("Failed to read response: {e}"));
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            drop(child);
+            child.kill_group();
             let _ = reader_handle.join();
             return Err(format!(
                 "JSON-RPC call to '{}' timed out after {}ms",
@@ -152,7 +156,7 @@ pub fn call_json_rpc_with_args(
             ));
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
-            drop(child);
+            child.kill_group();
             let _ = reader_handle.join();
             return Err("Process closed stdout pipe without sending response".to_string());
         }
@@ -270,6 +274,29 @@ mod tests {
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(err.contains("timed out after 50ms"));
+    }
+
+    #[test]
+    fn a_grandchild_holding_stdout_does_not_hang_the_timeout() {
+        // The direct child backgrounds a subshell that inherits stdout and
+        // sleeps. Killing only the direct child leaves the grandchild holding
+        // the pipe, so `join()` would wait for it; the timeout path must kill
+        // the whole process group (N-5).
+        let started = Instant::now();
+        let res = call_json_rpc_with_args(
+            Path::new("sh"),
+            &["-c", "read line; (sleep 30) & sleep 30"],
+            "ping",
+            serde_json::json!({}),
+            100,
+        );
+        let elapsed = started.elapsed();
+
+        assert!(res.is_err());
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "the timeout path waited for the grandchild: {elapsed:?}"
+        );
     }
 
     fn temp_pid_file(tag: &str) -> std::path::PathBuf {

@@ -1,13 +1,8 @@
-use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 pub fn is_wtype_available() -> bool {
-    Command::new("which")
-        .arg("wtype")
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
+    crate::process::command_exists("wtype")
 }
 
 pub fn type_text_via_wtype(text: &str) {
@@ -15,7 +10,8 @@ pub fn type_text_via_wtype(text: &str) {
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(200));
         // Fire-and-forget, but the child is remembered so it is reaped instead
-        // of lingering as a zombie (M-9).
-        crate::process::spawn_detached(Command::new("wtype").arg(&text)).ok();
+        // of lingering as a zombie (M-9). The command is built in
+        // `crate::process` so no execution path rolls its own `Command` (N-15).
+        crate::process::spawn_detached_program("wtype", &[&text]).ok();
     });
 }

@@ -72,6 +72,21 @@ impl ChildGuard {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+
+    /// Kill the child's whole process group and reap the child.
+    ///
+    /// The child must have been spawned with `process_group(0)` so its group id
+    /// equals its pid — otherwise this would signal the group we are in. A
+    /// grandchild that inherited the stdout pipe keeps a reader thread blocked
+    /// even after the direct child dies; killing the group closes the pipe and
+    /// lets that thread finish (N-5).
+    pub(crate) fn kill_group(&mut self) {
+        if let Some(pgid) = rustix::process::Pid::from_raw(self.0.id() as i32) {
+            let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
+        }
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }
 
 impl Drop for ChildGuard {
@@ -115,6 +130,23 @@ pub(crate) fn spawn_detached(command: &mut Command) -> io::Result<DetachedChild>
     Ok(handle)
 }
 
+/// [`spawn_detached`] for a program plus arguments. The `Command` is built here
+/// so callers never construct one directly (N-15).
+pub(crate) fn spawn_detached_program(program: &str, args: &[&str]) -> io::Result<DetachedChild> {
+    let mut command = Command::new(program);
+    command.args(args);
+    spawn_detached(&mut command)
+}
+
+/// Whether `program` is on `PATH`.
+pub(crate) fn command_exists(program: &str) -> bool {
+    Command::new("which")
+        .arg(program)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
 /// `Command::spawn` with a bounded retry on `ETXTBSY`.
 ///
 /// `pub(crate)` so the tests that run a just-written script use the same
@@ -134,6 +166,27 @@ pub(crate) fn spawn_retrying_text_file_busy(command: &mut Command) -> io::Result
             Err(error) => return Err(error),
         }
     }
+}
+
+/// A `sh -c` command carrying the JSON-command environment. Building it here
+/// keeps process construction in one module (N-15); the caller still has to run
+/// it through the execution gate when the command is a user action.
+#[cfg(feature = "gui")]
+pub(crate) fn shell_command(
+    script: &str,
+    env: &std::collections::HashMap<String, String>,
+) -> Command {
+    let mut command = Command::new("sh");
+    command.arg("-c").arg(script);
+    command.envs(env);
+    command
+}
+
+/// A command for `program`, with arguments left to the caller. See
+/// [`shell_command`] for why this exists (N-15).
+#[cfg(feature = "gui")]
+pub(crate) fn program_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    Command::new(program)
 }
 
 /// Result of [`run_capped`].

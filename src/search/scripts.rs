@@ -307,17 +307,18 @@ pub(crate) fn run_script_stdout_with_args(
     path: &std::path::Path,
     args: &[String],
 ) -> std::io::Result<String> {
-    let mut direct = std::process::Command::new(path);
+    let mut direct = crate::process::program_command(path);
     direct.args(args);
     match run_script_capped(&mut direct) {
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            let mut interpreter = match ext {
-                "py" => std::process::Command::new("python3"),
-                "js" | "ts" => std::process::Command::new("node"),
-                "rb" => std::process::Command::new("ruby"),
-                _ => std::process::Command::new("sh"),
+            let program = match ext {
+                "py" => "python3",
+                "js" | "ts" => "node",
+                "rb" => "ruby",
+                _ => "sh",
             };
+            let mut interpreter = crate::process::program_command(program);
             interpreter.arg(path).args(args);
             run_script_capped(&mut interpreter)
         }

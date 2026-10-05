@@ -264,20 +264,20 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
     {
         let view_c = view.clone();
         view.output_devices.connect_row_activated(move |_, row| {
-            if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:") {
-                if let Ok(id) = id_str.parse::<u32>() {
-                    activate_audio_device_by_id(&view_c, id);
-                }
+            if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:")
+                && let Ok(id) = id_str.parse::<u32>()
+            {
+                activate_audio_device_by_id(&view_c, id);
             }
         });
     }
     {
         let view_c = view.clone();
         view.input_devices.connect_row_activated(move |_, row| {
-            if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:") {
-                if let Ok(id) = id_str.parse::<u32>() {
-                    activate_audio_device_by_id(&view_c, id);
-                }
+            if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:")
+                && let Ok(id) = id_str.parse::<u32>()
+            {
+                activate_audio_device_by_id(&view_c, id);
             }
         });
     }
@@ -341,21 +341,19 @@ pub fn activate_audio_device_by_id(view: &AudioView, id: u32) {
 }
 
 pub fn activate_selected_audio_device(view: &AudioView) {
-    if let Some(row) = view.output_devices.selected_row() {
-        if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:") {
-            if let Ok(id) = id_str.parse::<u32>() {
-                activate_audio_device_by_id(view, id);
-                return;
-            }
-        }
+    if let Some(row) = view.output_devices.selected_row()
+        && let Some(id_str) = row.widget_name().strip_prefix("audio_dev:")
+        && let Ok(id) = id_str.parse::<u32>()
+    {
+        activate_audio_device_by_id(view, id);
+        return;
     }
-    if let Some(row) = view.input_devices.selected_row() {
-        if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:") {
-            if let Ok(id) = id_str.parse::<u32>() {
-                activate_audio_device_by_id(view, id);
-                return;
-            }
-        }
+    if let Some(row) = view.input_devices.selected_row()
+        && let Some(id_str) = row.widget_name().strip_prefix("audio_dev:")
+        && let Ok(id) = id_str.parse::<u32>()
+    {
+        activate_audio_device_by_id(view, id);
+        return;
     }
     view.mute_output.emit_clicked();
 }

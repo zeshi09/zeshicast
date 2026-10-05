@@ -466,9 +466,9 @@ fn set_process_rows(
     let common_len = old_len.min(new_len);
 
     let mut updated_all = true;
-    for i in 0..common_len {
+    for (i, process) in processes.iter().enumerate().take(common_len) {
         if let Some(row) = list.row_at_index(i as i32) {
-            if !update_process_row(&row, &processes[i], max_memory_kib) {
+            if !update_process_row(&row, process, max_memory_kib) {
                 updated_all = false;
                 break;
             }

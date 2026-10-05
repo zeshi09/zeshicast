@@ -204,10 +204,10 @@ fn notification_history_row(
 }
 
 pub fn dismiss_notification_row(row: &ListBoxRow) {
-    if let Some(id_str) = row.widget_name().strip_prefix("notif:") {
-        if let Ok(id) = id_str.parse::<u32>() {
-            crate::services::notifications::close_notification(id);
-            row.set_visible(false);
-        }
+    if let Some(id_str) = row.widget_name().strip_prefix("notif:")
+        && let Ok(id) = id_str.parse::<u32>()
+    {
+        crate::services::notifications::close_notification(id);
+        row.set_visible(false);
     }
 }

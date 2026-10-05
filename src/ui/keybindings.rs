@@ -698,13 +698,13 @@ fn cycle_root_focus(
     backward: bool,
 ) {
     let focused = gtk::prelude::RootExt::focus(window);
-    let is_entry = entry.has_focus() || focused.as_ref().map_or(false, |w| w == entry);
+    let is_entry = entry.has_focus() || focused.as_ref().is_some_and(|w| w == entry);
     let is_list = list.has_focus()
-        || focused.as_ref().map_or(false, |w| {
+        || focused.as_ref().is_some_and(|w| {
             w == list || w.ancestor(ListBox::static_type()).as_ref() == Some(list.upcast_ref())
         });
     let is_action_bar = action_bar.has_focus()
-        || focused.as_ref().map_or(false, |w| {
+        || focused.as_ref().is_some_and(|w| {
             w == action_bar
                 || w.ancestor(GtkBox::static_type()).as_ref() == Some(action_bar.upcast_ref())
         });
@@ -767,8 +767,6 @@ fn cycle_root_focus(
             } else {
                 entry.grab_focus();
             }
-        } else if is_list {
-            entry.grab_focus();
         } else {
             entry.grab_focus();
         }
@@ -778,14 +776,11 @@ fn cycle_root_focus(
 fn direct_child_of(widget: &gtk::Widget, container: &GtkBox) -> Option<gtk::Widget> {
     let mut curr = widget.clone();
     loop {
-        if let Some(parent) = curr.parent() {
-            if parent == *container {
-                return Some(curr);
-            }
-            curr = parent;
-        } else {
-            return None;
+        let parent = curr.parent()?;
+        if parent == *container {
+            return Some(curr);
         }
+        curr = parent;
     }
 }
 

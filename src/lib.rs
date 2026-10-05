@@ -1494,6 +1494,50 @@ DEPLOY_TOKEN = "{{pref:token}}"
         }
     }
 
+    /// Execution paths must go through `crate::process` (and, for a user
+    /// action, `crate::action`'s `execute()`/`preflight` gate). The three paths
+    /// N-15 named built their own `Command`; this guard keeps a new producer
+    /// from quietly doing the same.
+    #[test]
+    fn action_execution_modules_do_not_build_their_own_command() {
+        const GUARDED: &[&str] = &[
+            "src/search/commands.rs",
+            "src/search/scripts.rs",
+            "src/services/text_input.rs",
+        ];
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for relative in GUARDED {
+            let source = std::fs::read_to_string(root.join(relative))
+                .unwrap_or_else(|error| panic!("cannot read {relative}: {error}"));
+            // Anything after the first test module is not shipped.
+            let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+            assert!(
+                !builds_own_command(production),
+                "{relative} must spawn through crate::process, not a raw Command (N-15)"
+            );
+        }
+    }
+
+    /// Whether `source` contains a bare `Command::new(` (not `ShellCommand::new`
+    /// or `ProcessCommand::new`).
+    fn builds_own_command(source: &str) -> bool {
+        let needle = "Command::new(";
+        let mut start = 0;
+        while let Some(index) = source[start..].find(needle) {
+            let absolute = start + index;
+            let preceded_by_identifier = source[..absolute]
+                .chars()
+                .next_back()
+                .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_');
+            if !preceded_by_identifier {
+                return true;
+            }
+            start = absolute + needle.len();
+        }
+        false
+    }
+
     /// Every test named by a document must exist (P5.6).
     ///
     /// `docs/security.md` states the security model and `docs/remediation-
