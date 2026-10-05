@@ -61,10 +61,23 @@ pub(crate) fn preference_script_dirs(
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(std::path::PathBuf::from)
+            .map(expand_home_dir)
             .collect::<Vec<_>>()
     });
     custom.unwrap_or_else(|| vec![config_dir.join("scripts")])
+}
+
+/// Expand a leading `~` in a user-provided script directory (N-14). Without
+/// this, `~/scripts` is read as a literal directory named `~` under the process
+/// CWD — never the one the user meant.
+fn expand_home_dir(path: &str) -> std::path::PathBuf {
+    if path == "~" {
+        return crate::config::home_dir();
+    }
+    match path.strip_prefix("~/") {
+        Some(rest) => crate::config::home_dir().join(rest),
+        None => std::path::PathBuf::from(path),
+    }
 }
 
 impl Zeshicast {
@@ -187,5 +200,25 @@ impl Zeshicast {
         let mut pins = self.pins.iter().cloned().collect::<Vec<_>>();
         pins.sort();
         write_lines(&self.config_dir.join("pins.txt"), &pins)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_dirs_expand_a_leading_tilde() {
+        let preferences = HashMap::from([(
+            "script_dirs".to_string(),
+            "~/scripts, /absolute/dir, ~".to_string(),
+        )]);
+
+        let dirs = preference_script_dirs(&preferences, std::path::Path::new("/cfg"));
+        let home = crate::config::home_dir();
+
+        assert_eq!(dirs[0], home.join("scripts"));
+        assert_eq!(dirs[1], std::path::PathBuf::from("/absolute/dir"));
+        assert_eq!(dirs[2], home);
     }
 }

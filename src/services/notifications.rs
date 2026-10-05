@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NotificationSnapshot {
@@ -34,8 +34,12 @@ pub struct NotificationEntrySnapshot {
 //
 // zeshicast is the notification daemon: it owns `org.freedesktop.Notifications`
 // (see ui/notify_server.rs) and records every incoming notification here. No
-// external daemon (swaync/dunst) is involved. Everything lives on the GLib main
-// thread, so a thread-local store is enough.
+// external daemon (swaync/dunst) is involved.
+//
+// The store is process-global, not thread-local: extension failures and HTTP
+// errors are reported from worker threads (`action.rs`), and a thread-local
+// store would silently drop those notifications (N-6). A `Mutex` keeps every
+// caller on one state no matter which thread it runs on.
 
 #[derive(Clone)]
 struct StoredNotification {
@@ -54,12 +58,21 @@ struct NotificationState {
     running: bool,
 }
 
-thread_local! {
-    static STATE: RefCell<NotificationState> = RefCell::new(NotificationState {
-        next_id: 1,
-        dnd: load_persisted_dnd(),
-        ..Default::default()
-    });
+fn state() -> &'static Mutex<NotificationState> {
+    static STATE: OnceLock<Mutex<NotificationState>> = OnceLock::new();
+    STATE.get_or_init(|| {
+        Mutex::new(NotificationState {
+            next_id: 1,
+            dnd: load_persisted_dnd(),
+            ..Default::default()
+        })
+    })
+}
+
+/// Lock the store, recovering the data if a previous holder panicked: a poisoned
+/// notification store is still readable, and aborting on it is worse.
+fn lock_state() -> std::sync::MutexGuard<'static, NotificationState> {
+    state().lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
 const MAX_HISTORY: usize = 100;
@@ -121,88 +134,82 @@ fn now_secs() -> u64 {
 /// Record an incoming notification. Reuses `replaces_id` when non-zero (the
 /// notification spec's replacement semantics); returns the resolved id.
 pub fn push_notification(app_name: &str, summary: &str, body: &str, replaces_id: u32) -> u32 {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let id = if replaces_id != 0 {
-            replaces_id
-        } else {
-            let id = state.next_id;
-            state.next_id = state.next_id.checked_add(1).unwrap_or(1);
-            id
-        };
-        state.entries.retain(|entry| entry.id != id);
-        state.entries.insert(
-            0,
-            StoredNotification {
-                id,
-                app_name: truncate_utf8(app_name, MAX_APP_NAME_BYTES).to_string(),
-                summary: truncate_utf8(summary, MAX_SUMMARY_BYTES).to_string(),
-                body: truncate_utf8(body, MAX_BODY_BYTES).to_string(),
-                received_at: now_secs(),
-            },
-        );
-        state.entries.truncate(MAX_HISTORY);
+    let mut state = lock_state();
+    let id = if replaces_id != 0 {
+        replaces_id
+    } else {
+        let id = state.next_id;
+        state.next_id = state.next_id.checked_add(1).unwrap_or(1);
         id
-    })
+    };
+    state.entries.retain(|entry| entry.id != id);
+    state.entries.insert(
+        0,
+        StoredNotification {
+            id,
+            app_name: truncate_utf8(app_name, MAX_APP_NAME_BYTES).to_string(),
+            summary: truncate_utf8(summary, MAX_SUMMARY_BYTES).to_string(),
+            body: truncate_utf8(body, MAX_BODY_BYTES).to_string(),
+            received_at: now_secs(),
+        },
+    );
+    state.entries.truncate(MAX_HISTORY);
+    id
 }
 
 pub fn close_notification(id: u32) {
-    STATE.with(|state| state.borrow_mut().entries.retain(|entry| entry.id != id));
+    lock_state().entries.retain(|entry| entry.id != id);
 }
 
 pub fn clear_notifications() {
-    STATE.with(|state| state.borrow_mut().entries.clear());
+    lock_state().entries.clear();
 }
 
 /// Flip Do-Not-Disturb; returns the new state.
 pub fn toggle_dnd() -> bool {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state.dnd = !state.dnd;
-        persist_dnd(state.dnd);
-        state.dnd
-    })
+    let mut state = lock_state();
+    state.dnd = !state.dnd;
+    persist_dnd(state.dnd);
+    state.dnd
 }
 
 /// Check whether Do-Not-Disturb is currently enabled.
 pub fn is_dnd_enabled() -> bool {
-    STATE.with(|state| state.borrow().dnd)
+    lock_state().dnd
 }
 
 /// Marks the D-Bus server as active so the UI reports a working backend.
 pub fn mark_server_active() {
-    STATE.with(|state| state.borrow_mut().running = true);
+    lock_state().running = true;
 }
 
 /// Marks the D-Bus server as inactive (e.g. `org.freedesktop.Notifications`
 /// was lost to another daemon) so the UI stops reporting a working backend.
 pub fn mark_server_inactive() {
-    STATE.with(|state| state.borrow_mut().running = false);
+    lock_state().running = false;
 }
 
 pub fn notification_snapshot() -> NotificationSnapshot {
-    STATE.with(|state| {
-        let state = state.borrow();
-        if !state.running {
-            return NotificationSnapshot::default();
-        }
-        NotificationSnapshot {
-            backend: Some("zeshicast".to_string()),
-            count: Some(state.entries.len() as u32),
-            dnd: Some(state.dnd),
-            history: state
-                .entries
-                .iter()
-                .map(|entry| NotificationEntrySnapshot {
-                    id: Some(entry.id),
-                    app_name: non_empty_string(&entry.app_name),
-                    summary: entry.summary.clone(),
-                    body: non_empty_string(&entry.body),
-                    timestamp: Some(format_notif_time(entry.received_at)),
-                })
-                .collect(),
-        }
-    })
+    let state = lock_state();
+    if !state.running {
+        return NotificationSnapshot::default();
+    }
+    NotificationSnapshot {
+        backend: Some("zeshicast".to_string()),
+        count: Some(state.entries.len() as u32),
+        dnd: Some(state.dnd),
+        history: state
+            .entries
+            .iter()
+            .map(|entry| NotificationEntrySnapshot {
+                id: Some(entry.id),
+                app_name: non_empty_string(&entry.app_name),
+                summary: entry.summary.clone(),
+                body: non_empty_string(&entry.body),
+                timestamp: Some(format_notif_time(entry.received_at)),
+            })
+            .collect(),
+    }
 }
 
 fn format_notif_time(unix_secs: u64) -> String {
@@ -227,8 +234,25 @@ fn non_empty_string(value: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Notification state is process-global, so tests that observe counts or
+    /// history must serialize and start from a clean store.
+    fn isolated() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let mut state = lock_state();
+        state.entries.clear();
+        state.next_id = 1;
+        state.running = false;
+        drop(state);
+        guard
+    }
+
     #[test]
     fn notify_with_huge_body_is_capped() {
+        let _guard = isolated();
         mark_server_active();
         let app_name = "n".repeat(MAX_APP_NAME_BYTES + 10);
         let summary = "s".repeat(MAX_SUMMARY_BYTES + 10);
@@ -252,6 +276,7 @@ mod tests {
 
     #[test]
     fn truncation_never_splits_a_utf8_character() {
+        let _guard = isolated();
         mark_server_active();
         // Every 'ё' is two bytes, so the byte cap lands inside a character.
         let summary = "ё".repeat(MAX_SUMMARY_BYTES);
@@ -270,6 +295,7 @@ mod tests {
 
     #[test]
     fn store_records_newest_first_and_closes() {
+        let _guard = isolated();
         mark_server_active();
         let _first = push_notification("Mail", "New message", "Project update", 0);
         let second = push_notification("Chat", "Hi there", "", 0);
@@ -289,6 +315,7 @@ mod tests {
 
     #[test]
     fn replaces_id_updates_in_place() {
+        let _guard = isolated();
         let id = push_notification("App", "First", "", 0);
         let same = push_notification("App", "Second", "", id);
         assert_eq!(id, same);
@@ -299,6 +326,7 @@ mod tests {
 
     #[test]
     fn mark_server_inactive_clears_backend_indicator() {
+        let _guard = isolated();
         mark_server_active();
         push_notification("Mail", "New message", "Project update", 0);
         assert_eq!(
@@ -315,6 +343,7 @@ mod tests {
 
     #[test]
     fn dnd_toggles() {
+        let _guard = isolated();
         let initial = is_dnd_enabled();
         let toggled = toggle_dnd();
         assert_eq!(toggled, !initial);
@@ -322,5 +351,22 @@ mod tests {
         let restored = toggle_dnd();
         assert_eq!(restored, initial);
         assert_eq!(is_dnd_enabled(), initial);
+    }
+
+    /// N-6: extension failures and HTTP errors are reported from worker threads.
+    /// With a thread-local store the push landed on the worker's own state and
+    /// the main thread never saw it.
+    #[test]
+    fn a_worker_thread_push_is_visible_from_another_thread() {
+        let _guard = isolated();
+        mark_server_active();
+
+        std::thread::spawn(|| push_notification("Worker", "from a thread", "body", 0))
+            .join()
+            .expect("worker thread");
+
+        let snapshot = notification_snapshot();
+        assert_eq!(snapshot.count, Some(1));
+        assert_eq!(snapshot.history[0].summary, "from a thread");
     }
 }

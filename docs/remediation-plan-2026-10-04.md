@@ -58,9 +58,9 @@ nix develop --command cargo test --features gui,layer-shell
 
 `src/services/extension_protocol.rs:135-141` — после таймаута `drop(child); reader_handle.join()`; внук, унаследовавший stdout, держит пайп. **Правка:** `process_group(0)` + kill по `-pgid`, либо не `join()`-ить на error-путях. **Тест:** расширение с фоновым `sleep`, удерживающим stdout, не вешает вызов дольше таймаута; число fd не растёт.
 
-### P6 — 🔜 N-6: уведомления из воркер-потоков теряются
+### P6 — ✅ done. Уведомления из воркер-потоков (N-6, Medium)
 
-`src/services/notifications.rs:57-62` — `thread_local! STATE`; `src/action.rs:956,972` пишет из `std::thread`. **Правка:** `glib::idle_add_once` вокруг push (как в HTTP-пути `action.rs:892`) или глобальный `Mutex`. **Тест:** уведомление из worker-потока видно в `notification_snapshot` на главном.
+`src/services/notifications.rs` — `thread_local! STATE` заменён на process-global `Mutex<NotificationState>` (`OnceLock` + `lock_state()`, с восстановлением при отравлении); все аксессоры переведены. Теперь `push_notification` из `run_extension_item`/HTTP-worker (`action.rs:887,921`) виден главному потоку. Тесты сериализованы через `isolated()` (общий глобальный store), регрессия — `a_worker_thread_push_is_visible_from_another_thread`. ✅
 
 ### P12 — 🔜 N-7: недоверенный `mpris:artUrl`
 
@@ -76,9 +76,9 @@ nix develop --command cargo test --features gui,layer-shell
 
 `.github/workflows/rust.yml:94` — `command: check licenses bans sources` → `check advisories licenses bans sources`. Проверка сразу нашла реальную уязвимость: `rustls v0.23.40` (RUSTSEC-2026-0285, через `ureq`). **Правка:** `cargo update -p rustls` → `rustls 0.23.45` (+ `rustls-webpki 0.103.15`). **Проверка:** `cargo deny check advisories` → ok; `check licenses bans sources` → ok; `cargo check`/`test` (261) зелёные. ✅
 
-### P9 — 🔜 N-14: `~` в `script_dirs`
+### P9 — ✅ done. Раскрытие `~` в `script_dirs` (N-14, Medium)
 
-`src/app/preferences.rs:55-68` — раскрывать `~/` в `$HOME`. **Тест:** `~/…` → `$HOME`; CWD-каталог `~` не читается.
+`src/app/preferences.rs` — `expand_home_dir`: `~` → `$HOME`, `~/…` → `$HOME/…`, иначе без изменений. **Тест:** `script_dirs_expand_a_leading_tilde` — `~/scripts` → `$HOME/scripts`, `~` → `$HOME`, абсолютный путь не трогается. ✅
 
 ### P10 — 🔜 N-9/N-10: TOML-экспорт/ключи
 
@@ -127,14 +127,14 @@ Clippy для дефолтных фич в CI; убрать дубль джоб�
 | N-16 флейк browser_tabs | Medium | — | `cargo test` ×2 | ✅ |
 | N-12 скрипты без таймаута | Medium | P11 | `script_stdout_larger_than_the_pipe_buffer_is_captured` | ✅ |
 | N-5 join() на внуках | Medium | P5 | расширение с фоновым процессом | 🔜 |
-| N-6 уведомления воркеров | Medium | P6 | уведомление из worker-потока | 🔜 |
+| N-6 уведомления воркеров | Medium | P6 | уведомление из worker-потока | ✅ |
 | N-7 `mpris:artUrl` | Medium | P12 | `file:///etc/passwd`, большой http | 🔜 |
 | N-8 импорт стирает историю | Medium | P13 | сохранение истории при импорте | 🔜 |
 | N-9 env-strip обход | Medium | P10 | safe-export без токенов | 🔜 |
 | N-10 TOML-ключи | Medium | P10 | ключ с `"`/`\n` | 🔜 |
 | N-11 CI без advisories | Medium | P8 | `cargo deny check advisories` | ✅ |
 | N-13 рекурсия калькулятора | Medium | P7 | глубокое выражение → ошибка | ✅ |
-| N-14 `~` в script_dirs | Medium | P9 | `~/…` → `$HOME` | 🔜 |
+| N-14 `~` в script_dirs | Medium | P9 | `~/…` → `$HOME` | ✅ |
 | N-15 spawn мимо гейта | Medium | P14 | grep-гвард | 🔜 |
 | Minor-пакет | Low | P15 | по тесту на пункт | 🔜 |
 | Ops-пакет | Low | P16 | CI/README | 🔜 |
