@@ -28,6 +28,8 @@ jobs:
             command: cargo check
           - name: test
             command: cargo test
+          - name: clippy
+            command: cargo clippy --all-targets -- -D warnings
 
     steps:
       # Actions are pinned to a full commit SHA (zizmor: unpinned-uses) so a
@@ -57,8 +59,6 @@ jobs:
             command: nix develop --command cargo test --features gui,layer-shell
           - name: gui-clippy
             command: nix develop --command cargo clippy --all-targets --features gui,layer-shell -- -D warnings
-          - name: layer-shell-check
-            command: nix develop --command cargo check --features gui,layer-shell
           # `desktop` without `gui`: the headless build with the D-Bus services.
           # Its tests are the ones the other legs skip (mpris, NetworkManager).
           - name: desktop-test

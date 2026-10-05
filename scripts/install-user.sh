@@ -8,11 +8,15 @@ SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 ENABLE_DAEMON=0
 START_DAEMON=0
+LAYER_SHELL=0
 
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/install-user.sh [--enable-daemon] [--start-daemon]
+  scripts/install-user.sh [--enable-daemon] [--start-daemon] [--layer-shell]
+
+Builds with `--features gui`. Pass `--layer-shell` to also enable the
+wlr-layer-shell overlay (needs the gtk4-layer-shell dev package).
 
 Installs:
   ~/.local/bin/zeshicast
@@ -61,6 +65,9 @@ while [[ $# -gt 0 ]]; do
   --start-daemon)
     START_DAEMON=1
     ;;
+  --layer-shell)
+    LAYER_SHELL=1
+    ;;
   -h | --help)
     usage
     exit 0
@@ -84,10 +91,17 @@ render_template() {
 
 cd "$ROOT_DIR"
 
+FEATURES="gui"
+if [[ "$LAYER_SHELL" -eq 1 ]]; then
+  FEATURES="gui,layer-shell"
+fi
+
 if command -v nix >/dev/null 2>&1; then
-  nix develop -f shell.nix --command cargo build --release --features gui --bins
+  # The flake devShell pins the toolchain; shell.nix imported the unpinned
+  # <nixpkgs> channel instead.
+  nix develop "$ROOT_DIR" --command cargo build --release --features "$FEATURES" --bins
 else
-  cargo build --release --features gui --bins
+  cargo build --release --features "$FEATURES" --bins
 fi
 
 mkdir -p "$BIN_DIR" "$APP_DIR" "$SYSTEMD_USER_DIR"

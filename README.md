@@ -238,6 +238,12 @@ Installs binaries to `~/.local/bin`, desktop entries to
 `~/.local/share/applications`, and a systemd user service to
 `~/.config/systemd/user/zeshicast-gtk.service`.
 
+The script builds with `--features gui`, using the flake devShell when `nix` is
+available (otherwise your system toolchain). Add `--layer-shell` to also enable
+the wlr-layer-shell overlay. On a non-Nix system the build needs the `gtk4`,
+`gtk4-layer-shell`, `glib`, `pango`, `gdk-pixbuf`, `graphene`, `cairo`, and
+`wayland` development packages discoverable through `pkg-config`.
+
 ```bash
 systemctl --user status zeshicast-gtk.service
 systemctl --user restart zeshicast-gtk.service

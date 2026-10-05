@@ -118,7 +118,7 @@
           zeshicast = zeshicastFor pkgs;
         });
 
-      # `nix run github:blackzeshi/zeshicast` launches the GTK launcher.
+      # `nix run github:zeshi09/zeshicast` launches the GTK launcher.
       apps = forAllSystems (system: {
         default = {
           type = "app";
