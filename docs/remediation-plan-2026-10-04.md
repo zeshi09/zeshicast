@@ -66,15 +66,15 @@ nix develop --command cargo test --features gui,layer-shell
 
 `src/ui/views/media.rs:305-325` — `file://` синхронно грузится/декодируется на главном цикле без конфайнмента; http — `read_to_end` без лимита/таймаута. **Правка:** конфайнмент `file://` (канонизация + cache/allow-list, как `safe_icon_path_in`), лимит байт и общий дедлайн для http. **Тест:** `file:///etc/passwd` и большой http-ответ не роняют/не вешают UI.
 
-### P7 — 🔜 N-13: ограничение рекурсии калькулятора
+### P7 — ✅ done. Ограничение рекурсии калькулятора (N-13, Medium)
 
-`src/search/calculator.rs:121-133` — PoC: 50 000 скобок → stack overflow, abort процесса. **Правка:** счётчик глубины (≈64) в `Calculator`. **Тест:** глубокое выражение → ошибка, не abort.
+`src/search/calculator.rs` — поле `depth` и `const MAX_DEPTH = 64`; `factor` считает глубину и возвращает `Err("expression nested too deeply")` вместо переполнения стека (рекурсия вынесена в `factor_inner`). **Тест:** `calculator_rejects_deeply_nested_expressions` (`src/lib.rs`) — 50 000 пар скобок дают ошибку, а не `SIGABRT`. ✅
 
 ## Фаза 3. Данные и конфигурация (🔜 open)
 
-### P8 — 🔜 N-11: CI не проверяет advisories
+### P8 — ✅ done. CI проверяет advisories (N-11, Medium)
 
-`.github/workflows/rust.yml:94` — `command: check licenses bans sources` → добавить `advisories`. **Критерий:** `cargo deny check advisories` в CI.
+`.github/workflows/rust.yml:94` — `command: check licenses bans sources` → `check advisories licenses bans sources`. Проверка сразу нашла реальную уязвимость: `rustls v0.23.40` (RUSTSEC-2026-0285, через `ureq`). **Правка:** `cargo update -p rustls` → `rustls 0.23.45` (+ `rustls-webpki 0.103.15`). **Проверка:** `cargo deny check advisories` → ok; `check licenses bans sources` → ok; `cargo check`/`test` (261) зелёные. ✅
 
 ### P9 — 🔜 N-14: `~` в `script_dirs`
 
@@ -132,8 +132,8 @@ Clippy для дефолтных фич в CI; убрать дубль джоб�
 | N-8 импорт стирает историю | Medium | P13 | сохранение истории при импорте | 🔜 |
 | N-9 env-strip обход | Medium | P10 | safe-export без токенов | 🔜 |
 | N-10 TOML-ключи | Medium | P10 | ключ с `"`/`\n` | 🔜 |
-| N-11 CI без advisories | Medium | P8 | `cargo deny check advisories` | 🔜 |
-| N-13 рекурсия калькулятора | Medium | P7 | глубокое выражение → ошибка | 🔜 |
+| N-11 CI без advisories | Medium | P8 | `cargo deny check advisories` | ✅ |
+| N-13 рекурсия калькулятора | Medium | P7 | глубокое выражение → ошибка | ✅ |
 | N-14 `~` в script_dirs | Medium | P9 | `~/…` → `$HOME` | 🔜 |
 | N-15 spawn мимо гейта | Medium | P14 | grep-гвард | 🔜 |
 | Minor-пакет | Low | P15 | по тесту на пункт | 🔜 |

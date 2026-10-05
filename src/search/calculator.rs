@@ -39,9 +39,15 @@ pub(crate) fn calc_action(expr: &str) -> Option<crate::action::Action> {
     )
 }
 
+/// The deepest the parser will descend through nested parentheses / unary
+/// signs. Untrusted input (a pasted query) must not be able to overflow the
+/// stack; recursion is bounded, then rejected with a normal error.
+const MAX_DEPTH: usize = 64;
+
 pub(crate) struct Calculator<'a> {
     input: &'a [u8],
     pos: usize,
+    depth: usize,
 }
 
 impl<'a> Calculator<'a> {
@@ -49,6 +55,7 @@ impl<'a> Calculator<'a> {
         Self {
             input: input.as_bytes(),
             pos: 0,
+            depth: 0,
         }
     }
 
@@ -103,6 +110,16 @@ impl<'a> Calculator<'a> {
     }
 
     fn factor(&mut self) -> Result<f64, String> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return Err("expression nested too deeply".to_string());
+        }
+        let value = self.factor_inner();
+        self.depth -= 1;
+        value
+    }
+
+    fn factor_inner(&mut self) -> Result<f64, String> {
         self.skip_ws();
         match self.peek() {
             Some(b'-') => {

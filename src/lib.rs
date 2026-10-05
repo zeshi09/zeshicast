@@ -48,6 +48,18 @@ mod tests {
         );
     }
 
+    /// N-13: a pasted query of thousands of nested parentheses used to recurse
+    /// until the stack overflowed and the process aborted (SIGABRT). Depth is
+    /// now bounded and reported as an error instead.
+    #[test]
+    fn calculator_rejects_deeply_nested_expressions() {
+        let expression = format!("{}{}", "(".repeat(50_000), ")".repeat(50_000));
+        let error = crate::search::calculator::Calculator::new(&expression)
+            .parse()
+            .expect_err("deep nesting must not overflow the stack");
+        assert!(error.contains("nested too deeply"), "got {error}");
+    }
+
     #[test]
     fn fuzzy_score_matches_subsequence() {
         assert!(crate::search::fuzzy_score("Visual Studio Code", "vsc").is_some());

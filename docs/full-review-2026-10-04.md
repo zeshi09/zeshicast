@@ -252,6 +252,8 @@ fixed: дублирование `secondary_action_risk` (единственна�
 | P3 | N-3 (кэш изображений) | ✅ **исправлено** (после уточнения) | `src/ui/clipboard_capture.rs`: atomic-флаг `IMAGE_CAPTURE_ALLOWED`, проверка до `save_clipboard_image`; тест `disabled_image_capture_writes_nothing` |
 | P4 | N-4 (pipe-deadlock JSON) | ✅ **исправлено** | новый `process::run_capped` (дренаж пайпов + дедлайн + капы) → `run_json_command`; тесты `a_large_json_command_stdout_does_not_deadlock`, `a_json_command_over_the_cap_is_rejected_cleanly` + `process::tests::run_capped_*` |
 | P11 (часть) | N-12 (скрипты без таймаута) | ✅ **исправлено** | `run_script_stdout_with_args` через `run_capped` (30 с, 1 МиБ); тест `script_stdout_larger_than_the_pipe_buffer_is_captured` |
+| P7 | N-13 (рекурсия калькулятора) | ✅ **исправлено** | `src/search/calculator.rs`: `MAX_DEPTH = 64`; тест `calculator_rejects_deeply_nested_expressions` |
+| P8 | N-11 (CI без advisories) | ✅ **исправлено** | `.github/workflows/rust.yml`: `check advisories …`; нашёл `rustls 0.23.40` (RUSTSEC-2026-0285) → `cargo update -p rustls` → `0.23.45`; `cargo deny check` — всё ok |
 
 **Новая находка, сделанная при резолвинге (нужна отдельная правка):**
 
@@ -270,4 +272,4 @@ fixed: дублирование `secondary_action_risk` (единственна�
 
 GUI/desktop теперь **реально собраны и протестированы** в `nix develop` (dev-shell с GTK4/glib доступен) — ограничение из §8 снято для будущих прогонов; PoC N-4 подтверждён настоящим `run_json_command`, не только паттерном.
 
-Остаются не сделанными пункты P5–P10, P12–P17 (см. план).
+Остаются не сделанными пункты P5, P6, P9, P10, P12–P17 (см. план).
