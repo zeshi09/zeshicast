@@ -179,27 +179,93 @@ fn is_command_toml(relative: &Path) -> bool {
         )
 }
 
-/// Remove the `[env]` table (and any `[env.*]` sub-table) from a command TOML.
+/// Remove the `[env]` table (and any `[env.*]` sub-table) from a command TOML,
+/// as well as the inline forms `env = { ... }` and `env.TOKEN = ...`.
+///
+/// The old check only matched the exact spellings `[env]`, `[env.` and
+/// `[ env]`, so `[ env ]`, `[env ]`, array-of-tables `[[env]]` and inline tables
+/// all slipped through with their tokens intact (M-12 / N-9).
 fn strip_env_table(content: &str) -> String {
     let mut stripped = String::with_capacity(content.len());
-    let mut in_env = false;
+    let mut in_env_table = false;
+    // Brace depth while inside an `env = { ... }` inline table spanning lines.
+    let mut inline_env_depth: Option<i32> = None;
+
     for line in content.lines() {
+        if let Some(depth) = inline_env_depth {
+            let next = depth + brace_delta(line);
+            inline_env_depth = (next > 0).then_some(next);
+            continue;
+        }
+
         let trimmed = line.trim_start();
         if trimmed.starts_with('[') {
-            in_env = trimmed.starts_with("[env]")
-                || trimmed.starts_with("[env.")
-                || trimmed.starts_with("[ env]");
-            if in_env {
+            in_env_table = is_env_table_header(trimmed);
+            if in_env_table {
                 continue;
             }
         }
-        if in_env {
+        if in_env_table {
             continue;
         }
+        if is_inline_env_key(trimmed) {
+            let depth = brace_delta(line);
+            if depth > 0 {
+                inline_env_depth = Some(depth);
+            }
+            continue;
+        }
+
         stripped.push_str(line);
         stripped.push('\n');
     }
     stripped
+}
+
+/// Whether a table header line names `env` or a sub-table of it, tolerating
+/// whitespace (`[ env ]`), array-of-tables (`[[env]]`) and dotted names.
+fn is_env_table_header(trimmed: &str) -> bool {
+    let Some(inner) = trimmed.strip_prefix('[') else {
+        return false;
+    };
+    let inner = inner.strip_prefix('[').unwrap_or(inner).trim_start();
+    let name_end = inner
+        .find(|character: char| character == ']' || character == '.' || character.is_whitespace())
+        .unwrap_or(inner.len());
+    &inner[..name_end] == "env"
+}
+
+/// Whether a line assigns the `env` key directly (`env = { ... }`) or a dotted
+/// member of it (`env.TOKEN = ...`).
+fn is_inline_env_key(trimmed: &str) -> bool {
+    let Some(rest) = trimmed.strip_prefix("env") else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    rest.starts_with('=') || rest.starts_with('.')
+}
+
+/// Net `{` minus `}` on a line, ignoring braces inside quoted strings.
+fn brace_delta(line: &str) -> i32 {
+    let mut depth = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for character in line.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match character {
+            '\\' if in_double => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '{' if !in_single && !in_double => depth += 1,
+            '}' if !in_single && !in_double => depth -= 1,
+            _ => {}
+        }
+    }
+    depth
 }
 
 fn sanitize_export_preferences(path: &Path) -> io::Result<()> {
@@ -490,9 +556,25 @@ pub(crate) fn write_preferences(
     for key in keys {
         let value = &preferences[key];
         let escaped = escape_toml_string(value);
-        content.push_str(&format!("{key} = \"{escaped}\"\n"));
+        content.push_str(&format!("{} = \"{escaped}\"\n", toml_key(key)));
     }
     write_file_atomic(path, content.as_bytes(), 0o600)
+}
+
+/// A key as it should be written: bare when it can be, quoted and escaped
+/// otherwise. A key containing a newline or `"` used to be written raw, so it
+/// either produced an invalid file or spilled into a second assignment
+/// (N-10).
+fn toml_key(key: &str) -> String {
+    let is_bare = !key.is_empty()
+        && key.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '-'
+        });
+    if is_bare {
+        key.to_string()
+    } else {
+        format!("\"{}\"", escape_toml_string(key))
+    }
 }
 
 /// Escape a value for a TOML basic string (M-10).
@@ -744,6 +826,54 @@ mod tests {
         assert!(!preferences.contains_key("custom_token"));
         assert!(!preferences.contains_key("db_password"));
         assert!(!preferences.contains_key("export_include_secrets"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn strip_env_table_covers_all_spellings() {
+        let content = "[env]\nA = \"x\"\n\n[ env ]\nB = \"y\"\n\n[env.sub]\nC = \"z\"\n\n[[env]]\nD = \"w\"\n\nenv = { E = \"v\" }\n\nenv.F = \"u\"\n\n[other]\nkeep = \"yes\"\n";
+        let stripped = strip_env_table(content);
+
+        for token in ["A", "B", "C", "D", "E", "F"] {
+            assert!(
+                !stripped.contains(&format!("{token} = ")),
+                "{token} survived the strip: {stripped}"
+            );
+        }
+        assert!(stripped.contains("[other]"), "{stripped}");
+        assert!(stripped.contains("keep = \"yes\""), "{stripped}");
+    }
+
+    #[test]
+    fn strip_env_table_drops_a_multiline_inline_table() {
+        let content = "env = {\n  TOKEN = \"secret\"\n}\n\n[safe]\nkeep = 1\n";
+        let stripped = strip_env_table(content);
+        assert!(!stripped.contains("TOKEN"), "{stripped}");
+        assert!(stripped.contains("[safe]"), "{stripped}");
+    }
+
+    #[test]
+    fn preference_keys_are_escaped_not_injected() {
+        let dir = test_dir("preferences-keys");
+        let path = dir.join("preferences.toml");
+        let injected = "evil\nai_model".to_string();
+        let quoted = "we\"ird".to_string();
+        write_preferences(
+            &path,
+            &HashMap::from([
+                (injected.clone(), "x".to_string()),
+                (quoted.clone(), "y".to_string()),
+                ("plain_key".to_string(), "z".to_string()),
+            ]),
+        )
+        .unwrap();
+
+        let loaded = load_preferences(&path).expect("escaped keys must parse");
+        assert_eq!(loaded.len(), 3, "a key must not inject another assignment");
+        assert_eq!(loaded.get(&injected).map(String::as_str), Some("x"));
+        assert_eq!(loaded.get(&quoted).map(String::as_str), Some("y"));
+        assert_eq!(loaded.get("plain_key").map(String::as_str), Some("z"));
+        assert!(!loaded.contains_key("ai_model"));
         let _ = fs::remove_dir_all(dir);
     }
 

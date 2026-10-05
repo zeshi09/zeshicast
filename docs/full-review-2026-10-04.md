@@ -256,6 +256,7 @@ fixed: дублирование `secondary_action_risk` (единственна�
 | P8 | N-11 (CI без advisories) | ✅ **исправлено** | `.github/workflows/rust.yml`: `check advisories …`; нашёл `rustls 0.23.40` (RUSTSEC-2026-0285) → `cargo update -p rustls` → `0.23.45`; `cargo deny check` — всё ok |
 | P6 | N-6 (уведомления из воркеров) | ✅ **исправлено** | `notifications.rs`: process-global `Mutex` вместо `thread_local`; тест `a_worker_thread_push_is_visible_from_another_thread` |
 | P9 | N-14 (`~` в `script_dirs`) | ✅ **исправлено** | `app/preferences.rs`: `expand_home_dir`; тест `script_dirs_expand_a_leading_tilde` |
+| P10 | N-9/N-10 (env-strip + TOML-ключи) | ✅ **исправлено** | `config.rs`: `strip_env_table` ловит все формы `env`; `toml_key` экранирует ключи; тесты `strip_env_table_covers_all_spellings`, `preference_keys_are_escaped_not_injected` |
 
 **Новая находка, сделанная при резолвинге (нужна отдельная правка):**
 
@@ -274,4 +275,4 @@ fixed: дублирование `secondary_action_risk` (единственна�
 
 GUI/desktop теперь **реально собраны и протестированы** в `nix develop` (dev-shell с GTK4/glib доступен) — ограничение из §8 снято для будущих прогонов; PoC N-4 подтверждён настоящим `run_json_command`, не только паттерном.
 
-Остаются не сделанными пункты P5, P10, P12–P17 (см. план).
+Остаются не сделанными пункты P5, P12–P17 (см. план).

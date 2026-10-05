@@ -80,9 +80,9 @@ nix develop --command cargo test --features gui,layer-shell
 
 `src/app/preferences.rs` — `expand_home_dir`: `~` → `$HOME`, `~/…` → `$HOME/…`, иначе без изменений. **Тест:** `script_dirs_expand_a_leading_tilde` — `~/scripts` → `$HOME/scripts`, `~` → `$HOME`, абсолютный путь не трогается. ✅
 
-### P10 — 🔜 N-9/N-10: TOML-экспорт/ключи
+### P10 — ✅ done. TOML-экспорт/ключи (N-9/N-10, Medium)
 
-`src/config.rs:189-191` — `strip_env_table` не видит `[ env ]`/`[env ]` и inline `env = {…}`; `src/config.rs:493` — ключи пишутся без экранирования. **Правка:** нормализовать заголовок `[...]`, удалять inline `env`, экранировать/валидировать ключи. **Тесты:** safe-export без токенов во всех формах; ключ с `"`/`\n` не ломает файл и не флипает `export_include_secrets`.
+`src/config.rs` — `strip_env_table` переписан: детектор заголовков `is_env_table_header` ловит `[env]`, `[ env ]`, `[env ]`, `[env.sub]`, `[[env]]` независимо от пробелов; вырезаются inline `env = { … }` (в т.ч. многострочные) и dotted `env.TOKEN = …`. `write_preferences` пишет ключ через `toml_key` — bare, если можно, иначе quoted+escaped. **Тесты:** `strip_env_table_covers_all_spellings`, `strip_env_table_drops_a_multiline_inline_table`, `preference_keys_are_escaped_not_injected`. ✅
 
 ### P13 — 🔜 N-8: импорт стирает историю
 
@@ -130,8 +130,8 @@ Clippy для дефолтных фич в CI; убрать дубль джоб�
 | N-6 уведомления воркеров | Medium | P6 | уведомление из worker-потока | ✅ |
 | N-7 `mpris:artUrl` | Medium | P12 | `file:///etc/passwd`, большой http | 🔜 |
 | N-8 импорт стирает историю | Medium | P13 | сохранение истории при импорте | 🔜 |
-| N-9 env-strip обход | Medium | P10 | safe-export без токенов | 🔜 |
-| N-10 TOML-ключи | Medium | P10 | ключ с `"`/`\n` | 🔜 |
+| N-9 env-strip обход | Medium | P10 | safe-export без токенов | ✅ |
+| N-10 TOML-ключи | Medium | P10 | ключ с `"`/`\n` | ✅ |
 | N-11 CI без advisories | Medium | P8 | `cargo deny check advisories` | ✅ |
 | N-13 рекурсия калькулятора | Medium | P7 | глубокое выражение → ошибка | ✅ |
 | N-14 `~` в script_dirs | Medium | P9 | `~/…` → `$HOME` | ✅ |
