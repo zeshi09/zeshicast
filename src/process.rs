@@ -136,6 +136,103 @@ pub(crate) fn spawn_retrying_text_file_busy(command: &mut Command) -> io::Result
     }
 }
 
+/// Result of [`run_capped`].
+#[cfg(any(feature = "gui", test))]
+pub(crate) struct CappedRun {
+    pub(crate) status: std::process::ExitStatus,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
+    /// The deadline fired and the child was killed.
+    pub(crate) timed_out: bool,
+    /// Output was longer than its cap and the excess was discarded.
+    pub(crate) stdout_truncated: bool,
+    pub(crate) stderr_truncated: bool,
+}
+
+/// Run `command` with a deadline, draining stdout and stderr on their own
+/// threads while keeping at most `stdout_cap`/`stderr_cap` bytes each.
+///
+/// Draining is the point: a child that writes more than the pipe buffer (~64
+/// KiB) blocks in `write` forever when nobody reads, so a `wait()`-first helper
+/// turns a large-but-legitimate output into a spurious timeout (M-5, N-4).
+/// Reading on a thread while the parent waits keeps both the deadline and the
+/// output.
+#[cfg(any(feature = "gui", test))]
+pub(crate) fn run_capped(
+    command: &mut Command,
+    timeout: Duration,
+    stdout_cap: usize,
+    stderr_cap: usize,
+) -> io::Result<CappedRun> {
+    use std::process::Stdio;
+
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+
+    let stdout_reader = child
+        .stdout
+        .take()
+        .map(|pipe| std::thread::spawn(move || drain_capped(pipe, stdout_cap)));
+    let stderr_reader = child
+        .stderr
+        .take()
+        .map(|pipe| std::thread::spawn(move || drain_capped(pipe, stderr_cap)));
+
+    let deadline = Instant::now() + timeout;
+    let mut timed_out = false;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            timed_out = true;
+            let _ = child.kill();
+            break child.wait()?;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    let (stdout, stdout_truncated) = stdout_reader
+        .map(|handle| handle.join().unwrap_or_default())
+        .unwrap_or_default();
+    let (stderr, stderr_truncated) = stderr_reader
+        .map(|handle| handle.join().unwrap_or_default())
+        .unwrap_or_default();
+
+    Ok(CappedRun {
+        status,
+        stdout,
+        stderr,
+        timed_out,
+        stdout_truncated,
+        stderr_truncated,
+    })
+}
+
+/// Read `reader` to EOF, keeping at most `cap` bytes (the rest is discarded
+/// rather than left unread, which would block the writer).
+#[cfg(any(feature = "gui", test))]
+fn drain_capped<R: io::Read>(mut reader: R, cap: usize) -> (Vec<u8>, bool) {
+    let mut kept = Vec::new();
+    let mut buffer = [0u8; 8192];
+    let mut truncated = false;
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                let take = cap.saturating_sub(kept.len()).min(read);
+                kept.extend_from_slice(&buffer[..take]);
+                if take < read {
+                    truncated = true;
+                }
+            }
+            Err(ref error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+    (kept, truncated)
+}
+
 /// Reap every remembered child that has already exited.
 ///
 /// Returns how many were reaped. Cheap when nothing is running and called from
@@ -349,5 +446,50 @@ mod tests {
             "the exec must have been retried at least once"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// N-4/M-5: a child that writes more than the pipe buffer (~64 KiB) must
+    /// not deadlock. Draining on a reader thread keeps the output and the
+    /// deadline both honest.
+    #[test]
+    fn run_capped_reads_more_than_the_pipe_buffer() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("seq 1 30000"); // ~170 KiB
+        let run = run_capped(&mut command, Duration::from_secs(5), 512 * 1024, 8 * 1024)
+            .expect("run seq");
+
+        assert!(!run.timed_out, "large output must not hit the deadline");
+        assert!(run.status.success());
+        assert!(!run.stdout_truncated);
+        assert!(run.stderr.is_empty());
+        assert!(!run.stderr_truncated);
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        assert!(
+            stdout.ends_with("30000\n"),
+            "got {} bytes",
+            run.stdout.len()
+        );
+    }
+
+    #[test]
+    fn run_capped_kills_a_child_that_outlives_the_deadline() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("sleep 5");
+        let started = Instant::now();
+        let run =
+            run_capped(&mut command, Duration::from_millis(200), 1024, 1024).expect("run sleep");
+
+        assert!(run.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn run_capped_discards_output_past_the_cap() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("seq 1 30000");
+        let run = run_capped(&mut command, Duration::from_secs(5), 1024, 1024).expect("run seq");
+
+        assert_eq!(run.stdout.len(), 1024);
+        assert!(run.stdout_truncated);
     }
 }

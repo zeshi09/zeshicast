@@ -5,6 +5,20 @@ use gtk::glib;
 use gtk::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Whether image capture is currently allowed. The `wl-paste` watcher runs on
+/// its own thread and cannot borrow the launcher, so the main thread mirrors
+/// [`Zeshicast::clipboard_capture_images`] here before the watcher writes a PNG.
+static IMAGE_CAPTURE_ALLOWED: AtomicBool = AtomicBool::new(false);
+
+fn image_capture_allowed() -> bool {
+    IMAGE_CAPTURE_ALLOWED.load(Ordering::Relaxed)
+}
+
+fn set_image_capture_allowed(allowed: bool) {
+    IMAGE_CAPTURE_ALLOWED.store(allowed, Ordering::Relaxed);
+}
 
 pub(crate) fn install_clipboard_monitor(launcher: &Rc<RefCell<Zeshicast>>) {
     if !launcher.borrow().clipboard_history_enabled() {
@@ -39,12 +53,17 @@ pub(crate) fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshica
     std::thread::spawn(move || watch_clipboard_text(tx_text));
 
     let (tx_img, rx_img) = std::sync::mpsc::channel::<String>();
+    set_image_capture_allowed(launcher.borrow().clipboard_capture_images());
     if launcher.borrow().clipboard_capture_images() {
         std::thread::spawn(move || watch_clipboard_image(tx_img));
     }
 
     let launcher = Rc::clone(launcher);
     glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
+        // Mirror the current preference into the watcher's view, so toggling
+        // private mode off/on stops or resumes cached images without a restart.
+        let capture_images = launcher.borrow().clipboard_capture_images();
+        set_image_capture_allowed(capture_images);
         while let Ok(text) = rx_text.try_recv() {
             if !text.is_empty()
                 && let Err(error) = launcher.borrow_mut().add_clipboard_text(&text)
@@ -98,6 +117,11 @@ pub(crate) fn watch_clipboard_image_with(
 
         let mut reader = std::io::BufReader::new(stdout);
         while let Ok(Some(png_bytes)) = read_png_from_stream(&mut reader) {
+            // Private mode (or images/history off) must not leave a cached PNG
+            // behind: the main thread's guard only stops the history insert.
+            if !image_capture_allowed() {
+                continue;
+            }
             if let Ok(path) = crate::services::clipboard_store::save_clipboard_image(&png_bytes)
                 && tx.send(path).is_err()
             {
@@ -352,4 +376,61 @@ fn capture_clipboard_text(
             eprintln!("failed to save clipboard history: {error}");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    /// P3: while capture is disallowed (private mode, images off), the watcher
+    /// must not write a cached PNG or forward a path. It still has to drain the
+    /// stream so the child does not block on a full pipe.
+    #[test]
+    fn disabled_image_capture_writes_nothing() {
+        set_image_capture_allowed(false);
+
+        // A minimal PNG byte stream: signature, an IHDR chunk, an IEND chunk.
+        let png: Vec<u8> = [
+            b"\x89PNG\r\n\x1a\n".as_slice(),
+            &0u32.to_be_bytes(),
+            b"IHDR",
+            &[0u8; 4],
+            &0u32.to_be_bytes(),
+            b"IEND",
+            &[0u8; 4],
+        ]
+        .concat();
+        let dir =
+            std::env::temp_dir().join(format!("zeshicast-capture-gate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let source = dir.join("frame.png");
+        std::fs::write(&source, &png).expect("write png");
+
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let spawned = std::cell::Cell::new(false);
+        let mut spawn = || {
+            if spawned.get() {
+                // Second spawn ends the watcher loop.
+                return Err(std::io::Error::other("stop"));
+            }
+            spawned.set(true);
+            Command::new("cat")
+                .arg(&source)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+        };
+        watch_clipboard_image_with(tx, &mut spawn);
+
+        let forwarded: Vec<String> = rx.try_iter().filter(|m| !m.is_empty()).collect();
+        assert!(
+            forwarded.is_empty(),
+            "a disabled capture must not forward a cached path: {forwarded:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        set_image_capture_allowed(true);
+    }
 }

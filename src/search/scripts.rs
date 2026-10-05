@@ -286,32 +286,57 @@ fn raycast_meta<'a>(comment: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
+/// How long a script may run for its captured stdout before it is killed.
+#[cfg(feature = "gui")]
+const SCRIPT_CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Most stdout kept from one script run; the excess is drained and discarded so
+/// a runaway script cannot exhaust memory or wedge the reader (N-12).
+#[cfg(feature = "gui")]
+const SCRIPT_CAPTURE_STDOUT_LIMIT_BYTES: usize = 1024 * 1024;
+
 /// Run a script with arguments and return its stdout. `gui`, not `desktop`: the
 /// capture feeds a result view, which only the palette has (P5.1).
+///
+/// Both the direct exec and the interpreter fallback go through
+/// [`crate::process::run_capped`], so a hung script is killed at the deadline
+/// instead of holding its worker forever, and large output is drained rather
+/// than left to fill the pipe.
 #[cfg(feature = "gui")]
 pub(crate) fn run_script_stdout_with_args(
     path: &std::path::Path,
     args: &[String],
 ) -> std::io::Result<String> {
-    let res = std::process::Command::new(path).args(args).output();
-    let output = match res {
-        Ok(o) => o,
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+    let mut direct = std::process::Command::new(path);
+    direct.args(args);
+    match run_script_capped(&mut direct) {
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            let mut cmd = match ext {
+            let mut interpreter = match ext {
                 "py" => std::process::Command::new("python3"),
                 "js" | "ts" => std::process::Command::new("node"),
                 "rb" => std::process::Command::new("ruby"),
                 _ => std::process::Command::new("sh"),
             };
-            cmd.arg(path)
-                .args(args)
-                .output()
-                .map_err(|err| std::io::Error::other(err.to_string()))?
+            interpreter.arg(path).args(args);
+            run_script_capped(&mut interpreter)
         }
-        Err(e) => return Err(std::io::Error::other(e.to_string())),
-    };
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        result => result,
+    }
+}
+
+#[cfg(feature = "gui")]
+fn run_script_capped(command: &mut std::process::Command) -> std::io::Result<String> {
+    let run = crate::process::run_capped(
+        command,
+        SCRIPT_CAPTURE_TIMEOUT,
+        SCRIPT_CAPTURE_STDOUT_LIMIT_BYTES,
+        8 * 1024,
+    )?;
+    if run.timed_out {
+        return Err(std::io::Error::other("script timed out"));
+    }
+    Ok(String::from_utf8_lossy(&run.stdout).into_owned())
 }
 
 pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action> {
@@ -818,5 +843,26 @@ curl "wttr.in/$1?format=$2"
         assert!(!entry.arguments[0].optional);
         assert_eq!(entry.arguments[1].placeholder, "Format");
         assert!(entry.arguments[1].optional);
+    }
+
+    /// N-12: script stdout larger than the pipe buffer must be drained, not
+    /// left to block the script against a pipe nobody reads.
+    #[cfg(feature = "gui")]
+    #[test]
+    fn script_stdout_larger_than_the_pipe_buffer_is_captured() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir =
+            std::env::temp_dir().join(format!("zeshicast-script-stdout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("big.sh");
+        std::fs::write(&script, "#!/bin/sh\nseq 1 30000\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let stdout = super::run_script_stdout_with_args(&script, &[]).expect("run script");
+        assert!(stdout.ends_with("30000\n"), "got {} bytes", stdout.len());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

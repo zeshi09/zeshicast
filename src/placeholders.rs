@@ -76,17 +76,21 @@ fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) 
         // template author may wrap a placeholder in their own quotes; the three
         // quoting contexts (unquoted, inside `'…'`, inside `"…"`) are safe
         // because the value is escaped for the context it is inserted into.
-        let shell_context = if shell_escape {
-            shell_context(&output)
+        // One scan per placeholder reports both the quoting context and the
+        // here-document body the text ends inside of. Closed bodies are skipped
+        // whole, so a quote inside one cannot misclassify a later placeholder.
+        let (shell_context, heredoc) = if shell_escape {
+            let scan = scan_shell(&output);
+            (scan.context, scan.open_heredoc)
         } else {
-            ShellContext::Unquoted
+            (ShellContext::Unquoted, None)
         };
 
         // A here-document body is not a quoting context: quotes are literal
         // there while `$`, backticks and backslashes keep working unless the
         // delimiter was quoted. Checked before the comment rule, because a `#`
         // inside a body is just text (P1.3b).
-        if shell_escape && let Some(heredoc) = open_heredoc(&output) {
+        if shell_escape && let Some(heredoc) = heredoc {
             match render_placeholder(placeholder.trim(), context) {
                 Some(value) if heredoc_can_hold(&heredoc, &value) => {
                     output.push_str(&heredoc_escape(&value, heredoc.quoted));
@@ -100,29 +104,13 @@ fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) 
             continue;
         }
 
-        // Collapsing an author-written `'{{x}}'` wrapper is only correct in the
-        // unquoted context: inside an open single-quoted run the closing quote
-        // belongs to that run, and "collapsing" it would let the author's
-        // trailing quote swallow the rest of the template.
-        let mut trailing_quote_to_skip = 0;
-        let mut is_wrapped_in_single_quotes = false;
-        if shell_context == ShellContext::Unquoted
-            && output.ends_with('\'')
-            && after_end.len() >= 3
-            && after_end[2..].starts_with('\'')
-        {
-            output.pop();
-            trailing_quote_to_skip = 1;
-            is_wrapped_in_single_quotes = true;
-        }
-
         // A placeholder inside a shell comment is never code: no escaping can
         // make a substituted value safe there (a newline in the value ends the
         // comment and whatever follows becomes a command), so it is emitted
         // literally instead.
         if shell_context == ShellContext::Comment {
             output.push_str(&format!("{{{{{}}}}}", placeholder.trim()));
-            rest = &after_end[2 + trailing_quote_to_skip..];
+            rest = &after_end[2..];
             continue;
         }
 
@@ -138,21 +126,11 @@ fn expand(template: &str, context: &PlaceholderContext<'_>, shell_escape: bool) 
                 }
                 output.push_str(&escape_for_context(&value, shell_context));
             }
-            Some(value) => {
-                if is_wrapped_in_single_quotes {
-                    output.push('\'');
-                }
-                output.push_str(&value);
-            }
+            Some(value) => output.push_str(&value),
             // Unknown placeholder: emit it literally, unquoted.
-            None => {
-                if is_wrapped_in_single_quotes {
-                    output.push('\'');
-                }
-                output.push_str(&format!("{{{{{}}}}}", placeholder.trim()));
-            }
+            None => output.push_str(&format!("{{{{{}}}}}", placeholder.trim())),
         }
-        rest = &after_end[2 + trailing_quote_to_skip..];
+        rest = &after_end[2..];
     }
 
     output.push_str(rest);
@@ -214,23 +192,33 @@ struct OpenHeredoc {
     strip_tabs: bool,
 }
 
-/// Whether `text` ends inside a here-document body (P1.3b).
+/// What one pass over shell text ends in.
+struct ShellScan {
+    context: ShellContext,
+    open_heredoc: Option<OpenHeredoc>,
+}
+
+/// One pass over shell text that follows the same lexing rules for quotes,
+/// comments, escapes and here-document bodies (P1.3b).
 ///
 /// A here-document body is not a quoting context: quotes are literal there while
 /// `$`, backticks and backslashes keep working unless the delimiter was quoted.
 /// Escaping for it therefore means something different from the three quoting
-/// contexts, and getting it wrong means a `$(...)` inside a clipboard value
-/// runs as a command.
+/// contexts, so an unclosed body is reported in
+/// [`ShellScan::open_heredoc`] instead of a context.
 ///
-/// Deliberately conservative: when the scan cannot pair bodies with their
-/// operators (more than one here-document on the same line) it reports an
-/// *expanding* body, because escaping there is safe and not escaping is not.
-fn open_heredoc(text: &str) -> Option<OpenHeredoc> {
+/// Closed bodies are skipped whole, so a quote inside one is literal and cannot
+/// misclassify a later placeholder. Deliberately conservative: when the scan
+/// cannot pair bodies with their operators (more than one here-document on the
+/// same line) it reports an *expanding* body, because escaping there is safe
+/// and not escaping is not.
+fn scan_shell(text: &str) -> ShellScan {
     let chars: Vec<char> = text.chars().collect();
     let mut index = 0usize;
     let mut single = false;
     let mut double = false;
     let mut comment = false;
+    let mut open_heredoc = None;
 
     while index < chars.len() {
         let ch = chars[index];
@@ -291,7 +279,8 @@ fn open_heredoc(text: &str) -> Option<OpenHeredoc> {
             let Some(line_break) = chars[after_delimiter..].iter().position(|c| *c == '\n') else {
                 // The body has not started: the cursor is still on the command
                 // line, where normal quoting rules apply.
-                return None;
+                index += 1;
+                continue;
             };
             let body_start = after_delimiter + line_break + 1;
 
@@ -301,11 +290,12 @@ fn open_heredoc(text: &str) -> Option<OpenHeredoc> {
                     continue;
                 }
                 None => {
-                    return Some(OpenHeredoc {
+                    open_heredoc = Some(OpenHeredoc {
                         delimiter,
                         quoted: quoted && !multiple,
                         strip_tabs,
                     });
+                    break;
                 }
             }
         }
@@ -313,7 +303,25 @@ fn open_heredoc(text: &str) -> Option<OpenHeredoc> {
         index += 1;
     }
 
-    None
+    let context = if comment {
+        ShellContext::Comment
+    } else if single {
+        ShellContext::Single
+    } else if double {
+        ShellContext::Double
+    } else {
+        ShellContext::Unquoted
+    };
+    ShellScan {
+        context,
+        open_heredoc,
+    }
+}
+
+/// The here-document body `text` ends inside of, if any (P1.3b).
+#[cfg(test)]
+fn open_heredoc(text: &str) -> Option<OpenHeredoc> {
+    scan_shell(text).open_heredoc
 }
 
 /// Read a here-document delimiter, honouring a quoted form and backslash
@@ -433,47 +441,11 @@ fn heredoc_can_hold(heredoc: &OpenHeredoc, value: &str) -> bool {
     })
 }
 
+/// The quoting context `text` ends in. Test-only: expansion uses [`scan_shell`]
+/// directly so one scan answers both questions.
+#[cfg(test)]
 fn shell_context(text: &str) -> ShellContext {
-    let mut single = false;
-    let mut double = false;
-    let mut comment = false;
-    let mut previous: Option<char> = None;
-    let mut chars = text.chars();
-    while let Some(ch) = chars.next() {
-        if comment {
-            if ch == '\n' {
-                comment = false;
-                previous = Some(ch);
-            }
-            continue;
-        }
-        if single {
-            if ch == '\'' {
-                single = false;
-            }
-        } else if ch == '\\' {
-            // Backslash escapes the next character (unquoted and inside double
-            // quotes), so neither character affects quoting state.
-            previous = Some(chars.next().unwrap_or('\\'));
-            continue;
-        } else if ch == '\'' && !double {
-            single = true;
-        } else if ch == '"' {
-            double = !double;
-        } else if ch == '#' && !double && starts_comment(previous) {
-            comment = true;
-        }
-        previous = Some(ch);
-    }
-    if comment {
-        ShellContext::Comment
-    } else if single {
-        ShellContext::Single
-    } else if double {
-        ShellContext::Double
-    } else {
-        ShellContext::Unquoted
-    }
+    scan_shell(text).context
 }
 
 /// Escape `value` for the context it is about to be inserted into.
@@ -906,5 +878,76 @@ mod tests {
 
         let stripped = open_heredoc("cat <<-EOF\n").expect("open body");
         assert!(stripped.strip_tabs);
+    }
+
+    /// P1: an apostrophe inside a *closed* here-document body is literal and
+    /// must not flip the scanner into single-quote state for a later
+    /// placeholder. Before the fix, the value after the body was inserted
+    /// unquoted, so `$(…)` from the clipboard ran under `sh -c`.
+    #[test]
+    fn apostrophe_in_a_closed_heredoc_body_does_not_unquote_a_later_value() {
+        let ctx = PlaceholderContext::new("", Some(&"$(touch /tmp/z)".to_string()));
+        let expanded = expand_placeholders_shell("cat <<EOF\nit's\nEOF\necho {{clipboard}}", &ctx);
+        assert_eq!(expanded, "cat <<EOF\nit's\nEOF\necho '$(touch /tmp/z)'");
+    }
+
+    /// P1, end to end: the expanded template must not create the marker file.
+    #[test]
+    fn heredoc_body_quote_does_not_let_a_value_execute() {
+        let marker = std::env::temp_dir().join(format!("zeshicast-hd-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let ctx = PlaceholderContext::new("", Some(&format!("$(touch {})", marker.display())));
+        let expanded = expand_placeholders_shell("cat <<EOF\nit's\nEOF\necho {{clipboard}}", &ctx);
+
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&expanded)
+            .output();
+        assert!(!marker.exists(), "value executed: {expanded}");
+    }
+
+    /// P2: author-written quotes next to a placeholder are literal parts of the
+    /// template. The old collapse heuristic could pop a *closing* quote and
+    /// leave the value unquoted. Both templates must keep the value literal.
+    #[test]
+    fn author_quotes_beside_a_placeholder_keep_the_value_quoted() {
+        let ctx = PlaceholderContext::new("", Some(&"$(x)".to_string()));
+        assert_eq!(
+            expand_placeholders_shell("echo 'x'{{clipboard}}'y'", &ctx),
+            "echo 'x''$(x)''y'"
+        );
+        assert_eq!(
+            expand_placeholders_shell("printf ''{{clipboard}}''", &ctx),
+            "printf '''$(x)'''"
+        );
+    }
+
+    /// P2, end to end: neither template may let the value execute.
+    #[test]
+    fn quotes_beside_a_placeholder_do_not_let_a_value_execute() {
+        let marker = std::env::temp_dir().join(format!("zeshicast-q-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let value = format!("$(touch {})", marker.display());
+        let ctx = PlaceholderContext::new("", Some(&value));
+
+        for template in ["echo 'x'{{clipboard}}'y'", "printf ''{{clipboard}}''"] {
+            let expanded = expand_placeholders_shell(template, &ctx);
+            let _ = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&expanded)
+                .output();
+            assert!(
+                !marker.exists(),
+                "value executed from {template}: {expanded}"
+            );
+        }
+    }
+
+    /// P2: in non-shell expansion the author's quotes are literal characters
+    /// and must survive round-trip (the old heuristic dropped the closing one).
+    #[test]
+    fn non_shell_expansion_keeps_literal_quotes() {
+        let ctx = PlaceholderContext::new("v", None);
+        assert_eq!(expand_placeholders("x'{{query}}'y", &ctx), "x'v'y");
     }
 }

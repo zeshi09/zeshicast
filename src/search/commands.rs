@@ -580,56 +580,39 @@ const JSON_STDERR_LIMIT_BYTES: u64 = 8 * 1024;
 
 #[cfg(feature = "gui")]
 fn run_json_command(command: &ShellCommand) -> io::Result<String> {
-    use std::io::Read;
-    use std::process::Stdio;
-    use std::time::Instant;
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c").arg(&command.command).envs(&command.env);
 
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(&command.command)
-        .envs(&command.env)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    // Drain the pipes while waiting (N-4): a command that writes more than the
+    // ~64 KiB pipe buffer used to block in `write` until the 1 s deadline killed
+    // it, so the advertised 512 KiB stdout budget was unreachable.
+    let run = crate::process::run_capped(
+        &mut cmd,
+        JSON_COMMAND_TIMEOUT,
+        JSON_STDOUT_LIMIT_BYTES as usize,
+        JSON_STDERR_LIMIT_BYTES as usize,
+    )?;
 
-    let start = Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if start.elapsed() >= JSON_COMMAND_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(io::Error::other("json command timed out"));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(15));
-    };
-
-    let mut stdout = String::new();
-    if let Some(mut out) = child.stdout.take() {
-        out.by_ref()
-            .take(JSON_STDOUT_LIMIT_BYTES + 1)
-            .read_to_string(&mut stdout)
-            .ok();
+    if run.timed_out {
+        return Err(io::Error::other("json command timed out"));
     }
-    if stdout.len() as u64 > JSON_STDOUT_LIMIT_BYTES {
+    if run.stdout_truncated {
         return Err(io::Error::other("json command stdout exceeded 512 KiB"));
     }
 
-    if !status.success() {
-        let mut stderr = String::new();
-        if let Some(mut err) = child.stderr.take() {
-            err.by_ref()
-                .take(JSON_STDERR_LIMIT_BYTES)
-                .read_to_string(&mut stderr)
-                .ok();
+    if !run.status.success() {
+        let mut stderr: String = String::from_utf8_lossy(&run.stderr)
+            .trim()
+            .chars()
+            .take(160)
+            .collect();
+        if run.stderr_truncated {
+            stderr.push('…');
         }
-        return Err(io::Error::other(
-            stderr.trim().chars().take(160).collect::<String>(),
-        ));
+        return Err(io::Error::other(stderr));
     }
 
-    Ok(stdout)
+    Ok(String::from_utf8_lossy(&run.stdout).into_owned())
 }
 
 #[cfg(any(feature = "gui", test))]
@@ -1277,5 +1260,26 @@ permissions = ["shell"]
         );
         assert_eq!(allowed.risk, ActionRisk::Shell);
         assert!(allowed.risk.requires_confirmation());
+    }
+
+    /// N-4: a JSON command whose stdout is larger than the ~64 KiB pipe buffer
+    /// must be drained while the process waits, not read after it exits.
+    #[cfg(feature = "gui")]
+    #[test]
+    fn a_large_json_command_stdout_does_not_deadlock() {
+        // 200 KiB of output: comfortably above the pipe buffer, below the 512 KiB cap.
+        let command = crate::action::ShellCommand::new("head -c 200000 /dev/zero | tr '\\0' 'a'");
+        let stdout = super::run_json_command(&command).expect("200 KiB must not time out");
+        assert_eq!(stdout.len(), 200_000);
+    }
+
+    /// N-4: output past the cap is reported as an error, and the excess still
+    /// has to be drained or the child would block instead of exiting.
+    #[cfg(feature = "gui")]
+    #[test]
+    fn a_json_command_over_the_cap_is_rejected_cleanly() {
+        let command = crate::action::ShellCommand::new("head -c 600000 /dev/zero | tr '\\0' 'a'");
+        let error = super::run_json_command(&command).expect_err("over the cap");
+        assert!(error.to_string().contains("512 KiB"), "got {error}");
     }
 }
