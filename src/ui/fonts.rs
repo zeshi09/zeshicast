@@ -234,7 +234,7 @@ fn font_row(font_name: &str, preview: &str) -> gtk::ListBoxRow {
     layout.append(&name_lbl);
 
     // Preview text in that font using Pango markup
-    let escaped = font_name.replace('"', "");
+    let escaped = glib::markup_escape_text(font_name);
     let safe_preview: String = preview.chars().take(60).collect();
     let markup = format!(
         "<span font_desc=\"{escaped} 16\">{}</span>",

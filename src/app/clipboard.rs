@@ -30,7 +30,11 @@ impl Zeshicast {
         self.clipboard_history.retain(|e| e != &text);
         self.clipboard_history.insert(0, text);
         self.clipboard_history.truncate(retention);
-        prune_clipboard_image_cache(&self.clipboard_history)?;
+        // Pruning is housekeeping after a successful store: a failure there
+        // must not turn a stored entry into an error (remaining M-13).
+        if let Err(error) = prune_clipboard_image_cache(&self.clipboard_history) {
+            log::warn!("clipboard entry stored, but pruning the image cache failed: {error}");
+        }
         Ok(true)
     }
 

@@ -41,6 +41,20 @@ impl ChatMessage {
     }
 }
 
+/// Cap for a JSON body read from a user-configured endpoint (N-7).
+const MAX_AI_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Read and parse a JSON body under `cap` bytes. A user-configured endpoint
+/// must not be able to make us buffer an unbounded response.
+pub(crate) fn read_json_body(response: ureq::Response, cap: u64) -> Option<serde_json::Value> {
+    let mut reader = response.into_reader();
+    let body = crate::services::media::read_capped(&mut reader, cap).ok()?;
+    if body.len() as u64 > cap {
+        return None;
+    }
+    serde_json::from_slice(&body).ok()
+}
+
 /// List the models installed on an Ollama server (`GET {endpoint}/api/tags`).
 /// Blocking — call off the UI thread. Returns an empty list if unreachable.
 pub fn list_models(endpoint: &str) -> Vec<String> {
@@ -52,7 +66,7 @@ pub fn list_models(endpoint: &str) -> Vec<String> {
     let Ok(response) = agent.get(&url).call() else {
         return Vec::new();
     };
-    let Ok(value) = response.into_json::<serde_json::Value>() else {
+    let Some(value) = read_json_body(response, MAX_AI_RESPONSE_BYTES) else {
         return Vec::new();
     };
     value["models"]
@@ -88,9 +102,13 @@ pub fn ask_local_ai(config: &LocalAiConfig, prompt: &str) -> io::Result<String> 
         }))
         .map_err(|error| io::Error::other(error.to_string()))?;
 
-    let value: serde_json::Value = response
-        .into_json()
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+    let value: serde_json::Value =
+        read_json_body(response, MAX_AI_RESPONSE_BYTES).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "AI response missing or too large",
+            )
+        })?;
 
     value
         .get("response")

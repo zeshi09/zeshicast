@@ -14,6 +14,10 @@ const VISIBLE_MS: u64 = 850;
 /// Fade in/out duration (also the GtkRevealer crossfade time).
 const FADE_MS: u32 = 200;
 
+/// Refuse to load an icon file larger than this. The path is confined to the
+/// icon directories, but a large file there would still freeze decode (N-7).
+const MAX_ICON_BYTES: u64 = 512 * 1024;
+
 struct Osd {
     window: Window,
     label: Label,
@@ -415,6 +419,9 @@ fn load_icon_async(
     path: std::path::PathBuf,
     is_current: impl Fn() -> bool + 'static,
 ) {
+    if std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0) > MAX_ICON_BYTES {
+        return;
+    }
     let icon_box = icon_box.clone();
     gio::File::for_path(path).load_bytes_async(gio::Cancellable::NONE, move |result| {
         if !is_current() {

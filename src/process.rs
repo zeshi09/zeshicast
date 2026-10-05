@@ -73,6 +73,29 @@ impl ChildGuard {
         let _ = self.0.wait();
     }
 
+    /// Wait up to `timeout`, then kill the child and return `None`.
+    ///
+    /// Unlike [`reap`](Self::reap), this is for a child whose *result* we want:
+    /// a tool that hangs must not block the caller forever, but one that
+    /// finishes normally still reports its status.
+    pub(crate) fn wait_timeout(&mut self, timeout: Duration) -> Option<std::process::ExitStatus> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.0.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(None) => {
+                    let _ = self.0.kill();
+                    let _ = self.0.wait();
+                    return None;
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
     /// Kill the child's whole process group and reap the child.
     ///
     /// The child must have been spawned with `process_group(0)` so its group id

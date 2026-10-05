@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use crate::action::{Action, ActionKind, HttpRequest};
 
+/// Cap for a JSON body returned by a user-configured endpoint (N-7).
+const MAX_HTTP_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
+
 pub(crate) fn execute_http_request(request: &HttpRequest) -> Option<String> {
     match request {
         HttpRequest::Translate {
@@ -25,7 +28,7 @@ pub(crate) fn execute_http_request(request: &HttpRequest) -> Option<String> {
                 .set("Content-Type", "application/json")
                 .send_json(body)
                 .ok()?;
-            let value: serde_json::Value = resp.into_json().ok()?;
+            let value = crate::services::local_ai::read_json_body(resp, MAX_HTTP_RESPONSE_BYTES)?;
             value
                 .get("translatedText")
                 .and_then(|v| v.as_str())
@@ -51,7 +54,7 @@ pub(crate) fn execute_http_request(request: &HttpRequest) -> Option<String> {
                 .set("Authorization", &format!("Bearer {api_key}"))
                 .send_json(body)
                 .ok()?;
-            let value: serde_json::Value = resp.into_json().ok()?;
+            let value = crate::services::local_ai::read_json_body(resp, MAX_HTTP_RESPONSE_BYTES)?;
             value
                 .get("choices")
                 .and_then(|v| v.get(0))

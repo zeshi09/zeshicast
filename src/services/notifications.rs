@@ -48,6 +48,9 @@ struct StoredNotification {
     summary: String,
     body: String,
     received_at: u64,
+    /// The D-Bus sender that created it, when it came from the bus. Internal
+    /// pushes have no sender and may act on anything.
+    sender: Option<String>,
 }
 
 #[derive(Default)]
@@ -134,8 +137,23 @@ fn now_secs() -> u64 {
 /// Record an incoming notification. Reuses `replaces_id` when non-zero (the
 /// notification spec's replacement semantics); returns the resolved id.
 pub fn push_notification(app_name: &str, summary: &str, body: &str, replaces_id: u32) -> u32 {
+    push_notification_from(app_name, summary, body, replaces_id, None)
+}
+
+/// [`push_notification`] with the D-Bus sender of the caller.
+///
+/// A session-bus peer must only be able to replace its *own* notification: with
+/// the sender on the entry, `replaces_id` from a different client is treated as
+/// a brand-new notification instead of a hijack (Low finding, notify_server).
+pub fn push_notification_from(
+    app_name: &str,
+    summary: &str,
+    body: &str,
+    replaces_id: u32,
+    sender: Option<&str>,
+) -> u32 {
     let mut state = lock_state();
-    let id = if replaces_id != 0 {
+    let id = if replaces_id != 0 && can_own(&state, replaces_id, sender) {
         replaces_id
     } else {
         let id = state.next_id;
@@ -151,14 +169,32 @@ pub fn push_notification(app_name: &str, summary: &str, body: &str, replaces_id:
             summary: truncate_utf8(summary, MAX_SUMMARY_BYTES).to_string(),
             body: truncate_utf8(body, MAX_BODY_BYTES).to_string(),
             received_at: now_secs(),
+            sender: sender.map(str::to_string),
         },
     );
     state.entries.truncate(MAX_HISTORY);
     id
 }
 
+/// Whether `sender` may act on the notification with `id`: only its creator, or
+/// an internal caller (`None`).
+fn can_own(state: &NotificationState, id: u32, sender: Option<&str>) -> bool {
+    match state.entries.iter().find(|entry| entry.id == id) {
+        Some(entry) => sender.is_none() || entry.sender.as_deref() == sender,
+        None => true,
+    }
+}
+
 pub fn close_notification(id: u32) {
-    lock_state().entries.retain(|entry| entry.id != id);
+    close_notification_from(id, None);
+}
+
+/// [`close_notification`] that refuses to close another sender's notification.
+pub fn close_notification_from(id: u32, sender: Option<&str>) {
+    let mut state = lock_state();
+    if can_own(&state, id, sender) {
+        state.entries.retain(|entry| entry.id != id);
+    }
 }
 
 pub fn clear_notifications() {
@@ -368,5 +404,25 @@ mod tests {
         let snapshot = notification_snapshot();
         assert_eq!(snapshot.count, Some(1));
         assert_eq!(snapshot.history[0].summary, "from a thread");
+    }
+
+    #[test]
+    fn another_sender_cannot_replace_or_close_a_notification() {
+        let _guard = isolated();
+        mark_server_active();
+
+        let first = push_notification_from("A", "one", "", 0, Some(":1.1"));
+        // A different client asking to replace that id gets a new notification
+        // instead of overwriting someone else's (ownership check).
+        let second = push_notification_from("B", "two", "", first, Some(":1.2"));
+        assert_ne!(first, second);
+        assert_eq!(notification_snapshot().count, Some(2));
+
+        // And it cannot close the other client's notification either.
+        close_notification_from(first, Some(":1.2"));
+        assert_eq!(notification_snapshot().count, Some(2));
+        // The owner still can.
+        close_notification_from(second, Some(":1.2"));
+        assert_eq!(notification_snapshot().count, Some(1));
     }
 }

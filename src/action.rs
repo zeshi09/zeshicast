@@ -935,6 +935,8 @@ fn run_verified_request(request: ExecutionRequest) {
 /// How long one extension `execute` call may run before its child is killed.
 const EXTENSION_EXEC_TIMEOUT_MS: u64 = 5_000;
 
+/// How long `wl-copy`/`xclip` may take before it is killed (N-7).
+const COPY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 /// Run one extension item over the extension's own JSON-RPC protocol (P1.5c).
 ///
 /// This is what an extension result does now: the *extension* decides what the
@@ -1181,9 +1183,10 @@ fn copy_with(program: &str, args: &[&str], text: &str) -> bool {
     }
     drop(stdin);
 
+    // A hung `wl-copy`/`xclip` must not block the caller (the main thread for
+    // `ExecutionRequest::Copy`) forever (N-7).
     child
-        .child_mut()
-        .wait()
+        .wait_timeout(COPY_TIMEOUT)
         .map(|status| status.success())
         .unwrap_or(false)
 }

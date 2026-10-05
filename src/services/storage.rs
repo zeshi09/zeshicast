@@ -19,6 +19,7 @@ fn open(config_dir: &Path) -> Result<Connection> {
     }
     conn.execute_batch("PRAGMA journal_mode = WAL;")?;
     init(&mut conn)?;
+    secure_sidecar_permissions(&db_path);
     Ok(conn)
 }
 
@@ -31,6 +32,22 @@ fn secure_database_permissions(path: &Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn secure_database_permissions(_path: &Path) -> std::io::Result<()> {
     Ok(())
+}
+
+/// WAL/SHM sidecars carry the same clipboard history as the database, so they
+/// need the same 0600. SQLite usually inherits the DB's permissions, but that is
+/// not guaranteed across versions (N-7).
+fn secure_sidecar_permissions(db_path: &Path) {
+    for suffix in ["-wal", "-shm"] {
+        let mut name = db_path.as_os_str().to_os_string();
+        name.push(suffix);
+        let sidecar = std::path::PathBuf::from(name);
+        if sidecar.exists()
+            && let Err(error) = secure_database_permissions(&sidecar)
+        {
+            log::warn!("could not restrict {} to 0600: {error}", sidecar.display());
+        }
+    }
 }
 
 fn init(conn: &mut Connection) -> Result<()> {
@@ -412,6 +429,26 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600);
+
+        // WAL/SHM sidecars (created while the connection is open) must match.
+        let conn = open(&dir).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard (text, added_at) VALUES (?1, ?2)",
+            params!["sidecar-secret", now()],
+        )
+        .unwrap();
+        for suffix in ["-wal", "-shm"] {
+            let path = dir.join(format!("zeshicast.db{suffix}"));
+            let meta = std::fs::metadata(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            assert_eq!(
+                meta.permissions().mode() & 0o777,
+                0o600,
+                "{}",
+                path.display()
+            );
+        }
+        drop(conn);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -325,15 +325,10 @@ pub fn copy_clipboard_image(value: &str) -> bool {
     if let Some(mut child) = spawned {
         return child.wait().is_ok();
     }
-    std::process::Command::new("xclip")
-        .args([
-            "-selection",
-            "clipboard",
-            "-t",
-            "image/png",
-            "-i",
-            &path.to_string_lossy(),
-        ])
-        .spawn()
-        .is_ok()
+    let path = path.to_string_lossy();
+    crate::process::spawn_detached_program(
+        "xclip",
+        &["-selection", "clipboard", "-t", "image/png", "-i", &path],
+    )
+    .is_ok()
 }

@@ -106,17 +106,44 @@ fn handle_method_call(
     match method {
         // Notify(app_name, replaces_id, app_icon, summary, body, actions, hints, expire) -> id
         "Notify" => {
-            let app_name = params.child_value(0).get::<String>().unwrap_or_default();
-            let replaces_id = params.child_value(1).get::<u32>().unwrap_or(0);
-            let app_icon = params.child_value(2).get::<String>().unwrap_or_default();
-            let summary = params.child_value(3).get::<String>().unwrap_or_default();
-            let body = params.child_value(4).get::<String>().unwrap_or_default();
-            let expire_timeout = params.child_value(7).get::<i32>().unwrap_or(-1);
-            let id = crate::services::notifications::push_notification(
+            // GDBus normally validates the signature, but a short tuple must not
+            // panic the daemon (n_children guard).
+            let child_string = |index: usize| -> String {
+                if params.n_children() > index {
+                    params
+                        .child_value(index)
+                        .get::<String>()
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            };
+            let child_u32 = |index: usize| -> u32 {
+                if params.n_children() > index {
+                    params.child_value(index).get::<u32>().unwrap_or(0)
+                } else {
+                    0
+                }
+            };
+            let child_i32 = |index: usize| -> i32 {
+                if params.n_children() > index {
+                    params.child_value(index).get::<i32>().unwrap_or(-1)
+                } else {
+                    -1
+                }
+            };
+            let app_name = child_string(0);
+            let replaces_id = child_u32(1);
+            let app_icon = child_string(2);
+            let summary = child_string(3);
+            let body = child_string(4);
+            let expire_timeout = child_i32(7);
+            let id = crate::services::notifications::push_notification_from(
                 &app_name,
                 &summary,
                 &body,
                 replaces_id,
+                _sender,
             );
 
             if !crate::services::notifications::is_dnd_enabled() {
@@ -133,8 +160,12 @@ fn handle_method_call(
             invocation.return_value(Some(&(id,).to_variant()));
         }
         "CloseNotification" => {
-            let id = params.child_value(0).get::<u32>().unwrap_or(0);
-            crate::services::notifications::close_notification(id);
+            let id = if params.n_children() > 0 {
+                params.child_value(0).get::<u32>().unwrap_or(0)
+            } else {
+                0
+            };
+            crate::services::notifications::close_notification_from(id, _sender);
             super::osd::dismiss_notification_osd();
             // reason 3 = closed by a call to CloseNotification.
             let _ = connection.emit_signal(
