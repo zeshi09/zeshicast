@@ -61,16 +61,20 @@ pub fn show_confirmation_panel<F>(
     }
     {
         let panel_keys = panel.clone();
-        let on_confirm = Rc::clone(&on_confirm);
+        let cancel_c = cancel.clone();
+        let confirm_c = confirm.clone();
         let key_controller = EventControllerKey::new();
         key_controller.connect_key_pressed(move |_, key, _, _| match key {
             gdk::Key::Escape => {
                 panel_keys.close();
                 glib::Propagation::Stop
             }
-            gdk::Key::Return | gdk::Key::KP_Enter => {
-                on_confirm();
-                panel_keys.close();
+            gdk::Key::Left | gdk::Key::h | gdk::Key::H => {
+                cancel_c.grab_focus();
+                glib::Propagation::Stop
+            }
+            gdk::Key::Right | gdk::Key::l | gdk::Key::L => {
+                confirm_c.grab_focus();
                 glib::Propagation::Stop
             }
             _ => glib::Propagation::Proceed,
@@ -78,7 +82,7 @@ pub fn show_confirmation_panel<F>(
         panel.add_controller(key_controller);
     }
 
-    confirm.grab_focus();
+    cancel.grab_focus();
     panel.present();
 }
 

@@ -491,6 +491,7 @@ pub(crate) fn finish_interaction(
 pub(crate) fn copy_selected(list: &ListBox, results: &Rc<RefCell<Vec<Action>>>) {
     if let Some(action) = selected_action(list, results) {
         action.copy_value();
+        crate::ui::show_toast_osd(None, "✓ Copied to clipboard");
     }
 }
 

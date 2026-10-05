@@ -35,7 +35,26 @@ pub fn install_css() {
         .unwrap_or("system");
     apply_gtk_theme(theme);
 
+    let is_dark = match theme {
+        "light" => false,
+        "dark" => true,
+        _ => gtk::Settings::default()
+            .map(|s| s.is_gtk_application_prefer_dark_theme())
+            .unwrap_or(true),
+    };
+
+    // Dark-mode vibrant tokens vs light-mode deep tokens (WCAG AA >= 4.5:1)
+    let (ac_purple, ac_amber, ac_green, ac_red) = if is_dark {
+        ("#8B7CF8", "#F5A623", "#4BD98A", "#FF6B5F")
+    } else {
+        ("#6352E8", "#B45309", "#15803D", "#DC2626")
+    };
+
     let css = include_str!("../../resources/style.css")
+        .replace("__COLOR_PURPLE__", ac_purple)
+        .replace("__COLOR_AMBER__", ac_amber)
+        .replace("__COLOR_GREEN__", ac_green)
+        .replace("__COLOR_RED__", ac_red)
         .replace("__FONT_FAMILY__", &font_family)
         .replace("__FONT_SIZE__", &font_size.to_string())
         .replace("__SUBTITLE_SIZE__", &subtitle_size.to_string())

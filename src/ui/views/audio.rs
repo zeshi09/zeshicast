@@ -261,6 +261,26 @@ pub fn audio_view(snapshot: &AudioSnapshot) -> AudioView {
         input_scale: input_bar_scale,
         suppress_volume_cb,
     };
+    {
+        let view_c = view.clone();
+        view.output_devices.connect_row_activated(move |_, row| {
+            if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:") {
+                if let Ok(id) = id_str.parse::<u32>() {
+                    activate_audio_device_by_id(&view_c, id);
+                }
+            }
+        });
+    }
+    {
+        let view_c = view.clone();
+        view.input_devices.connect_row_activated(move |_, row| {
+            if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:") {
+                if let Ok(id) = id_str.parse::<u32>() {
+                    activate_audio_device_by_id(&view_c, id);
+                }
+            }
+        });
+    }
     set_audio_snapshot(&view, snapshot);
     view
 }
@@ -298,10 +318,52 @@ pub fn set_audio_snapshot(view: &AudioView, snapshot: &AudioSnapshot) {
     set_audio_stream_rows(&view.streams_list, &snapshot.streams);
 }
 
+pub fn activate_audio_device_by_id(view: &AudioView, id: u32) {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("wpctl")
+            .args(["set-default", &id.to_string()])
+            .status();
+        let _ = sender.send(crate::services::audio::audio_snapshot());
+    });
+    let view = view.clone();
+    glib::timeout_add_local(
+        std::time::Duration::from_millis(30),
+        move || match receiver.try_recv() {
+            Ok(snapshot) => {
+                set_audio_snapshot(&view, &snapshot);
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        },
+    );
+}
+
+pub fn activate_selected_audio_device(view: &AudioView) {
+    if let Some(row) = view.output_devices.selected_row() {
+        if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:") {
+            if let Ok(id) = id_str.parse::<u32>() {
+                activate_audio_device_by_id(view, id);
+                return;
+            }
+        }
+    }
+    if let Some(row) = view.input_devices.selected_row() {
+        if let Some(id_str) = row.widget_name().strip_prefix("audio_dev:") {
+            if let Ok(id) = id_str.parse::<u32>() {
+                activate_audio_device_by_id(view, id);
+                return;
+            }
+        }
+    }
+    view.mute_output.emit_clicked();
+}
+
 /// Fill a device ListBox from real devices; clicking a row sets it as the
 /// system default (`wpctl set-default <id>`) and repopulates from a fresh
 /// snapshot gathered off the main thread.
-fn populate_audio_device_list(view: &AudioView, list: &ListBox, devices: &[AudioDeviceOption]) {
+fn populate_audio_device_list(_view: &AudioView, list: &ListBox, devices: &[AudioDeviceOption]) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
@@ -317,34 +379,13 @@ fn populate_audio_device_list(view: &AudioView, list: &ListBox, devices: &[Audio
     for device in devices {
         let row = audio_device_row(&device.name, device.is_default);
         if let Some(id) = device.id {
+            row.set_widget_name(&format!("audio_dev:{id}"));
+            let row_weak = row.downgrade();
             let gesture = gtk::GestureClick::new();
-            let view = view.clone();
             gesture.connect_released(move |_, _, _, _| {
-                // `wpctl set-default` plus the fresh snapshot run off-thread
-                // so the click never blocks the GTK main loop; the view is
-                // refreshed from the snapshot once both complete (same
-                // pattern as the deferred file index in launcher.rs).
-                let (sender, receiver) = std::sync::mpsc::channel();
-                std::thread::spawn(move || {
-                    let _ = std::process::Command::new("wpctl")
-                        .args(["set-default", &id.to_string()])
-                        .status();
-                    let _ = sender.send(crate::services::audio::audio_snapshot());
-                });
-                let view = view.clone();
-                glib::timeout_add_local(
-                    std::time::Duration::from_millis(30),
-                    move || match receiver.try_recv() {
-                        Ok(snapshot) => {
-                            set_audio_snapshot(&view, &snapshot);
-                            glib::ControlFlow::Break
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            glib::ControlFlow::Break
-                        }
-                    },
-                );
+                if let Some(r) = row_weak.upgrade() {
+                    r.activate();
+                }
             });
             row.add_controller(gesture);
         }

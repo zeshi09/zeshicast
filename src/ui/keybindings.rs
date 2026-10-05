@@ -6,9 +6,10 @@ use super::action_panel_controller::{
 use super::launcher::{
     clear_clipboard_history_or_confirm, clipboard_item_action, copy_clipboard_row, copy_selected,
     copy_snippet_row, finish_interaction, refresh_clipboard_view, refresh_snippet_view,
-    run_secondary_action_or_confirm, run_selected_with_views, show_clipboard_view,
-    show_extension_view, show_preferences_view, show_root_view, show_snippet_view,
-    terminate_selected_system_process_or_confirm,
+    run_secondary_action_or_confirm, run_secondary_for_selected, run_selected_with_views,
+    selected_action, show_clipboard_view, show_extension_view, show_preferences_view,
+    show_root_view, show_snippet_view, terminate_selected_system_process_or_confirm,
+    update_results,
 };
 use crate::action::{Action, SecondaryActionKind};
 use crate::app::{SnippetSummary, Zeshicast};
@@ -224,12 +225,57 @@ pub(crate) fn handle_key(
             show_emoji_view(navigation, entry, action_bar, emoji_view);
             glib::Propagation::Stop
         }
-        gdk::Key::f if state.contains(gdk::ModifierType::CONTROL_MASK) => {
-            show_font_browser_view(navigation, entry, action_bar, font_view);
+        gdk::Key::f | gdk::Key::F if state.contains(gdk::ModifierType::CONTROL_MASK) => {
+            if state.contains(gdk::ModifierType::SHIFT_MASK) {
+                run_secondary_for_selected(
+                    launcher,
+                    list,
+                    results,
+                    SecondaryActionKind::OpenParent,
+                );
+            } else {
+                show_font_browser_view(navigation, entry, action_bar, font_view);
+            }
+            glib::Propagation::Stop
+        }
+        gdk::Key::p | gdk::Key::P if state.contains(gdk::ModifierType::CONTROL_MASK) => {
+            if let Some(action) = selected_action(list, results) {
+                let is_pinned = launcher.borrow().is_pinned(&action);
+                let kind = if is_pinned {
+                    SecondaryActionKind::Unpin
+                } else {
+                    SecondaryActionKind::Pin
+                };
+                if let Err(error) = launcher.borrow_mut().run_secondary_action(&action, kind) {
+                    eprintln!("failed to update pin: {error}");
+                } else {
+                    crate::ui::show_toast_osd(
+                        None,
+                        if is_pinned {
+                            "✓ Unpinned"
+                        } else {
+                            "✓ Pinned"
+                        },
+                    );
+                }
+                update_results(
+                    &launcher.borrow(),
+                    results,
+                    list,
+                    entry.text().as_str(),
+                    None,
+                );
+            }
             glib::Propagation::Stop
         }
         gdk::Key::comma if state.contains(gdk::ModifierType::CONTROL_MASK) => {
             show_preferences_view(navigation, entry, action_bar);
+            glib::Propagation::Stop
+        }
+        gdk::Key::Tab | gdk::Key::ISO_Left_Tab => {
+            let is_backward =
+                key == gdk::Key::ISO_Left_Tab || state.contains(gdk::ModifierType::SHIFT_MASK);
+            cycle_root_focus(window, entry, list, action_bar, is_backward);
             glib::Propagation::Stop
         }
         gdk::Key::Down => {
@@ -318,11 +364,24 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Dashboard => {
-                show_root_view(navigation, entry, action_bar);
+                crate::ui::activate_focused_dashboard_card(dashboard_view);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::SystemMonitor => {
-                show_root_view(navigation, entry, action_bar);
+                let window = window.clone();
+                let system_monitor_view = system_monitor_view.clone();
+                let view_for_cb = system_monitor_view.clone();
+                terminate_selected_system_process_or_confirm(
+                    &window,
+                    &system_monitor_view,
+                    move || {
+                        crate::ui::set_system_monitor_snapshot(
+                            &view_for_cb,
+                            &crate::services::poll_cache::cached_system_snapshot(),
+                            &crate::services::poll_cache::cached_top_processes(),
+                        );
+                    },
+                );
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::AiChat => {
@@ -334,19 +393,21 @@ fn handle_view_key(
                 }
             }
             crate::ui::LauncherView::Audio => {
-                show_root_view(navigation, entry, action_bar);
+                crate::ui::activate_selected_audio_device(audio_view);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Media => {
-                show_root_view(navigation, entry, action_bar);
+                media_view.play_pause.emit_clicked();
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Network => {
-                show_root_view(navigation, entry, action_bar);
+                crate::ui::launcher::activate_selected_network_row(network_list);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Notifications => {
-                show_root_view(navigation, entry, action_bar);
+                if let Some(row) = notifications_view.history.selected_row() {
+                    crate::ui::dismiss_notification_row(&row);
+                }
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Snippets => {
@@ -362,6 +423,10 @@ fn handle_view_key(
             }
             _ => glib::Propagation::Proceed,
         },
+        gdk::Key::space if navigation.current() == crate::ui::LauncherView::Media => {
+            media_view.play_pause.emit_clicked();
+            glib::Propagation::Stop
+        }
         gdk::Key::Down => match navigation.current() {
             crate::ui::LauncherView::Actions => {
                 crate::ui::move_selection(action_panel_list, 1);
@@ -376,10 +441,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Dashboard => {
-                crate::ui::set_dashboard_snapshot(
-                    dashboard_view,
-                    &crate::services::poll_cache::cached_system_snapshot(),
-                );
+                crate::ui::cycle_dashboard_card(dashboard_view, 1);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::SystemMonitor => {
@@ -387,7 +449,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Audio => {
-                crate::ui::move_selection(&audio_view.streams_list, 1);
+                crate::ui::move_selection(&audio_view.output_devices, 1);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Media => {
@@ -402,10 +464,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Notifications => {
-                crate::ui::set_notification_snapshot(
-                    notifications_view,
-                    &crate::services::notifications::notification_snapshot(),
-                );
+                crate::ui::move_selection(&notifications_view.history, 1);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Snippets => {
@@ -439,10 +498,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Dashboard => {
-                crate::ui::set_dashboard_snapshot(
-                    dashboard_view,
-                    &crate::services::poll_cache::cached_system_snapshot(),
-                );
+                crate::ui::cycle_dashboard_card(dashboard_view, -1);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::SystemMonitor => {
@@ -450,7 +506,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Audio => {
-                crate::ui::move_selection(&audio_view.streams_list, -1);
+                crate::ui::move_selection(&audio_view.output_devices, -1);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Media => {
@@ -465,10 +521,7 @@ fn handle_view_key(
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Notifications => {
-                crate::ui::set_notification_snapshot(
-                    notifications_view,
-                    &crate::services::notifications::notification_snapshot(),
-                );
+                crate::ui::move_selection(&notifications_view.history, -1);
                 glib::Propagation::Stop
             }
             crate::ui::LauncherView::Snippets => {
@@ -527,13 +580,33 @@ fn handle_view_key(
         gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::Snippets => {
             if let Some(row) = snippet_list.selected_row()
                 && let Some(item) = snippet_items.borrow().get(row.index() as usize)
-                && let Err(error) = launcher
-                    .borrow_mut()
-                    .delete_snippet(&item.name, &item.value)
             {
-                eprintln!("failed to delete snippet: {error}");
+                let launcher_for_del = Rc::clone(launcher);
+                let snippet_list = snippet_list.clone();
+                let snippet_items = Rc::clone(snippet_items);
+                let name = item.name.clone();
+                let value = item.value.clone();
+                crate::ui::show_confirmation_panel(
+                    window,
+                    &format!("Delete snippet '{name}'?"),
+                    "This action cannot be undone.",
+                    "Delete",
+                    move || {
+                        if let Err(error) =
+                            launcher_for_del.borrow_mut().delete_snippet(&name, &value)
+                        {
+                            eprintln!("failed to delete snippet: {error}");
+                        }
+                        refresh_snippet_view(&launcher_for_del, &snippet_list, &snippet_items);
+                    },
+                );
             }
-            refresh_snippet_view(launcher, snippet_list, snippet_items);
+            glib::Propagation::Stop
+        }
+        gdk::Key::Delete if navigation.current() == crate::ui::LauncherView::Notifications => {
+            if let Some(row) = notifications_view.history.selected_row() {
+                crate::ui::dismiss_notification_row(&row);
+            }
             glib::Propagation::Stop
         }
         gdk::Key::e | gdk::Key::E
@@ -615,4 +688,147 @@ fn handle_view_key(
             glib::Propagation::Proceed
         }
     }
+}
+
+fn cycle_root_focus(
+    window: &ApplicationWindow,
+    entry: &Entry,
+    list: &ListBox,
+    action_bar: &GtkBox,
+    backward: bool,
+) {
+    let focused = gtk::prelude::RootExt::focus(window);
+    let is_entry = entry.has_focus() || focused.as_ref().map_or(false, |w| w == entry);
+    let is_list = list.has_focus()
+        || focused.as_ref().map_or(false, |w| {
+            w == list || w.ancestor(ListBox::static_type()).as_ref() == Some(list.upcast_ref())
+        });
+    let is_action_bar = action_bar.has_focus()
+        || focused.as_ref().map_or(false, |w| {
+            w == action_bar
+                || w.ancestor(GtkBox::static_type()).as_ref() == Some(action_bar.upcast_ref())
+        });
+
+    if !backward {
+        // Forward: Entry -> List (selected row) -> Action Bar buttons -> Entry
+        if is_entry {
+            if let Some(row) = list.selected_row().or_else(|| list.row_at_index(0)) {
+                list.select_row(Some(&row));
+                row.grab_focus();
+            } else if let Some(first_btn) = find_first_focusable(action_bar) {
+                first_btn.grab_focus();
+            } else {
+                entry.grab_focus();
+            }
+        } else if is_list {
+            if let Some(first_btn) = find_first_focusable(action_bar) {
+                first_btn.grab_focus();
+            } else {
+                entry.grab_focus();
+            }
+        } else if is_action_bar {
+            if let Some(ref current) = focused {
+                let direct_child = direct_child_of(current, action_bar);
+                let next = direct_child.as_ref().and_then(find_next_focusable_sibling);
+                if let Some(next_btn) = next {
+                    next_btn.grab_focus();
+                } else {
+                    entry.grab_focus();
+                }
+            } else {
+                entry.grab_focus();
+            }
+        } else {
+            entry.grab_focus();
+        }
+    } else {
+        // Backward: Entry -> Action Bar (last button) -> List (selected row) -> Entry
+        if is_entry {
+            if let Some(last_btn) = find_last_focusable(action_bar) {
+                last_btn.grab_focus();
+            } else if let Some(row) = list.selected_row().or_else(|| list.row_at_index(0)) {
+                list.select_row(Some(&row));
+                row.grab_focus();
+            } else {
+                entry.grab_focus();
+            }
+        } else if is_action_bar {
+            if let Some(ref current) = focused {
+                let direct_child = direct_child_of(current, action_bar);
+                let prev = direct_child.as_ref().and_then(find_prev_focusable_sibling);
+                if let Some(prev_btn) = prev {
+                    prev_btn.grab_focus();
+                } else if let Some(row) = list.selected_row().or_else(|| list.row_at_index(0)) {
+                    list.select_row(Some(&row));
+                    row.grab_focus();
+                } else {
+                    entry.grab_focus();
+                }
+            } else {
+                entry.grab_focus();
+            }
+        } else if is_list {
+            entry.grab_focus();
+        } else {
+            entry.grab_focus();
+        }
+    }
+}
+
+fn direct_child_of(widget: &gtk::Widget, container: &GtkBox) -> Option<gtk::Widget> {
+    let mut curr = widget.clone();
+    loop {
+        if let Some(parent) = curr.parent() {
+            if parent == *container {
+                return Some(curr);
+            }
+            curr = parent;
+        } else {
+            return None;
+        }
+    }
+}
+
+fn find_first_focusable(container: &GtkBox) -> Option<gtk::Widget> {
+    let mut child = container.first_child();
+    while let Some(c) = child {
+        if c.is_focusable() && c.is_visible() {
+            return Some(c);
+        }
+        child = c.next_sibling();
+    }
+    None
+}
+
+fn find_last_focusable(container: &GtkBox) -> Option<gtk::Widget> {
+    let mut child = container.last_child();
+    while let Some(c) = child {
+        if c.is_focusable() && c.is_visible() {
+            return Some(c);
+        }
+        child = c.prev_sibling();
+    }
+    None
+}
+
+fn find_next_focusable_sibling(widget: &gtk::Widget) -> Option<gtk::Widget> {
+    let mut sibling = widget.next_sibling();
+    while let Some(s) = sibling {
+        if s.is_focusable() && s.is_visible() {
+            return Some(s);
+        }
+        sibling = s.next_sibling();
+    }
+    None
+}
+
+fn find_prev_focusable_sibling(widget: &gtk::Widget) -> Option<gtk::Widget> {
+    let mut sibling = widget.prev_sibling();
+    while let Some(s) = sibling {
+        if s.is_focusable() && s.is_visible() {
+            return Some(s);
+        }
+        sibling = s.prev_sibling();
+    }
+    None
 }

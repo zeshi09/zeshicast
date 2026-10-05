@@ -1,7 +1,7 @@
-@define-color ac_purple #8B7CF8;
-@define-color ac_amber  #F5A623;
-@define-color ac_green  #4BD98A;
-@define-color ac_red    #FF6B5F;
+@define-color ac_purple __COLOR_PURPLE__;
+@define-color ac_amber  __COLOR_AMBER__;
+@define-color ac_green  __COLOR_GREEN__;
+@define-color ac_red    __COLOR_RED__;
 
 * { font-family: __FONT_FAMILY__; }
 .mono,
@@ -67,7 +67,7 @@ window { background-color: transparent; }
   background-color: alpha(@window_bg_color, 0.985);
   border-radius: 14px;
   overflow: hidden;
-  animation: launcher-open 110ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: launcher-open 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -188,7 +188,7 @@ entry, entry:focus, entry:focus-visible {
   padding: 0 14px;
   border-radius: 0;
   background: transparent;
-  animation: row-enter 130ms ease both;
+  animation: row-enter 130ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transition: background 70ms ease;
 }
 
@@ -204,7 +204,7 @@ entry, entry:focus, entry:focus-visible {
 }
 
 .result-row.danger .result-title {
-  color: #FF6B5F;
+  color: @ac_red;
 }
 
 .result-row.extension-disabled {
@@ -272,12 +272,12 @@ entry, entry:focus, entry:focus-visible {
 /* ── Result type badge (alias for category-pill with spec styling) ── */
 .result-badge {
   padding: 1px 7px;
-  background: rgba(255,255,255,0.055);
-  border: 1px solid rgba(255,255,255,0.09);
+  background: alpha(@window_fg_color, 0.055);
+  border: 1px solid alpha(@window_fg_color, 0.090);
   border-radius: 5px;
   font-size: 11px;
   font-weight: 500;
-  color: rgba(255,255,255,0.40);
+  color: alpha(@window_fg_color, 0.400);
   letter-spacing: 0.010em;
   min-height: 18px;
   opacity: 0;
@@ -402,7 +402,7 @@ entry, entry:focus, entry:focus-visible {
 }
 
 .action-row-label.danger {
-  color: #FF6B5F;
+  color: @ac_red;
 }
 
 /* ── Hotkey badges ── */
@@ -481,6 +481,24 @@ entry, entry:focus, entry:focus-visible {
   transform: scale(0.96);
 }
 
+/* ════════════════════════════════════════════════════════════
+   KEYBOARD FOCUS RINGS (A11y & Navigation)
+   ════════════════════════════════════════════════════════════ */
+
+button:focus-visible,
+.action-bar-btn:focus-visible,
+.widget-btn:focus-visible,
+.result-row:focus-visible,
+.action-bar-more:focus-visible {
+  outline: 2px solid @accent_color;
+  outline-offset: 1px;
+}
+
+entry.search-entry:focus-visible {
+  outline: 2px solid alpha(@accent_color, 0.60);
+  outline-offset: 1px;
+}
+
 .result-counter {
   font-size: 11px;
   font-weight: 500;
@@ -537,7 +555,7 @@ entry, entry:focus, entry:focus-visible {
 
 .dashboard-view {
   padding: 16px 14px 14px;
-  animation: dashboard-enter 200ms ease both;
+  animation: dashboard-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .dashboard-clock {
@@ -596,7 +614,7 @@ entry, entry:focus, entry:focus-visible {
   border-radius: 10px;
   padding: 16px;
   min-height: 100px;
-  animation: dashboard-enter 200ms ease both;
+  animation: dashboard-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transition: background-color 140ms ease, border-color 140ms ease;
 }
 
@@ -604,6 +622,12 @@ entry, entry:focus, entry:focus-visible {
   background-color: alpha(@window_fg_color, 0.085);
   border-color: alpha(@window_fg_color, 0.130);
   transform: translateY(-1px);
+}
+
+.metric-card.card-selected {
+  background-color: alpha(@window_fg_color, 0.085);
+  border-color: @accent_color;
+  box-shadow: 0 0 0 1px @accent_color;
 }
 
 .metric-card .metric-value {
@@ -649,18 +673,18 @@ entry, entry:focus, entry:focus-visible {
 }
 
 .dashboard-metric-bar.warning progress {
-  background: #F5A623;
+  background: @ac_amber;
 }
 
 .dashboard-metric-bar.danger progress {
-  background: #FF6B5F;
+  background: @ac_red;
 }
 
 /* Fixed per-metric bar colors (match dashboard mockup) */
-.metric-bar-cpu progress  { background: #8B7CF8; }
-.metric-bar-mem progress  { background: #F5A623; }
-.metric-bar-disk progress { background: #F5A623; }
-.metric-bar-temp progress { background: #8B7CF8; }
+.metric-bar-cpu progress  { background: @ac_purple; }
+.metric-bar-mem progress  { background: @ac_amber; }
+.metric-bar-disk progress { background: @ac_amber; }
+.metric-bar-temp progress { background: @ac_purple; }
 
 /* ── Media player buttons ── */
 /* Circular icon buttons. The element+class selector and zeroed min/padding
@@ -748,13 +772,19 @@ button.media-btn-seek:hover {
   border: 1px solid alpha(@window_fg_color, 0.090);
   border-radius: 10px;
   padding: 12px 14px;
-  animation: dashboard-enter 200ms ease both;
+  animation: dashboard-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transition: background-color 140ms ease, border-color 140ms ease;
 }
 
 .control-card:hover {
   background-color: alpha(@window_fg_color, 0.085);
   border-color: alpha(@window_fg_color, 0.130);
+}
+
+.control-card.card-selected {
+  background-color: alpha(@window_fg_color, 0.095);
+  border-color: @accent_color;
+  box-shadow: 0 0 0 1px @accent_color;
 }
 
 .control-card-icon {
@@ -822,7 +852,7 @@ button.media-btn-seek:hover {
   border: 1px solid alpha(@window_fg_color, 0.070);
   border-radius: 10px;
   padding: 12px 14px;
-  animation: dashboard-enter 200ms ease both;
+  animation: dashboard-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transition: background 140ms ease;
 }
 
@@ -907,7 +937,7 @@ button.media-btn-seek:hover {
 .emoji-confirm {
   font-size: 13px;
   font-weight: 600;
-  color: #4BD98A;
+  color: @ac_green;
   letter-spacing: -0.01em;
 }
 
@@ -962,7 +992,7 @@ button.media-btn-seek:hover {
   min-height: 52px;
   padding: 0 14px;
   background: transparent;
-  animation: row-enter 130ms ease both;
+  animation: row-enter 130ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transition: background 70ms ease;
 }
 
@@ -1046,8 +1076,8 @@ button.media-btn-seek:hover {
 }
 
 .process-memory-bar.usage-low progress  { background: alpha(@window_fg_color, 0.15); }
-.process-memory-bar.usage-mid progress  { background: #8B7CF8; }
-.process-memory-bar.usage-high progress { background: #F5A623; }
+.process-memory-bar.usage-mid progress  { background: @ac_purple; }
+.process-memory-bar.usage-high progress { background: @ac_amber; }
 
 /* ════════════════════════════════════════════════════════════
    MEDIA VIEW
@@ -1312,6 +1342,22 @@ window.osd-window,
   font-weight: 700;
   letter-spacing: 2px;
   color: alpha(@window_fg_color, 0.95);
+}
+
+.osd-toast-pill {
+  margin: 24px;
+  background-color: @window_bg_color;
+  border: 1px solid alpha(@window_fg_color, 0.12);
+  border-radius: 16px;
+  padding: 12px 24px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.40);
+}
+
+.osd-toast-label {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: @ac_green;
 }
 
 /* ── Notification Toast OSD (top-right corner) ── */

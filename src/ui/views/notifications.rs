@@ -55,6 +55,9 @@ pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView 
     history.add_css_class("results-list");
     history.set_vexpand(true);
     history.set_activate_on_single_click(false);
+    history.connect_row_activated(|_, row| {
+        dismiss_notification_row(row);
+    });
 
     let scroller = super::scrollable_list(&history);
     root.append(&scroller);
@@ -186,11 +189,11 @@ fn notification_history_row(
     dismiss.set_valign(gtk::Align::Start);
     dismiss.set_tooltip_text(Some("Dismiss notification"));
     if let Some(id) = entry.id {
+        row.set_widget_name(&format!("notif:{id}"));
         let row_weak = row.downgrade();
         dismiss.connect_clicked(move |_| {
-            crate::services::notifications::close_notification(id);
             if let Some(row) = row_weak.upgrade() {
-                row.set_visible(false);
+                dismiss_notification_row(&row);
             }
         });
     }
@@ -198,4 +201,13 @@ fn notification_history_row(
 
     row.set_child(Some(&layout));
     row
+}
+
+pub fn dismiss_notification_row(row: &ListBoxRow) {
+    if let Some(id_str) = row.widget_name().strip_prefix("notif:") {
+        if let Ok(id) = id_str.parse::<u32>() {
+            crate::services::notifications::close_notification(id);
+            row.set_visible(false);
+        }
+    }
 }

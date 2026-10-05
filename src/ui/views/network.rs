@@ -121,6 +121,12 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
             "network-connect-btn"
         });
         btn.set_valign(gtk::Align::Center);
+        let row_weak = row.downgrade();
+        btn.connect_clicked(move |_| {
+            if let Some(r) = row_weak.upgrade() {
+                r.activate();
+            }
+        });
         layout.append(&btn);
 
         row.set_child(Some(&layout));
@@ -144,6 +150,7 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
     for vpn in &snapshot.vpn_connections {
         let row = gtk::ListBoxRow::new();
         row.add_css_class("result-row");
+        row.set_widget_name(&format!("vpn:{}", vpn.name));
 
         let layout = GtkBox::new(Orientation::Horizontal, 10);
         layout.set_margin_top(8);

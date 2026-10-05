@@ -235,6 +235,27 @@ pub(crate) fn copy_selected_network_value(list: &ListBox, value: NetworkCopyValu
 
     if let Some(value) = value {
         crate::action::copy_text(&value);
+        crate::ui::show_toast_osd(None, "✓ Copied to clipboard");
+    }
+}
+
+pub(crate) fn activate_selected_network_row(list: &ListBox) {
+    if let Some(row) = list.selected_row() {
+        activate_network_row(list, &row);
+    }
+}
+
+pub(crate) fn activate_network_row(list: &ListBox, row: &gtk::ListBoxRow) {
+    if let Some(ssid) = row_wifi_ssid(row) {
+        if row.has_css_class("network-active") {
+            run_command_request("nmcli", ["connection", "down", "id", ssid.as_str()]);
+        } else {
+            run_command_request("nmcli", ["dev", "wifi", "connect", "--", ssid.as_str()]);
+        }
+    } else if row_interface_name(row).is_some() {
+        copy_selected_network_value(list, NetworkCopyValue::Ip);
+    } else if let Some(vpn) = row.widget_name().strip_prefix("vpn:") {
+        run_command_request("nmcli", ["connection", "down", "id", vpn]);
     }
 }
 
@@ -244,10 +265,11 @@ pub(crate) fn run_selected_network_command(list: &ListBox, value: NetworkCommand
     };
     match value {
         NetworkCommandValue::DisconnectInterface => {
-            let Some(name) = row_interface_name(&row) else {
-                return;
-            };
-            run_command_request("nmcli", ["device", "disconnect", name.as_str()]);
+            if let Some(name) = row_interface_name(&row) {
+                run_command_request("nmcli", ["device", "disconnect", name.as_str()]);
+            } else if let Some(ssid) = row_wifi_ssid(&row) {
+                run_command_request("nmcli", ["connection", "down", "id", ssid.as_str()]);
+            }
         }
         NetworkCommandValue::ConnectWifi => {
             let Some(ssid) = row_wifi_ssid(&row) else {
@@ -277,6 +299,7 @@ pub(crate) fn copy_clipboard_row(
         } else {
             crate::action::copy_text(&item.value);
         }
+        crate::ui::show_toast_osd(None, "✓ Copied to clipboard");
     }
 }
 
@@ -311,6 +334,7 @@ pub(crate) fn refresh_snippet_view(
 pub(crate) fn copy_snippet_row(index: usize, snippet_items: &Rc<RefCell<Vec<SnippetSummary>>>) {
     if let Some(item) = snippet_items.borrow().get(index) {
         crate::action::copy_text(&item.value);
+        crate::ui::show_toast_osd(None, "✓ Copied to clipboard");
     }
 }
 

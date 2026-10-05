@@ -436,17 +436,23 @@ fn set_process_rows(
             .map(|process| process.pid)
     });
 
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
-    *displayed.borrow_mut() = processes.to_vec();
-
     if processes.is_empty() {
+        while let Some(child) = list.first_child() {
+            list.remove(&child);
+        }
+        *displayed.borrow_mut() = Vec::new();
         list.append(&super::secondary_action_row(
             "dialog-information-symbolic",
             "No process data available",
         ));
         return;
+    }
+
+    // If previous was empty or showed the informational empty-state row, clear it
+    if displayed.borrow().is_empty() {
+        while let Some(child) = list.first_child() {
+            list.remove(&child);
+        }
     }
 
     let max_memory_kib = processes
@@ -455,9 +461,43 @@ fn set_process_rows(
         .max()
         .unwrap_or(1);
 
-    for process in processes {
-        list.append(&process_row(process, max_memory_kib));
+    let old_len = displayed.borrow().len();
+    let new_len = processes.len();
+    let common_len = old_len.min(new_len);
+
+    let mut updated_all = true;
+    for i in 0..common_len {
+        if let Some(row) = list.row_at_index(i as i32) {
+            if !update_process_row(&row, &processes[i], max_memory_kib) {
+                updated_all = false;
+                break;
+            }
+        } else {
+            updated_all = false;
+            break;
+        }
     }
+
+    if !updated_all {
+        while let Some(child) = list.first_child() {
+            list.remove(&child);
+        }
+        for process in processes {
+            list.append(&process_row(process, max_memory_kib));
+        }
+    } else if new_len > old_len {
+        for process in &processes[old_len..] {
+            list.append(&process_row(process, max_memory_kib));
+        }
+    } else if old_len > new_len {
+        for i in (new_len..old_len).rev() {
+            if let Some(row) = list.row_at_index(i as i32) {
+                list.remove(&row);
+            }
+        }
+    }
+
+    *displayed.borrow_mut() = processes.to_vec();
 
     // Restore the selection by PID: selecting row 0 on every refresh (as this
     // did) moved the highlight away from the process the user had picked.
@@ -466,6 +506,74 @@ fn set_process_rows(
     {
         list.select_row(Some(&row));
     }
+}
+
+fn update_process_row(
+    row: &gtk::ListBoxRow,
+    process: &ProcessSummary,
+    max_memory_kib: u64,
+) -> bool {
+    let Some(child) = row.child() else {
+        return false;
+    };
+    let Ok(layout) = child.downcast::<GtkBox>() else {
+        return false;
+    };
+    let Some(c0) = layout.first_child() else {
+        return false;
+    };
+    let Ok(title) = c0.downcast::<Label>() else {
+        return false;
+    };
+    let Some(c1) = title.next_sibling() else {
+        return false;
+    };
+    let Ok(mem_bar) = c1.downcast::<ProgressBar>() else {
+        return false;
+    };
+    let Some(c2) = mem_bar.next_sibling() else {
+        return false;
+    };
+    let Ok(mem_lbl) = c2.downcast::<Label>() else {
+        return false;
+    };
+
+    if title.text().as_str() != process.name {
+        title.set_text(&process.name);
+    }
+
+    let mem_frac = process
+        .memory_kib
+        .map(|v| v as f64 / max_memory_kib.max(1) as f64)
+        .unwrap_or(0.0);
+
+    mem_bar.remove_css_class("usage-high");
+    mem_bar.remove_css_class("usage-mid");
+    mem_bar.remove_css_class("usage-low");
+    mem_bar.add_css_class(if mem_frac > 0.5 {
+        "usage-high"
+    } else if mem_frac > 0.15 {
+        "usage-mid"
+    } else {
+        "usage-low"
+    });
+    mem_bar.set_fraction(mem_frac.clamp(0.0, 1.0));
+
+    let mem_text = process
+        .memory_kib
+        .map(|v| {
+            if v >= 1024 * 1024 {
+                format!("{:.1}G", v as f64 / 1024.0 / 1024.0)
+            } else {
+                format!("{}M", v / 1024)
+            }
+        })
+        .unwrap_or_else(|| "—".to_string());
+    if mem_lbl.text().as_str() != mem_text {
+        mem_lbl.set_text(&mem_text);
+    }
+
+    true
 }
 
 fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow {

@@ -13,6 +13,7 @@ pub struct ClipboardHistoryView {
     pub detail_kind: Label,
     pub detail_size: Label,
     pub detail_mime: Label,
+    pub copy: Button,
 }
 
 pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryView {
@@ -150,6 +151,7 @@ pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryVie
         detail_kind,
         detail_size,
         detail_mime,
+        copy,
     };
     set_clipboard_detail(&view, items.first());
     view

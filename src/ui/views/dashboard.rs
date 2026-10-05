@@ -10,7 +10,7 @@ use chrono::Local;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Grid, Label, Orientation, ProgressBar};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -55,6 +55,8 @@ pub struct DashboardView {
     pub toggle_mute: Button,
     pub lock: Button,
     pub suspend: Button,
+    pub cards: Vec<GtkBox>,
+    pub focused_card: Rc<Cell<usize>>,
 }
 
 pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
@@ -244,25 +246,6 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     notify_row.append(&open_notifications);
     notify_row.append(&toggle_dnd);
 
-    // Clicking a control card triggers its (hidden) open button.
-    for (card, btn) in [
-        (&network_card, &open_network),
-        (&audio_card, &open_audio),
-        (&media_card, &open_media),
-    ] {
-        let gesture = gtk::GestureClick::new();
-        let btn = btn.clone();
-        gesture.connect_released(move |_, _, _, _| {
-            btn.activate();
-        });
-        card.add_controller(gesture);
-    }
-
-    control_row.append(&network_card);
-    control_row.append(&audio_card);
-    control_row.append(&media_card);
-    root.append(&control_row);
-
     // Quick action buttons — kept for IPC/keyboard bindings but not shown in UI
     let open_ai = dashboard_button("AI Chat");
     let open_system = dashboard_button("System Monitor");
@@ -274,6 +257,51 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     lock.set_visible(false);
     suspend.set_visible(false);
     toggle_bluetooth.set_visible(false);
+
+    let focused_card = Rc::new(Cell::new(0));
+
+    // Navigable cards: 0: CPU/System, 1: Network, 2: Audio, 3: Media
+    for (idx, (card, btn)) in [
+        (&load_card, &open_system),
+        (&network_card, &open_network),
+        (&audio_card, &open_audio),
+        (&media_card, &open_media),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let gesture = gtk::GestureClick::new();
+        let btn = btn.clone();
+        let focused_card_c = Rc::clone(&focused_card);
+        gesture.connect_released(move |_, _, _, _| {
+            focused_card_c.set(idx);
+            btn.activate();
+        });
+        card.add_controller(gesture);
+    }
+
+    {
+        let gesture = gtk::GestureClick::new();
+        let btn = open_system.clone();
+        let focused_card_c = Rc::clone(&focused_card);
+        gesture.connect_released(move |_, _, _, _| {
+            focused_card_c.set(0);
+            btn.activate();
+        });
+        memory_card.add_controller(gesture);
+    }
+
+    let cards = vec![
+        load_card.clone(),
+        network_card.clone(),
+        audio_card.clone(),
+        media_card.clone(),
+    ];
+
+    control_row.append(&network_card);
+    control_row.append(&audio_card);
+    control_row.append(&media_card);
+    root.append(&control_row);
 
     // Use scroll as the actual root widget — but the struct expects a GtkBox.
     // Wrap scroll in an outer box.
@@ -322,6 +350,8 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         toggle_mute,
         lock,
         suspend,
+        cards,
+        focused_card,
     };
     set_dashboard_snapshot(&view, snapshot);
     set_dashboard_network_snapshot(&view, &NetworkSnapshot::default());
@@ -576,5 +606,65 @@ pub(crate) fn format_duration(seconds: u64) -> String {
         format!("{hours}h {minutes}m")
     } else {
         format!("{minutes}m")
+    }
+}
+
+pub fn set_dashboard_card_focus(view: &DashboardView, index: usize) {
+    if view.cards.is_empty() {
+        return;
+    }
+    let index = index % view.cards.len();
+    view.focused_card.set(index);
+    for (i, card) in view.cards.iter().enumerate() {
+        if i == index {
+            card.add_css_class("card-selected");
+        } else {
+            card.remove_css_class("card-selected");
+        }
+    }
+}
+
+pub fn cycle_dashboard_card(view: &DashboardView, delta: i32) {
+    if view.cards.is_empty() {
+        return;
+    }
+    let count = view.cards.len();
+    let current = view.focused_card.get();
+    let next = if delta >= 0 {
+        (current + delta as usize) % count
+    } else {
+        (current + count - ((-delta) as usize % count)) % count
+    };
+    set_dashboard_card_focus(view, next);
+}
+
+pub fn activate_focused_dashboard_card(view: &DashboardView) {
+    match view.focused_card.get() {
+        0 => {
+            view.open_system.emit_clicked();
+        }
+        1 => {
+            view.open_network.emit_clicked();
+        }
+        2 => {
+            view.open_audio.emit_clicked();
+        }
+        3 => {
+            view.open_media.emit_clicked();
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_duration_formats_days_hours_and_minutes() {
+        assert_eq!(format_duration(45), "0m");
+        assert_eq!(format_duration(120), "2m");
+        assert_eq!(format_duration(3660), "1h 1m");
+        assert_eq!(format_duration(90000), "1d 1h 0m");
     }
 }

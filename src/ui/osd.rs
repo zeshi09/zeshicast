@@ -107,6 +107,101 @@ fn build_osd(app: &Application) -> Osd {
     }
 }
 
+// ── Toast OSD (transient operational feedback) ──────────────────────────────
+
+struct ToastOsd {
+    window: Window,
+    label: Label,
+    revealer: Revealer,
+    generation: u64,
+}
+
+thread_local! {
+    static TOAST_OSD: RefCell<Option<ToastOsd>> = const { RefCell::new(None) };
+}
+
+pub fn show_toast_osd(app: Option<&Application>, message: &str) {
+    let message = message.trim();
+    if message.is_empty() {
+        return;
+    }
+    let Some(app) = app
+        .cloned()
+        .or_else(|| gio::Application::default().and_then(|a| a.downcast::<Application>().ok()))
+    else {
+        return;
+    };
+
+    let generation = TOAST_OSD.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let osd = slot.get_or_insert_with(|| build_toast_osd(&app));
+        osd.generation = osd.generation.wrapping_add(1);
+        osd.label.set_text(message);
+        osd.window.set_visible(true);
+        osd.revealer.set_reveal_child(true);
+        osd.generation
+    });
+
+    glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+        let still_current = TOAST_OSD.with(|cell| {
+            if let Some(osd) = cell.borrow().as_ref()
+                && osd.generation == generation
+            {
+                osd.revealer.set_reveal_child(false);
+                return true;
+            }
+            false
+        });
+        if !still_current {
+            return;
+        }
+        glib::timeout_add_local_once(Duration::from_millis(FADE_MS as u64 + 40), move || {
+            TOAST_OSD.with(|cell| {
+                if let Some(osd) = cell.borrow().as_ref()
+                    && osd.generation == generation
+                {
+                    osd.window.set_visible(false);
+                }
+            });
+        });
+    });
+}
+
+fn build_toast_osd(app: &Application) -> ToastOsd {
+    let window = Window::builder()
+        .application(app)
+        .decorated(false)
+        .resizable(false)
+        .build();
+    window.add_css_class("osd-window");
+    configure_layer_shell(&window);
+
+    let label = Label::new(None);
+    label.add_css_class("osd-toast-label");
+
+    let pill = GtkBox::new(Orientation::Horizontal, 0);
+    pill.add_css_class("osd-toast-pill");
+    pill.set_halign(Align::Center);
+    pill.set_valign(Align::Center);
+    pill.append(&label);
+
+    let revealer = Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::Crossfade)
+        .transition_duration(FADE_MS)
+        .reveal_child(false)
+        .child(&pill)
+        .build();
+
+    window.set_child(Some(&revealer));
+
+    ToastOsd {
+        window,
+        label,
+        revealer,
+        generation: 0,
+    }
+}
+
 // ── Notification OSD (toast in top-right corner) ─────────────────────────────
 
 struct NotificationOsd {

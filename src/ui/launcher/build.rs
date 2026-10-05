@@ -43,11 +43,12 @@ pub(crate) fn build_ui(
         super::super::notify_server::install_notification_server();
     }
 
+    let (default_w, default_h) = calculate_launcher_geometry();
     let window = ApplicationWindow::builder()
         .application(app)
         .title("Zeshicast")
-        .default_width(900)
-        .default_height(760)
+        .default_width(default_w)
+        .default_height(default_h)
         .resizable(false)
         .decorated(false)
         .build();
@@ -70,7 +71,7 @@ pub(crate) fn build_ui(
     mode_badge.add_css_class("mode-badge");
     mode_badge.set_visible(false);
 
-    let ctrl_k_hint = Label::new(Some("⌃K"));
+    let ctrl_k_hint = Label::new(Some("Ctrl+K"));
     ctrl_k_hint.add_css_class("ctrl-k-hint");
     ctrl_k_hint.set_valign(gtk::Align::Center);
 
@@ -725,6 +726,12 @@ pub(crate) fn build_ui(
     }
 
     {
+        network_view.list.connect_row_activated(move |list, row| {
+            activate_network_row(list, row);
+        });
+    }
+
+    {
         let network_list = network_view.list.clone();
         network_view.connect_wifi.clone().connect_clicked(move |_| {
             run_selected_network_command(&network_list, NetworkCommandValue::ConnectWifi);
@@ -972,6 +979,20 @@ pub(crate) fn build_ui(
     }
 
     {
+        let entry = entry.clone();
+        let action_bar = action_bar.clone();
+        let navigation = navigation.clone();
+        let clipboard_items = Rc::clone(&clipboard_items);
+        let clipboard_list = clipboard_view.list.clone();
+        clipboard_view.copy.clone().connect_clicked(move |_| {
+            if let Some(row) = clipboard_list.selected_row() {
+                copy_clipboard_row(&clipboard_list, row.index() as usize, &clipboard_items);
+                show_root_view(&navigation, &entry, &action_bar);
+            }
+        });
+    }
+
+    {
         let clipboard_view = clipboard_view.clone();
         let clipboard_list = clipboard_view.list.clone();
         let clipboard_items = Rc::clone(&clipboard_items);
@@ -1154,7 +1175,7 @@ pub(crate) fn action_bar(
     counter.set_visible(false);
 
     // Right: Actions button
-    let actions = footer_button("Actions  ⌃K");
+    let actions = footer_button("Actions  Ctrl+K");
 
     {
         let window = window.clone();
@@ -1252,6 +1273,7 @@ pub(crate) fn action_bar(
         let launcher = Rc::clone(launcher);
         let list = list.clone();
         let results = Rc::clone(results);
+        let entry = entry.clone();
         pin.connect_clicked(move |_| {
             if let Some(action) = selected_action(&list, &results) {
                 let kind = if launcher.borrow().is_pinned(&action) {
@@ -1261,7 +1283,23 @@ pub(crate) fn action_bar(
                 };
                 if let Err(error) = launcher.borrow_mut().run_secondary_action(&action, kind) {
                     eprintln!("failed to update pin: {error}");
+                } else {
+                    crate::ui::show_toast_osd(
+                        None,
+                        if kind == SecondaryActionKind::Unpin {
+                            "✓ Unpinned"
+                        } else {
+                            "✓ Pinned"
+                        },
+                    );
                 }
+                update_results(
+                    &launcher.borrow(),
+                    &results,
+                    &list,
+                    entry.text().as_str(),
+                    None,
+                );
             }
         });
     }
@@ -1286,4 +1324,24 @@ fn icon_bar_button(icon: &str, tooltip: &str) -> Button {
     button.add_css_class("action-bar-btn");
     button.set_tooltip_text(Some(tooltip));
     button
+}
+
+pub(crate) fn calculate_launcher_geometry() -> (i32, i32) {
+    if let Some(display) = gtk::gdk::Display::default() {
+        let monitors = display.monitors();
+        if let Some(monitor) = monitors
+            .item(0)
+            .and_then(|m| m.downcast::<gtk::gdk::Monitor>().ok())
+        {
+            let geometry = monitor.geometry();
+            let screen_w = geometry.width();
+            let screen_h = geometry.height();
+            if screen_w > 0 && screen_h > 0 {
+                let w = ((screen_w as f64 * 0.90) as i32).clamp(560, 900);
+                let h = ((screen_h as f64 * 0.82) as i32).clamp(480, 760);
+                return (w, h);
+            }
+        }
+    }
+    (900, 760)
 }

@@ -63,6 +63,7 @@ pub(super) fn show_dashboard_view(
         dashboard_view,
         &crate::services::notifications::notification_snapshot(),
     );
+    crate::ui::set_dashboard_card_focus(dashboard_view, 0);
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Dashboard);
@@ -110,7 +111,10 @@ pub(super) fn show_audio_view(
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Audio);
-    audio_view.streams_list.grab_focus();
+    if let Some(row) = audio_view.output_devices.row_at_index(0) {
+        audio_view.output_devices.select_row(Some(&row));
+    }
+    audio_view.output_devices.grab_focus();
 }
 
 pub(super) fn show_network_view(
@@ -142,6 +146,10 @@ pub(super) fn show_notifications_view(
     entry.set_visible(false);
     action_bar.set_visible(false);
     navigation.push(crate::ui::LauncherView::Notifications);
+    if let Some(row) = notifications_view.history.row_at_index(0) {
+        notifications_view.history.select_row(Some(&row));
+    }
+    notifications_view.history.grab_focus();
 }
 
 pub(super) fn show_media_view(
