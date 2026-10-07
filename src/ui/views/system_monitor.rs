@@ -7,6 +7,55 @@ use gtk::{Box as GtkBox, Button, DrawingArea, Label, ListBox, Orientation, Progr
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// Order the process table is shown in. Cycled by the header button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessSort {
+    Memory,
+    Name,
+    Pid,
+}
+
+/// Callback a per-row kill button invokes with the row's PID. The launcher owns
+/// the confirmation panel and sets this once the view exists.
+pub type KillRowCallback = Rc<RefCell<Option<Rc<dyn Fn(u32)>>>>;
+
+impl ProcessSort {
+    fn next(self) -> Self {
+        match self {
+            Self::Memory => Self::Name,
+            Self::Name => Self::Pid,
+            Self::Pid => Self::Memory,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Memory => "Memory ▾",
+            Self::Name => "Name ▾",
+            Self::Pid => "PID ▾",
+        }
+    }
+}
+
+/// Sort `processes` in place. Pure so it can be tested without a display.
+fn sort_processes(processes: &mut [ProcessSummary], sort: ProcessSort) {
+    match sort {
+        ProcessSort::Memory => processes.sort_by(|a, b| {
+            b.memory_kib
+                .unwrap_or_default()
+                .cmp(&a.memory_kib.unwrap_or_default())
+                .then_with(|| a.name.cmp(&b.name))
+        }),
+        ProcessSort::Name => processes.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.pid.cmp(&b.pid))
+        }),
+        ProcessSort::Pid => processes.sort_by_key(|process| process.pid),
+    }
+}
+
 #[derive(Clone)]
 pub struct SystemMonitorView {
     pub root: GtkBox,
@@ -27,6 +76,12 @@ pub struct SystemMonitorView {
     pub net_tx: Label,
     pub list: ListBox,
     pub kill: Button,
+    pub sort: Button,
+    /// Current process sort order, cycled by the sort button.
+    pub sort_mode: Rc<std::cell::Cell<ProcessSort>>,
+    /// Called with a PID when a row's own kill button is pressed. Set by the
+    /// launcher, which owns the confirmation panel and the window.
+    pub on_kill_row: KillRowCallback,
     /// The processes the rows were built from (M-7).
     ///
     /// Killing must read the row's process from here instead of indexing into a
@@ -245,10 +300,22 @@ pub fn system_monitor_view(
     processes_label.set_visible(false);
 
     // ── Process table ────────────────────────────────────────────────────────
-    let list = super::results_list();
-    list.set_vexpand(true);
-    let scroller = super::scrollable_list(&list);
-    root.append(&scroller);
+    let header = GtkBox::new(Orientation::Horizontal, 6);
+    header.set_margin_top(2);
+    header.set_margin_bottom(2);
+    header.set_margin_start(14);
+    header.set_margin_end(14);
+    let header_title = Label::new(Some("Processes"));
+    header_title.add_css_class("metric-label");
+    header_title.set_xalign(0.0);
+    header_title.set_hexpand(true);
+    header.append(&header_title);
+
+    let sort = Button::with_label(ProcessSort::Memory.label());
+    sort.add_css_class("dashboard-button");
+    sort.add_css_class("widget-btn");
+    sort.set_tooltip_text(Some("Sort processes"));
+    header.append(&sort);
 
     let kill = Button::builder()
         .icon_name("process-stop-symbolic")
@@ -256,7 +323,13 @@ pub fn system_monitor_view(
         .build();
     kill.add_css_class("dashboard-button");
     kill.add_css_class("widget-btn");
-    kill.set_visible(false);
+    header.append(&kill);
+    root.append(&header);
+
+    let list = super::results_list();
+    list.set_vexpand(true);
+    let scroller = super::scrollable_list(&list);
+    root.append(&scroller);
 
     let view = SystemMonitorView {
         root,
@@ -278,9 +351,36 @@ pub fn system_monitor_view(
         list,
         displayed_processes: Rc::new(RefCell::new(Vec::new())),
         kill,
+        sort,
+        sort_mode: Rc::new(std::cell::Cell::new(ProcessSort::Memory)),
+        on_kill_row: Rc::new(RefCell::new(None)),
     };
+
+    {
+        let view = view.clone();
+        view.sort.clone().connect_clicked(move |button| {
+            let mode = view.sort_mode.get().next();
+            view.sort_mode.set(mode);
+            button.set_label(mode.label());
+            resort_process_rows(&view);
+        });
+    }
+
     set_system_monitor_snapshot(&view, snapshot, processes);
     view
+}
+
+/// Re-sort and rebuild the table from the processes already on screen (the sort
+/// button must not wait for the next poll).
+fn resort_process_rows(view: &SystemMonitorView) {
+    let mut processes = view.displayed_processes.borrow().clone();
+    sort_processes(&mut processes, view.sort_mode.get());
+    set_process_rows(
+        &view.list,
+        &processes,
+        &view.displayed_processes,
+        &view.on_kill_row,
+    );
 }
 
 pub fn set_system_monitor_snapshot(
@@ -373,7 +473,14 @@ pub fn set_system_monitor_snapshot(
             .map(|count| count.to_string())
             .unwrap_or("unknown".to_string()),
     );
-    set_process_rows(&view.list, processes, &view.displayed_processes);
+    let mut sorted = processes.to_vec();
+    sort_processes(&mut sorted, view.sort_mode.get());
+    set_process_rows(
+        &view.list,
+        &sorted,
+        &view.displayed_processes,
+        &view.on_kill_row,
+    );
 }
 
 pub fn set_system_monitor_thermal_snapshot(view: &SystemMonitorView, snapshot: &ThermalSnapshot) {
@@ -428,6 +535,7 @@ fn set_process_rows(
     list: &ListBox,
     processes: &[ProcessSummary],
     displayed: &Rc<RefCell<Vec<ProcessSummary>>>,
+    on_kill_row: &KillRowCallback,
 ) {
     let previous_pid = list.selected_row().and_then(|row| {
         displayed
@@ -483,11 +591,11 @@ fn set_process_rows(
             list.remove(&child);
         }
         for process in processes {
-            list.append(&process_row(process, max_memory_kib));
+            list.append(&process_row(process, max_memory_kib, on_kill_row));
         }
     } else if new_len > old_len {
         for process in &processes[old_len..] {
-            list.append(&process_row(process, max_memory_kib));
+            list.append(&process_row(process, max_memory_kib, on_kill_row));
         }
     } else if old_len > new_len {
         for i in (new_len..old_len).rev() {
@@ -573,10 +681,25 @@ fn update_process_row(
         mem_lbl.set_text(&mem_text);
     }
 
+    // Keep the row's kill button pointed at the process this row now shows:
+    // rows are reused across refreshes, so the captured PID would go stale.
+    if let Some(widget) = mem_lbl.next_sibling()
+        && let Ok(kill) = widget.downcast::<Button>()
+    {
+        let pid = process.pid.to_string();
+        if kill.widget_name().as_str() != pid {
+            kill.set_widget_name(&pid);
+        }
+    }
+
     true
 }
 
-fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow {
+fn process_row(
+    process: &ProcessSummary,
+    max_memory_kib: u64,
+    on_kill_row: &KillRowCallback,
+) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.add_css_class("result-row");
 
@@ -632,6 +755,25 @@ fn process_row(process: &ProcessSummary, max_memory_kib: u64) -> gtk::ListBoxRow
     mem_lbl.set_xalign(1.0);
     layout.append(&mem_lbl);
 
+    // Per-row kill: press the stop icon on the row you mean to terminate.
+    let kill = Button::builder()
+        .icon_name("process-stop-symbolic")
+        .tooltip_text("Terminate this process")
+        .build();
+    kill.add_css_class("row-kill-button");
+    kill.set_widget_name(&process.pid.to_string());
+    {
+        let on_kill_row = Rc::clone(on_kill_row);
+        kill.connect_clicked(move |button| {
+            if let Ok(pid) = button.widget_name().parse::<u32>()
+                && let Some(callback) = on_kill_row.borrow().as_ref()
+            {
+                callback(pid);
+            }
+        });
+    }
+    layout.append(&kill);
+
     row.set_child(Some(&layout));
     row
 }
@@ -645,6 +787,7 @@ mod tests {
             pid,
             name: name.to_string(),
             memory_kib: Some(1024),
+            start_time: Some(1),
         }
     }
 
@@ -662,6 +805,45 @@ mod tests {
             "the kill must target the process the row shows"
         );
         assert_eq!(crate::ui::row_process(&displayed, 5).map(|p| p.pid), None);
+    }
+
+    #[test]
+    fn processes_sort_by_the_chosen_mode() {
+        let mut processes = vec![
+            ProcessSummary {
+                pid: 30,
+                name: "zsh".into(),
+                memory_kib: Some(10),
+                start_time: Some(1),
+            },
+            ProcessSummary {
+                pid: 10,
+                name: "firefox".into(),
+                memory_kib: Some(300),
+                start_time: Some(1),
+            },
+            ProcessSummary {
+                pid: 20,
+                name: "alpha".into(),
+                memory_kib: Some(50),
+                start_time: Some(1),
+            },
+        ];
+        sort_processes(&mut processes, ProcessSort::Memory);
+        assert_eq!(
+            processes.iter().map(|p| p.pid).collect::<Vec<_>>(),
+            vec![10, 20, 30]
+        );
+        sort_processes(&mut processes, ProcessSort::Name);
+        assert_eq!(
+            processes.iter().map(|p| p.pid).collect::<Vec<_>>(),
+            vec![20, 10, 30]
+        );
+        sort_processes(&mut processes, ProcessSort::Pid);
+        assert_eq!(
+            processes.iter().map(|p| p.pid).collect::<Vec<_>>(),
+            vec![10, 20, 30]
+        );
     }
 
     #[test]

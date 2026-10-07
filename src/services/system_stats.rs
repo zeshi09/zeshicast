@@ -20,6 +20,9 @@ pub struct ProcessSummary {
     pub pid: u32,
     pub name: String,
     pub memory_kib: Option<u64>,
+    /// Start time of the process (`/proc/<pid>/stat` field 22). A PID alone can
+    /// name a different process after reuse; the kill path checks this first.
+    pub start_time: Option<u64>,
 }
 
 impl SystemSnapshot {
@@ -174,11 +177,51 @@ fn read_process_summaries() -> io::Result<Vec<ProcessSummary>> {
         let Ok(status) = fs::read_to_string(entry.path().join("status")) else {
             continue;
         };
-        if let Some(process) = parse_process_status(pid, &status) {
+        if let Some(mut process) = parse_process_status(pid, &status) {
+            process.start_time = process_start_time(pid);
             processes.push(process);
         }
     }
     Ok(processes)
+}
+
+/// Start time of `pid` in clock ticks since boot (`/proc/<pid>/stat` field 22).
+pub fn process_start_time(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_start_time(&stat)
+}
+
+/// Parse the starttime field out of `/proc/<pid>/stat`.
+///
+/// The comm field (field 2) is wrapped in parentheses and may itself contain
+/// spaces and `)`, so it is stripped by taking everything after the *last*
+/// `) `. The remaining fields start at `state` (field 3), which makes `starttime`
+/// (field 22) the 20th value, i.e. index 19.
+fn parse_start_time(stat: &str) -> Option<u64> {
+    let after_comm = stat.rsplit_once(") ")?.1;
+    after_comm.split_whitespace().nth(19)?.parse().ok()
+}
+
+/// Send `SIGTERM` to `pid` only when its start time still matches `expected`.
+///
+/// Returns `true` when the signal was sent. A mismatched (or unreadable) start
+/// time means the PID was reused or the process already exited, so we do not
+/// kill a stranger.
+pub fn kill_process_if_start_time_matches(pid: u32, expected: u64) -> bool {
+    if process_start_time(pid) != Some(expected) {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        rustix::process::Pid::from_raw(pid as i32)
+            .map(|pid| rustix::process::kill_process(pid, rustix::process::Signal::TERM).is_ok())
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
 }
 
 fn parse_process_status(pid: u32, contents: &str) -> Option<ProcessSummary> {
@@ -197,6 +240,7 @@ fn parse_process_status(pid: u32, contents: &str) -> Option<ProcessSummary> {
         pid,
         name: name?,
         memory_kib,
+        start_time: None,
     })
 }
 
@@ -265,7 +309,17 @@ VmRSS:	  204800 kB
                 pid: 42,
                 name: "firefox".to_string(),
                 memory_kib: Some(204_800),
+                start_time: None,
             })
         );
+    }
+
+    #[test]
+    fn process_start_time_parses_the_stat_field() {
+        // The comm field contains both a space and a `)`, so a naive split on
+        // whitespace would land on the wrong field.
+        let stat = "1234 (weird ) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 987654 20";
+        assert_eq!(parse_start_time(stat), Some(987654));
+        assert_eq!(parse_start_time("not a stat line"), None);
     }
 }

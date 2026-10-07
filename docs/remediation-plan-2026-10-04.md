@@ -106,9 +106,13 @@ xclip `spawn_detached` (`services/clipboard_store.rs:335-341`); `prune`-`?` → 
 
 Clippy для дефолтных фич в CI; убрать дубль джобы `gui-check`/`layer-shell-check`; `install-user.sh` → flake-devShell + опция `layer-shell`; README-оговорка для Non-Nix; правка URL во flake-комментарии (`flake.nix:121`).
 
-### P17 — 🔜 UX-долг (из MINOR прошлого ревью)
+### P17 — ✅ done. UX-долг System Monitor (Low)
 
-Фильтр/сортировки процессов и per-row kill (`ui/views/system_monitor.rs`), футер, проверка start-time при kill.
+* **Sort**: `ProcessSort` (Memory → Name → PID) + кнопка-переключатель в шапке; чистая `sort_processes`, тест `processes_sort_by_the_chosen_mode`.
+* **Per-row kill**: в каждой строке кнопка stop, ведущая на тот же подтверждающий диалог; pid из `widget_name` строки, обновляется при переиспользовании строк.
+* **Kill-кнопка видима**: раньше `kill` создавалась с `set_visible(false)` и не вставлялась в дерево; теперь шапка «Processes» содержит sort и kill.
+* **Футер без невыделяемых строк**: `selectable_position` считает только `is_selectable()`-строки.
+* **PID start-time**: `start_time` из `/proc/<pid>/stat`; `kill_process_if_start_time_matches` проверяет перед `SIGTERM`; палитра — `ActionKind::KillProcess` / `ExecutionRequest::KillProcess`. Тест `process_start_time_parses_the_stat_field`.
 
 ### N-16 — ✅ done. Флейк изоляции теста `browser_tabs`
 
@@ -138,7 +142,7 @@ Clippy для дефолтных фич в CI; убрать дубль джоб�
 | N-15 spawn мимо гейта | Medium | P14 | grep-гвард | 🔜 |
 | Minor-пакет | Low | P15 | по тесту на пункт | 🔜 |
 | Ops-пакет | Low | P16 | CI/README | 🔜 |
-| UX-долг | Low | P17 | чек-лист | 🔜 |
+| UX-долг | Low | P17 | чек-лист | ✅ |
 
 ## Критерии готовности (Definition of Done)
 

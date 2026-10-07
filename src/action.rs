@@ -141,6 +141,11 @@ pub(crate) enum ExecutionRequest {
     Http(HttpRequest),
     Media(crate::services::media::MediaControl),
     Notification(crate::services::notifications::NotificationAction),
+    /// Terminate `pid` only when its start time still matches (PID reuse).
+    KillProcess {
+        pid: u32,
+        start_time: u64,
+    },
     /// Run one item of an extension through that extension's own JSON-RPC
     /// `execute` method (P1.5c). The id names an item *in that extension*, so it
     /// is not a command line and never reaches a shell.
@@ -160,6 +165,7 @@ impl ExecutionRequest {
     pub(crate) fn required_capabilities(&self) -> CapabilitySet {
         match self {
             Self::Shell { .. } | Self::Command(_) => CapabilitySet::new(vec![Capability::Shell]),
+            Self::KillProcess { .. } => CapabilitySet::new(vec![Capability::Shell]),
             // An extension item may do anything the extension itself could; it
             // stays behind the manifest's `shell` capability (no relaxation).
             Self::ExtensionExec { .. } => CapabilitySet::new(vec![Capability::Shell]),
@@ -749,6 +755,10 @@ impl Action {
             ActionKind::HttpCopy(req) => Some(ExecutionRequest::Http(req.clone())),
             ActionKind::Media(control) => Some(ExecutionRequest::Media(*control)),
             ActionKind::Notification(action) => Some(ExecutionRequest::Notification(*action)),
+            ActionKind::KillProcess { pid, start_time } => Some(ExecutionRequest::KillProcess {
+                pid: *pid,
+                start_time: *start_time,
+            }),
             ActionKind::ExtensionItem { binary, id } => Some(ExecutionRequest::ExtensionExec {
                 binary: binary.clone(),
                 id: id.clone(),
@@ -817,6 +827,7 @@ impl Action {
             ActionKind::JsonCommand(command) => command.command.command.clone(),
             ActionKind::Media(_) => self.title.clone(),
             ActionKind::Notification(_) => self.title.clone(),
+            ActionKind::KillProcess { pid, .. } => pid.to_string(),
             ActionKind::None => self.title.clone(),
         }
     }
@@ -929,6 +940,11 @@ fn run_verified_request(request: ExecutionRequest) {
                 crate::services::notifications::clear_notifications()
             }
         },
+        ExecutionRequest::KillProcess { pid, start_time } => {
+            if !crate::services::system_stats::kill_process_if_start_time_matches(pid, start_time) {
+                log::warn!("not killing {pid}: it is no longer the process that was shown");
+            }
+        }
     }
 }
 
@@ -1047,6 +1063,12 @@ pub(crate) enum ActionKind {
     Media(crate::services::media::MediaControl),
     /// Notification action routed to our own notification store.
     Notification(crate::services::notifications::NotificationAction),
+    /// Terminate a process, but only if it is still the one the user saw: a PID
+    /// can be reused, so the start time from `/proc/<pid>/stat` gates the kill.
+    KillProcess {
+        pid: u32,
+        start_time: u64,
+    },
     /// One item of an external extension, run over its own protocol.
     ExtensionItem {
         binary: PathBuf,

@@ -1296,12 +1296,18 @@ DEPLOY_TOKEN = "{{pref:token}}"
             pid: 4242,
             name: "zeshicast".to_string(),
             command: "target/debug/zeshicast-gtk --daemon".to_string(),
+            start_time: Some(1),
         }];
 
         let actions = crate::search::processes::search_process_entries(&processes, "zesh");
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].category, "Process");
-        assert_eq!(actions[0].value(), "kill 4242");
+        // A known start time routes the kill through the identity-checked
+        // variant instead of a bare `kill <pid>` shell string.
+        assert!(matches!(
+            actions[0].kind,
+            crate::action::ActionKind::KillProcess { pid: 4242, .. }
+        ));
         assert_eq!(actions[0].risk, crate::action::ActionRisk::ProcessKill);
         assert!(actions[0].subtitle.contains("target/debug/zeshicast-gtk"));
     }

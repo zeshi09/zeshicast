@@ -16,6 +16,8 @@ pub(crate) struct ProcessEntry {
     pub(crate) pid: u32,
     pub(crate) name: String,
     pub(crate) command: String,
+    /// Start time from `/proc/<pid>/stat`, so a kill can refuse a reused PID.
+    pub(crate) start_time: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,10 +100,19 @@ pub(crate) fn search_process_entries(processes: &[ProcessEntry], query: &str) ->
 }
 
 fn process_action(process: &ProcessEntry, score: i32) -> Action {
+    let kind = match process.start_time {
+        Some(start_time) => ActionKind::KillProcess {
+            pid: process.pid,
+            start_time,
+        },
+        // No start time means we cannot verify the PID; keep the old shell kill
+        // (still behind `ActionRisk::ProcessKill`).
+        None => ActionKind::Shell(ShellCommand::new(format!("kill {}", process.pid))),
+    };
     Action::new(
         "Process",
         format!("Kill {} ({})", process.name, process.pid),
-        ActionKind::Shell(ShellCommand::new(format!("kill {}", process.pid))),
+        kind,
         score,
     )
     .with_subtitle(process_subtitle(process))
@@ -163,7 +174,12 @@ fn load_process_entry(pid: u32, path: &Path) -> Option<ProcessEntry> {
         .map(|value| decode_cmdline(&value))
         .unwrap_or_default();
 
-    Some(ProcessEntry { pid, name, command })
+    Some(ProcessEntry {
+        pid,
+        name,
+        command,
+        start_time: crate::services::system_stats::process_start_time(pid),
+    })
 }
 
 pub(crate) fn decode_cmdline(value: &[u8]) -> String {
@@ -188,6 +204,7 @@ mod tests {
             pid: 4242,
             name: "zeshicast".to_string(),
             command: "target/debug/zeshicast-gtk --daemon".to_string(),
+            start_time: Some(1),
         }]
     }
 

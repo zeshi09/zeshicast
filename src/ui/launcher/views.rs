@@ -182,6 +182,19 @@ pub(crate) fn terminate_selected_system_process_or_confirm<F>(
         return;
     };
 
+    confirm_and_kill_process(window, process, on_done);
+}
+
+/// Confirmation panel for killing `process`. Once confirmed the signal is sent
+/// only if the process still has the same start time, so a reused PID cannot
+/// make us kill a stranger.
+pub(crate) fn confirm_and_kill_process<F>(
+    window: &ApplicationWindow,
+    process: crate::services::system_stats::ProcessSummary,
+    on_done: F,
+) where
+    F: Fn() + 'static,
+{
     let detail = format!("Kill process {} ({})", process.name, process.pid);
     crate::ui::show_confirmation_panel(
         window,
@@ -189,7 +202,24 @@ pub(crate) fn terminate_selected_system_process_or_confirm<F>(
         &detail,
         "Confirm",
         move || {
-            run_command_request("kill", [process.pid.to_string()]);
+            match process.start_time {
+                Some(start_time) => {
+                    if !crate::services::system_stats::kill_process_if_start_time_matches(
+                        process.pid,
+                        start_time,
+                    ) {
+                        crate::ui::show_notification_osd(
+                            None,
+                            "Zeshicast",
+                            "Process exited",
+                            &format!("{} ({}) is already gone", process.name, process.pid),
+                            "",
+                            3000,
+                        );
+                    }
+                }
+                None => run_command_request("kill", [process.pid.to_string()]),
+            }
             on_done();
         },
     );

@@ -261,17 +261,18 @@ pub(crate) fn build_ui(
         });
     }
 
-    // Footer counter follows selection: "8 of 24"
+    // Footer counter follows selection: "8 of 24". Non-selectable rows
+    // (group headers, the informational row) are not counted.
     {
-        let results = Rc::clone(&results);
         let result_counter = result_counter.clone();
-        list.connect_row_selected(move |_, row| {
-            let total = results.borrow().len();
+        list.connect_row_selected(move |list, row| {
             const OVERFLOW_THRESHOLD: usize = 6;
-            if total > OVERFLOW_THRESHOLD
-                && let Some(row) = row
-            {
-                result_counter.set_text(&format!("{} of {}", row.index() + 1, total));
+            let Some(row) = row else {
+                return;
+            };
+            let (position, total) = selectable_position(list, row);
+            if total > OVERFLOW_THRESHOLD && position > 0 {
+                result_counter.set_text(&format!("{position} of {total}"));
                 result_counter.set_visible(true);
             }
         });
@@ -765,6 +766,23 @@ pub(crate) fn build_ui(
         system_monitor_view.kill.clone().connect_clicked(move |_| {
             terminate_selected_system_process_or_confirm(&window, &system_monitor_view, || {});
         });
+    }
+
+    {
+        // Per-row kill buttons need the same confirmation panel, given a PID.
+        let window = window.clone();
+        let displayed = Rc::clone(&system_monitor_view.displayed_processes);
+        let on_kill_row: Rc<dyn Fn(u32)> = Rc::new(move |pid| {
+            let process = displayed
+                .borrow()
+                .iter()
+                .find(|process| process.pid == pid)
+                .cloned();
+            if let Some(process) = process {
+                confirm_and_kill_process(&window, process, || {});
+            }
+        });
+        *system_monitor_view.on_kill_row.borrow_mut() = Some(on_kill_row);
     }
 
     {
@@ -1311,6 +1329,27 @@ pub(crate) fn action_bar(
     bar.append(&counter);
     bar.append(&actions);
     (bar, counter)
+}
+
+/// The 1-based position of `row` among the *selectable* rows of `list`, and the
+/// total number of selectable rows. Headers and informational rows do not count:
+/// the footer used to include them because it formatted the raw widget index.
+fn selectable_position(list: &ListBox, row: &gtk::ListBoxRow) -> (usize, usize) {
+    let mut position = 0;
+    let mut total = 0;
+    let mut child = list.first_child();
+    while let Some(widget) = child {
+        if let Some(candidate) = widget.downcast_ref::<gtk::ListBoxRow>()
+            && candidate.is_selectable()
+        {
+            total += 1;
+            if candidate == row {
+                position = total;
+            }
+        }
+        child = widget.next_sibling();
+    }
+    (position, total)
 }
 
 fn footer_button(label: &str) -> Button {
