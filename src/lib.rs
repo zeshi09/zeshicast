@@ -10,6 +10,7 @@ mod placeholders;
 mod process;
 mod search;
 mod services;
+pub mod trace;
 #[cfg(feature = "gui")]
 pub mod ui;
 

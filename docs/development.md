@@ -40,6 +40,23 @@ Supply chain check:
 nix shell nixpkgs#cargo-deny -c cargo deny check
 ```
 
+## Timing Marks
+
+`ZESHICAST_TRACE=1` logs where the time goes (Q2.1), with a `trace:` prefix:
+
+```text
+trace: apps load took 33.7 ms              model loads and the file index
+trace: first frame at 212.4 ms since start first frame after process start
+trace: show took 18.3 ms                   --toggle / launch → first frame
+trace: rss while hidden 81.2 MiB           every time the palette hides
+trace: keystroke to results n=42 p50=… p95=… max=…   summary at exit
+trace: rss at exit 83.0 MiB
+```
+
+Off by default and free when off. For the daemon:
+`systemctl --user stop zeshicast && ZESHICAST_TRACE=1 zeshicast-gtk --daemon`,
+then `zeshicast-gtk --quit` prints the summary. `scripts/measure.sh` automates it.
+
 ## Feature Flags
 
 - Default build: headless CLI, no GTK and no D-Bus services.

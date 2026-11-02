@@ -57,6 +57,7 @@ pub(crate) fn build_ui(
     // Timers and pollers follow the window (P3.3): a hidden palette does no
     // per-second work and forks nothing.
     crate::ui::track_window_visibility(&window);
+    trace_window_frames(&window);
 
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("launcher-frame");
@@ -240,6 +241,9 @@ pub(crate) fn build_ui(
             let result_counter = result_counter.clone();
             let displayed_query = query.clone();
             let snapshot_source = Rc::clone(&launcher);
+            // Q2.1: keystroke → rendered results, debounce included, for the
+            // query that is actually shown (stale ones are never delivered).
+            let typed_at = std::time::Instant::now();
             search_flow.request_off_thread(
                 query,
                 // The snapshot is taken on the main thread (cheap clones)...
@@ -256,6 +260,7 @@ pub(crate) fn build_ui(
                         Some(&result_counter),
                         actions,
                     );
+                    crate::trace::sample("keystroke to results", typed_at.elapsed());
                 },
             );
         });
@@ -1433,4 +1438,23 @@ pub(crate) fn calculate_launcher_geometry() -> (i32, i32) {
         }
     }
     (900, 760)
+}
+
+/// Q2.1 timing marks: the first frame after start, every "show requested →
+/// first frame", and the resident memory each time the palette goes idle.
+fn trace_window_frames(window: &ApplicationWindow) {
+    let first = std::cell::Cell::new(true);
+    window.connect_map(move |window| {
+        let is_first = first.replace(false);
+        // The tick callback fires when the frame clock starts the next frame,
+        // i.e. the first frame of the freshly mapped window.
+        window.add_tick_callback(move |_, _| {
+            if is_first {
+                crate::trace::since_start("first frame");
+            }
+            crate::trace::end("show");
+            glib::ControlFlow::Break
+        });
+    });
+    window.connect_hide(|_| crate::trace::log_rss("while hidden"));
 }

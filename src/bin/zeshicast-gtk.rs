@@ -86,6 +86,7 @@ fn main() -> glib::ExitCode {
     // Logging first (P4.4): the GUI process is the daemon in `--daemon` mode, so
     // its diagnostics belong in the journal with levels, not on stdout.
     zeshicast::logging::init();
+    zeshicast::trace::mark_process_start();
 
     // GTK4's Vulkan/NGL renderer randomly clips the tops of glyphs on some
     // GPU/driver setups; the cairo (software) renderer is glitch-free and plenty
@@ -183,6 +184,10 @@ fn main() -> glib::ExitCode {
             }
 
             let daemon = args.iter().any(|arg| arg == "--daemon");
+            if !daemon {
+                // Q2.1: closed by the first frame after the window maps.
+                zeshicast::trace::begin("show");
+            }
             let toggle = wants_toggle(&args);
             let view = parse_view(&args);
             // A palette built by this very call was just presented by
@@ -224,6 +229,7 @@ fn main() -> glib::ExitCode {
     // P2-4 graceful shutdown: systemd stop / Ctrl-C must not kill us between
     // writes; turn the signals into the ordinary quit path instead.
     install_termination_handlers(&app);
+    app.connect_shutdown(|_| zeshicast::trace::summary());
 
     app.run()
 }

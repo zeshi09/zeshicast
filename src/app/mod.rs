@@ -232,7 +232,7 @@ impl Zeshicast {
     /// Build the filesystem index. Safe to call off the main thread.
     #[cfg(feature = "gui")]
     pub(crate) fn build_file_index() -> Vec<FileEntry> {
-        load_file_index(&home_dir())
+        crate::trace::timed("file index", || load_file_index(&home_dir()))
     }
 
     /// Install a filesystem index built elsewhere (see `build_file_index`).
@@ -250,8 +250,12 @@ impl Zeshicast {
         let extensions = load_extension_manifests(&config_dir);
 
         migrate_legacy_storage_if_needed(&config_dir);
-        let storage_data = load_clipboard_and_usage(&config_dir, &preferences);
-        let (commands, scripts) = load_commands_and_scripts(&config_dir, &script_dirs, &extensions);
+        let storage_data = crate::trace::timed("clipboard and usage load", || {
+            load_clipboard_and_usage(&config_dir, &preferences)
+        });
+        let (commands, scripts) = crate::trace::timed("commands and scripts load", || {
+            load_commands_and_scripts(&config_dir, &script_dirs, &extensions)
+        });
         let calc_history = load_calc_history(&config_dir.join("calc_history.json"));
 
         let snippets = if storage::snippet_has_data(&config_dir) {
@@ -267,8 +271,10 @@ impl Zeshicast {
             load_named_values(&config_dir.join("snippets.txt"))
         };
 
+        let apps = crate::trace::timed("apps load", || load_apps(&home));
+
         Self {
-            apps: load_apps(&home),
+            apps,
             quicklinks: load_named_values(&config_dir.join("quicklinks.txt")),
             snippets,
             commands,
@@ -287,7 +293,7 @@ impl Zeshicast {
             frequencies: storage_data.frequencies,
             extensions,
             files: if index_files {
-                load_file_index(&home)
+                crate::trace::timed("file index", || load_file_index(&home))
             } else {
                 Vec::new()
             },
