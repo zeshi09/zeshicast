@@ -130,7 +130,11 @@ fn main() -> glib::ExitCode {
             }
 
             let daemon = args.iter().any(|arg| arg == "--daemon");
+            let toggle = wants_toggle(&args);
             let view = parse_view(&args);
+            // A palette built by this very call was just presented by
+            // `ensure_ui`; toggling it would hide it again at once.
+            let existed = state.borrow().is_some();
             zeshicast::ui::ensure_ui(
                 app,
                 &state,
@@ -140,7 +144,11 @@ fn main() -> glib::ExitCode {
             );
 
             if !daemon && let Some(state) = state.borrow().as_ref() {
-                zeshicast::ui::present_launcher_view(state, view.as_deref());
+                if toggle && existed {
+                    zeshicast::ui::toggle_launcher(state, &hold, view.as_deref());
+                } else {
+                    zeshicast::ui::present_launcher_view(state, view.as_deref());
+                }
             }
 
             glib::ExitCode::SUCCESS
@@ -152,6 +160,11 @@ fn main() -> glib::ExitCode {
     install_termination_handlers(&app);
 
     app.run()
+}
+
+/// `--toggle`: hide the palette when it is shown, show it when hidden (Q1.2).
+fn wants_toggle(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--toggle")
 }
 
 /// Resolve a requested start-up view from the command line.
@@ -202,6 +215,8 @@ fn help_text() -> &'static str {
 Usage:
   zeshicast-gtk            Show the launcher window
   zeshicast-gtk --daemon   Start hidden, keep the index warm, record clipboard history
+  zeshicast-gtk --toggle   Show the launcher, or hide it if it is already shown
+                           (bind this to your launcher hotkey)
   zeshicast-gtk --quit     Stop the running daemon
 
 Open a specific view directly (works against a running --daemon too):
@@ -262,6 +277,35 @@ mod tests {
     /// handlers: a delivered signal must run our Rust closure as an ordinary
     /// callback on the default main context (the SIGINT/SIGTERM path itself
     /// cannot be raised in unit tests without killing the test harness).
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[test]
+    fn toggle_flag_is_recognised_alongside_a_view() {
+        assert!(wants_toggle(&args(&["zeshicast-gtk", "--toggle"])));
+        assert!(wants_toggle(&args(&[
+            "zeshicast-gtk",
+            "--toggle",
+            "--clipboard"
+        ])));
+        assert_eq!(
+            parse_view(&args(&["zeshicast-gtk", "--toggle", "--clipboard"])).as_deref(),
+            Some("clipboard")
+        );
+        assert!(!wants_toggle(&args(&["zeshicast-gtk"])));
+        assert!(!wants_toggle(&args(&["zeshicast-gtk", "--daemon"])));
+        assert!(help_text().contains("--toggle"));
+    }
+
+    #[test]
+    fn toggle_hides_a_visible_palette_and_shows_a_hidden_one() {
+        use zeshicast::ui::{LauncherToggle, launcher_toggle_action};
+
+        assert_eq!(launcher_toggle_action(true), LauncherToggle::Hide);
+        assert_eq!(launcher_toggle_action(false), LauncherToggle::Show);
+    }
+
     #[test]
     fn unix_signal_handler_runs_on_the_default_main_context() {
         let handled = Arc::new(AtomicBool::new(false));

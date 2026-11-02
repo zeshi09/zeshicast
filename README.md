@@ -53,12 +53,27 @@ systemctl --user status zeshicast        # the daemon (owns org.freedesktop.Noti
 systemctl --user restart zeshicast
 ```
 
-Bind a key in niri to pop the launcher (the daemon shows its window instantly):
+Bind a key to toggle the launcher: the first press shows it (instantly, from
+the running daemon), the second press hides it. Without a daemon, `--toggle`
+simply opens the launcher.
 
 ```kdl
-// ~/.config/niri/config.kdl
-binds { Mod+Space { spawn "zeshicast-gtk"; } }
+// niri — ~/.config/niri/config.kdl
+binds { Mod+Space { spawn "zeshicast-gtk" "--toggle"; } }
 ```
+
+```ini
+# Hyprland — ~/.config/hypr/hyprland.conf
+bind = SUPER, SPACE, exec, zeshicast-gtk --toggle
+```
+
+```ini
+# Sway — ~/.config/sway/config
+bindsym $mod+space exec zeshicast-gtk --toggle
+```
+
+`--toggle` combines with a view: `zeshicast-gtk --toggle --clipboard` gives
+clipboard history its own key.
 
 > The notification server owns `org.freedesktop.Notifications` — **disable any
 > other notification daemon** (swaync / mako / dunst) or it won't acquire the

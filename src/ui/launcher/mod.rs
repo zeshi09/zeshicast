@@ -115,6 +115,36 @@ pub fn present_launcher_view(state: &GuiState, view: Option<&str>) {
     state.window.present();
 }
 
+/// What `zeshicast-gtk --toggle` does to a palette that already exists (Q1.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LauncherToggle {
+    Show,
+    Hide,
+}
+
+/// The same key shows the palette when it is hidden and hides it when it is
+/// shown, so one compositor binding is enough.
+pub fn launcher_toggle_action(window_visible: bool) -> LauncherToggle {
+    if window_visible {
+        LauncherToggle::Hide
+    } else {
+        LauncherToggle::Show
+    }
+}
+
+/// Show or hide the palette (Q1.2). Hiding takes the Escape path: the window is
+/// hidden while the daemon holds the application, and closed otherwise.
+pub fn toggle_launcher(
+    state: &GuiState,
+    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    view: Option<&str>,
+) {
+    match launcher_toggle_action(state.window.is_visible()) {
+        LauncherToggle::Hide => run::finish_interaction(&state.window, hold),
+        LauncherToggle::Show => present_launcher_view(state, view),
+    }
+}
+
 fn select_first_action_row(list: &ListBox) {
     let mut index = 0;
     while let Some(row) = list.row_at_index(index) {

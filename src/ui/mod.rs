@@ -21,7 +21,10 @@ mod views;
 mod widgets;
 
 pub use forms::show_form_panel;
-pub use launcher::{GuiState, ensure_ui, present_launcher, present_launcher_view};
+pub use launcher::{
+    GuiState, LauncherToggle, ensure_ui, launcher_toggle_action, present_launcher,
+    present_launcher_view, toggle_launcher,
+};
 pub use layer_shell::configure_launcher;
 pub use navigation::{LauncherView, NavigationStack};
 pub use osd::{dismiss_notification_osd, show_layout_osd, show_notification_osd, show_toast_osd};
