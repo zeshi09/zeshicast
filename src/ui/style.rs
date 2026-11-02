@@ -100,3 +100,41 @@ fn css_font_family(value: &str) -> String {
         filtered.to_string()
     }
 }
+
+/// GSK renderer for a `ui_renderer` preference value (Q2.3). Cairo stays the
+/// default: GTK's GL/Vulkan renderers clip glyph tops on some drivers. `gl`
+/// opts into NGL once `scripts/measure.sh --gui` shows it is worth it.
+pub(crate) fn renderer_for_preference(value: Option<&str>) -> &'static str {
+    match value
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("gl" | "ngl") => "ngl",
+        Some("vulkan") => "vulkan",
+        _ => "cairo",
+    }
+}
+
+/// The renderer from `preferences.toml`. Read before GTK starts, because
+/// GSK picks its renderer once per process; `GSK_RENDERER` overrides it.
+pub fn preferred_renderer() -> &'static str {
+    let preferences =
+        load_preferences_or_default(&home_dir().join(".config/zeshicast/preferences.toml"));
+    renderer_for_preference(preferences.get("ui_renderer").map(String::as_str))
+}
+
+#[cfg(test)]
+mod renderer_tests {
+    use super::renderer_for_preference;
+
+    #[test]
+    fn renderer_preference_maps_to_gsk_names_and_defaults_to_cairo() {
+        assert_eq!(renderer_for_preference(None), "cairo");
+        assert_eq!(renderer_for_preference(Some("cairo")), "cairo");
+        assert_eq!(renderer_for_preference(Some(" GL ")), "ngl");
+        assert_eq!(renderer_for_preference(Some("ngl")), "ngl");
+        assert_eq!(renderer_for_preference(Some("vulkan")), "vulkan");
+        // A typo keeps the safe default rather than an unknown GSK name.
+        assert_eq!(renderer_for_preference(Some("opengl!")), "cairo");
+    }
+}

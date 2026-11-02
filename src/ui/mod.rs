@@ -33,7 +33,7 @@ pub use navigation::{LauncherView, NavigationStack};
 pub use osd::{dismiss_notification_osd, show_layout_osd, show_notification_osd, show_toast_osd};
 pub use panels::{show_alias_panel, show_confirmation_panel, show_snippet_editor_panel};
 pub use status_strip::StatusStrip;
-pub use style::install_css;
+pub use style::{install_css, preferred_renderer};
 
 /// Whether the palette window is visible (P3.3).
 static UI_VISIBLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);

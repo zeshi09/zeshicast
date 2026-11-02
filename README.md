@@ -133,8 +133,9 @@ nix develop --command cargo run --features gui --bin zeshicast-gtk
 ```
 
 > The launcher defaults to `GSK_RENDERER=cairo` (the GTK Vulkan/NGL renderer
-> clips glyph tops on some drivers); override with `GSK_RENDERER=ngl` for GPU
-> rendering.
+> clips glyph tops on some drivers). Switch to GPU rendering with Preferences →
+> Appearance → Renderer → GL (after a restart), or per run with
+> `GSK_RENDERER=ngl`, which always wins. `scripts/measure.sh --gui` compares both.
 
 Results carry Raycast-style metadata: title, subtitle, category, score and icon.
 The GTK launcher renders this as a compact command list with action buttons.

@@ -3,6 +3,7 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("ui_font_size", "15"),
     ("ui_density", "compact"),
     ("ui_theme", "system"),
+    ("ui_renderer", "cairo"),
     ("show_status_strip", "true"),
     (
         "status_items",
@@ -56,6 +57,7 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
             ("ui_font_size", "Font size"),
             ("ui_density", "Row density"),
             ("ui_theme", "Theme"),
+            ("ui_renderer", "Renderer (after restart)"),
         ],
     },
     PrefSection {
@@ -210,6 +212,12 @@ fn preference_field_row(
     } else if key == "ui_theme" {
         row.append(&segmented_choice(
             &[("system", "System"), ("dark", "Dark"), ("light", "Light")],
+            effective_val,
+            &entry,
+        ));
+    } else if key == "ui_renderer" {
+        row.append(&segmented_choice(
+            &[("cairo", "Cairo"), ("gl", "GL")],
             effective_val,
             &entry,
         ));

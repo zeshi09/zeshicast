@@ -89,11 +89,12 @@ fn main() -> glib::ExitCode {
     zeshicast::trace::mark_process_start();
 
     // GTK4's Vulkan/NGL renderer randomly clips the tops of glyphs on some
-    // GPU/driver setups; the cairo (software) renderer is glitch-free and plenty
-    // fast for a launcher. Default to it, but let the user override.
+    // GPU/driver setups, so cairo (software) is the default. The `ui_renderer`
+    // preference can opt into GL (Q2.3); GSK_RENDERER still wins over both.
     if std::env::var_os("GSK_RENDERER").is_none() {
+        let renderer = zeshicast::ui::preferred_renderer();
         // Safe: runs at the very start of main, before any threads or GTK init.
-        unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
+        unsafe { std::env::set_var("GSK_RENDERER", renderer) };
     }
 
     // Q1.4: `--dmenu` is a separate, short-lived picker process. It is
