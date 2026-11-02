@@ -26,8 +26,14 @@ jobs:
             command: cargo fmt --check
           - name: check
             command: cargo check
+          # On failure, surface the failing tests as annotations: they are
+          # readable without signing in, unlike the job log.
           - name: test
-            command: cargo test
+            command: >-
+              cargo test 2>&1 | tee test.log; status=${PIPESTATUS[0]};
+              grep -E '^test .* FAILED$|panicked at|^---- ' test.log | head -n 40 |
+              while IFS= read -r line; do echo "::error title=cargo test::$line"; done;
+              exit "$status"
           - name: clippy
             command: cargo clippy --all-targets -- -D warnings
 
