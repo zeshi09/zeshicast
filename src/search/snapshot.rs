@@ -22,6 +22,7 @@ use crate::search::apps::{AppEntry, app_action};
 use crate::search::commands::CommandEntry;
 use crate::search::files;
 use crate::search::files::FileEntry;
+use crate::search::layout;
 use crate::search::media::search_media_actions;
 use crate::search::named_values::{ActionTarget, NamedValue};
 use crate::search::notifications::search_notification_actions;
@@ -34,6 +35,9 @@ use crate::search::{
     ScriptsProvider, SearchContext, SearchProvider, SwayProvider, SystemProvider, WebProvider,
     WindowsProvider, fuzzy_score,
 };
+
+/// Score handicap for results found by reading a Cyrillic query as QWERTY.
+const WRONG_LAYOUT_PENALTY: i32 = 50;
 
 /// Everything `search` reads from the application.
 #[derive(Debug, Clone)]
@@ -65,6 +69,35 @@ impl SearchData {
     }
 
     pub fn search(&self, query: &str) -> Vec<Action> {
+        let results = self.search_as_typed(query);
+        let Some(qwerty) = layout::qwerty_from_jcuken(query.trim()) else {
+            return results;
+        };
+
+        // Q1.1: a Cyrillic query may have been typed with the wrong layout
+        // active (`ашкуащч` → `firefox`). "Nothing found as typed" is not a
+        // usable signal: long Russian clipboard texts almost always contain
+        // a weak subsequence match. So both readings compete; the remapped
+        // one pays a penalty and wins only with a clearly better match.
+        let mut merged = results;
+        let mut seen: HashSet<String> = merged.iter().map(Action::identity).collect();
+        for mut action in self.search_as_typed(&qwerty) {
+            if seen.insert(action.identity()) {
+                action.score -= WRONG_LAYOUT_PENALTY;
+                merged.push(action);
+            }
+        }
+        merged.sort_by(|left, right| {
+            right
+                .score
+                .cmp(&left.score)
+                .then_with(|| left.title.cmp(&right.title))
+        });
+        merged.truncate(MAX_RESULTS);
+        merged
+    }
+
+    fn search_as_typed(&self, query: &str) -> Vec<Action> {
         let mut actions = Vec::new();
         let trimmed = query.trim();
         let lower = trimmed.to_lowercase();
@@ -487,5 +520,59 @@ mod tests {
                 "{category} in {categories:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    fn data(apps: &[&str], clipboard: &[&str]) -> SearchData {
+        SearchData {
+            apps: apps
+                .iter()
+                .map(|name| {
+                    crate::search::apps::parse_desktop_content(&format!(
+                        "[Desktop Entry]\nType=Application\nName={name}\nExec={}\n",
+                        name.to_lowercase()
+                    ))
+                    .expect("valid desktop entry")
+                })
+                .collect(),
+            quicklinks: Vec::new(),
+            snippets: Vec::new(),
+            commands: Vec::new(),
+            scripts: Vec::new(),
+            clipboard_history: clipboard.iter().map(|text| (*text).to_string()).collect(),
+            preferences: HashMap::new(),
+            aliases: HashMap::new(),
+            pins: HashSet::new(),
+            recent: Vec::new(),
+            frequencies: HashMap::new(),
+            extensions: Vec::new(),
+            files: Vec::new(),
+            calc_history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_query_typed_in_the_russian_layout_finds_the_app() {
+        let results = data(&["Firefox"], &[]).search("ашкуащч");
+        assert_eq!(results.first().map(|a| a.title.as_str()), Some("Firefox"));
+    }
+
+    #[test]
+    fn the_wrong_layout_beats_weak_matches_in_russian_text() {
+        // "еуду" is "tele" on the Russian layout. The clipboard text contains
+        // е…у…д…у as a weak subsequence, which must not hide Telegram.
+        let results = data(&["Telegram"], &["перед ужином думаю у окна"]).search("еуду");
+        assert_eq!(results.first().map(|a| a.title.as_str()), Some("Telegram"));
+    }
+
+    #[test]
+    fn a_cyrillic_query_that_matches_is_not_remapped() {
+        let results = data(&["Firefox"], &["привет мир"]).search("привет");
+        assert!(results.iter().any(|a| a.category == "Clipboard"));
+        assert!(results.iter().all(|a| a.title != "Firefox"));
     }
 }

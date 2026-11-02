@@ -6,6 +6,7 @@ pub(crate) mod commands;
 pub(crate) mod emoji;
 pub(crate) mod extensions;
 pub(crate) mod files;
+pub(crate) mod layout;
 pub(crate) mod media;
 pub(crate) mod mozlz4;
 pub(crate) mod named_values;
@@ -263,6 +264,14 @@ pub(crate) fn fuzzy_score(text: &str, query: &str) -> Option<i32> {
 ///
 /// The file index stores `name_lower` per entry and lowers the query once per
 /// search, so scanning 10 000 entries never allocates a string per entry.
+///
+/// Tiers, best first, with non-overlapping ranges (Q1.1): exact (500) →
+/// prefix (361–400) → substring at a word start (340–360) → acronym of word
+/// starts, `vsc` → "Visual Studio Code" (330) → substring inside a word
+/// (200–300) → a compact subsequence (< 200). Positions
+/// and lengths count characters, not bytes, so Cyrillic names are not
+/// penalised twice. A subsequence spread over the whole haystack is not a
+/// match: `invoice` must not hit "Mastering_REST_APIs_…_Advanced.azw3".
 pub(crate) fn fuzzy_score_lower(text_lower: &str, query: &str) -> Option<i32> {
     if query.is_empty() {
         return None;
@@ -272,34 +281,136 @@ pub(crate) fn fuzzy_score_lower(text_lower: &str, query: &str) -> Option<i32> {
         return Some(500);
     }
     if text_lower.starts_with(query) {
-        return Some(400 - text_lower.len() as i32);
+        return Some(400 - char_count(text_lower).min(39));
     }
-    if text_lower.contains(query) {
-        return Some(300 - text_lower.find(query).unwrap_or(0) as i32);
+    if let Some(score) = substring_score(text_lower, query) {
+        return Some(score);
     }
+    // Both remaining tiers need the query as an ordered subsequence; checking
+    // that first without allocating rejects most of a 10 000-entry index.
+    if !is_subsequence(text_lower, query) {
+        return None;
+    }
+    if is_acronym(text_lower, query) {
+        return Some(330);
+    }
+    subsequence_score(text_lower, query)
+}
 
-    let mut score = 0;
-    let mut last_index = None;
-    let mut chars = text_lower.char_indices();
+fn is_subsequence(text_lower: &str, query: &str) -> bool {
+    let mut text = text_lower.chars();
+    query
+        .chars()
+        .all(|wanted| text.by_ref().any(|actual| actual == wanted))
+}
 
-    for wanted in query.chars() {
-        let mut found = None;
-        for (index, actual) in chars.by_ref() {
-            if actual == wanted {
-                found = Some(index);
-                break;
-            }
-        }
-        let index = found?;
-        score += match last_index {
-            Some(last) if index == last + 1 => 20,
-            Some(last) => 10 - (index.saturating_sub(last) as i32).min(10),
-            None => 20 - index as i32,
+fn char_count(text: &str) -> i32 {
+    i32::try_from(text.chars().count()).unwrap_or(i32::MAX)
+}
+
+/// Characters after which a new word starts.
+fn is_word_separator(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '-' | '_' | '.' | '/' | '\\' | '(' | ')' | '[' | ']' | ':' | ','
+        )
+}
+
+/// Best substring occurrence: one at a word start beats one inside a word, and
+/// earlier beats later.
+fn substring_score(text_lower: &str, query: &str) -> Option<i32> {
+    let mut best: Option<i32> = None;
+    for (byte, _) in text_lower.match_indices(query) {
+        let position = char_count(&text_lower[..byte]);
+        let at_word_start = text_lower[..byte]
+            .chars()
+            .next_back()
+            .is_none_or(is_word_separator);
+        let score = if at_word_start {
+            360 - position.min(20)
+        } else {
+            300 - position.min(100)
         };
-        last_index = Some(index);
+        best = best.max(Some(score));
+        if at_word_start {
+            break;
+        }
+    }
+    best
+}
+
+/// `true` when every query character is the first letter of consecutive-or-
+/// later words, in order, and the query names at least two words.
+fn is_acronym(text_lower: &str, query: &str) -> bool {
+    let mut previous: Option<char> = None;
+    let mut initials = text_lower.chars().filter(move |&c| {
+        let starts_word = !is_word_separator(c) && previous.is_none_or(is_word_separator);
+        previous = Some(c);
+        starts_word
+    });
+    let mut matched = 0;
+    for wanted in query.chars().filter(|c| !c.is_whitespace()) {
+        if !initials.any(|initial| initial == wanted) {
+            return false;
+        }
+        matched += 1;
+    }
+    matched >= 2
+}
+
+/// Ordered subsequence match, rewarded for adjacency and word starts. Rejected
+/// when the matched characters are spread too far apart to mean anything.
+///
+/// Tries the first few occurrences of the query's first character as starting
+/// points, so `fx` in "f… firefox" can still find the compact match.
+fn subsequence_score(text_lower: &str, query: &str) -> Option<i32> {
+    const MAX_STARTS: usize = 8;
+
+    let text: Vec<char> = text_lower.chars().collect();
+    let wanted: Vec<char> = query.chars().collect();
+    let first = *wanted.first()?;
+    let max_span = wanted.len() * 3 + 6;
+
+    text.iter()
+        .enumerate()
+        .filter(|(_, c)| **c == first)
+        .take(MAX_STARTS)
+        .filter_map(|(start, _)| subsequence_from(&text, &wanted, start, max_span))
+        .max()
+}
+
+fn subsequence_from(text: &[char], wanted: &[char], start: usize, max_span: usize) -> Option<i32> {
+    let at_word_start = |index: usize| index == 0 || is_word_separator(text[index - 1]);
+
+    let mut score = 20 - i32::try_from(start).unwrap_or(20).min(20);
+    if at_word_start(start) {
+        score += 15;
+    }
+    let mut last = start;
+
+    for &c in &wanted[1..] {
+        let index = last
+            + 1
+            + text
+                .get(last + 1..)?
+                .iter()
+                .position(|actual| *actual == c)?;
+        if index - start + 1 > max_span {
+            return None;
+        }
+        score += if index == last + 1 {
+            20
+        } else {
+            10 - i32::try_from(index - last).unwrap_or(10).min(10)
+        };
+        if at_word_start(index) {
+            score += 15;
+        }
+        last = index;
     }
 
-    Some(score)
+    Some(score.min(199))
 }
 
 pub(crate) struct BrowserTabsProvider;
@@ -329,5 +440,74 @@ impl SearchProvider for ExtensionsProvider<'_> {
             }
         }
         actions
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn score(text: &str, query: &str) -> i32 {
+        fuzzy_score(text, query).unwrap_or_else(|| panic!("{query:?} should match {text:?}"))
+    }
+
+    #[test]
+    fn tiers_rank_exact_prefix_word_start_acronym_inner_subsequence() {
+        let exact = score("code", "code");
+        let prefix = score("codex", "code");
+        let word_start = score("visual studio code", "code");
+        let acronym = score("visual studio code", "vsc");
+        let inner = score("barcode scanner", "code");
+        let subsequence = score("firefox", "frfx");
+
+        assert!(exact > prefix, "{exact} > {prefix}");
+        assert!(prefix > word_start, "{prefix} > {word_start}");
+        assert!(word_start > acronym, "{word_start} > {acronym}");
+        assert!(acronym > inner, "{acronym} > {inner}");
+        assert!(inner > subsequence, "{inner} > {subsequence}");
+    }
+
+    #[test]
+    fn acronyms_beat_an_inner_substring() {
+        assert!(score("Visual Studio Code", "vsc") > score("dvsconfig", "vsc"));
+        assert!(score("Google Chrome", "gc") > score("bgcolor tool", "gc"));
+    }
+
+    #[test]
+    fn positions_count_characters_not_bytes() {
+        // Same character lengths and positions: Cyrillic must not be penalised
+        // for its two-byte UTF-8 encoding.
+        assert_eq!(score("заметки 2024", "2024"), score("notes12 2024", "2024"));
+        assert_eq!(
+            score("заметки.txt", "заметки"),
+            score("notes12.txt", "notes12")
+        );
+    }
+
+    #[test]
+    fn compact_subsequences_match_scattered_ones_do_not() {
+        assert!(fuzzy_score("Firefox", "frfx").is_some());
+        assert!(fuzzy_score("Neovim", "nvim").is_some());
+        assert!(fuzzy_score("Google Chrome", "gco").is_some());
+        assert_eq!(
+            fuzzy_score(
+                "Mastering_REST_APIs_Boosting_Your_Web_Development_Journey_with_Advanced.azw3",
+                "invoice"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_later_compact_match_is_found_after_an_early_stray_letter() {
+        // The first `f` is a dead end; the compact match starts at "firefox".
+        assert!(fuzzy_score("f bundle firefox", "frfx").is_some());
+    }
+
+    #[test]
+    fn single_letters_and_empty_queries() {
+        assert_eq!(fuzzy_score("firefox", ""), None);
+        assert!(fuzzy_score("firefox", "f").is_some());
+        assert_eq!(fuzzy_score("firefox", "z"), None);
     }
 }
