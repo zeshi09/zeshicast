@@ -41,6 +41,11 @@ the section under a version heading and tags it `vX.Y.Z`.
 - Preferences → Appearance → Renderer (Cairo, the default, or GL);
   `GSK_RENDERER` still overrides it.
 
+- When another daemon (mako, swaync, dunst…) owns
+  `org.freedesktop.Notifications`, zeshicast now names it in a toast and
+  the journal and explains the two ways out, instead of silently losing
+  notification history and Do Not Disturb.
+
 ### Changed
 
 - Fuzzy search ranks exact > prefix > word start > acronym (`vsc` → Visual

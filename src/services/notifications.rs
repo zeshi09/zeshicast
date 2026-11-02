@@ -225,6 +225,48 @@ pub fn mark_server_inactive() {
     lock_state().running = false;
 }
 
+/// Nix wraps programs as `.NAME-wrapped`, and `/proc/<pid>/comm` cuts that
+/// to 15 bytes (`.zeshicast-gtk-`). Recover `NAME` for the message.
+fn unwrap_nix_wrapper_name(comm: &str) -> String {
+    let Some(rest) = comm.strip_prefix('.') else {
+        return comm.to_string();
+    };
+    const SUFFIX: &str = "-wrapped";
+    for cut in (1..=SUFFIX.len()).rev() {
+        if let Some(name) = rest.strip_suffix(&SUFFIX[..cut]) {
+            return name.to_string();
+        }
+    }
+    rest.to_string()
+}
+
+/// What to tell the user when another process holds
+/// `org.freedesktop.Notifications` (Q3.2): which one, and the two ways out.
+/// `owner` is that process's `/proc/<pid>/comm`; anything but printable
+/// characters is dropped so a hostile name cannot garble the message.
+pub fn name_conflict_message(owner: Option<&str>) -> String {
+    let owner: Option<String> = owner
+        .map(|name| {
+            name.chars()
+                .filter(|c| !c.is_control())
+                .take(32)
+                .collect::<String>()
+        })
+        .map(|name| unwrap_nix_wrapper_name(name.trim()))
+        .filter(|name| !name.is_empty());
+    match owner {
+        Some(owner) => format!(
+            "{owner} already handles notifications, so zeshicast's history and \
+             Do Not Disturb are off. Stop {owner}, or turn off Notification \
+             features in Preferences → Extensions."
+        ),
+        None => "Another notification daemon is running, so zeshicast's history and \
+                 Do Not Disturb are off. Stop it, or turn off Notification features \
+                 in Preferences → Extensions."
+            .to_string(),
+    }
+}
+
 pub fn notification_snapshot() -> NotificationSnapshot {
     let state = lock_state();
     if !state.running {
@@ -358,6 +400,31 @@ mod tests {
         mark_server_active();
         assert_eq!(notification_snapshot().count, Some(1));
         assert_eq!(notification_snapshot().history[0].summary, "Second");
+    }
+
+    #[test]
+    fn name_conflict_message_names_the_owner_and_both_ways_out() {
+        let message = name_conflict_message(Some("mako\n"));
+        assert!(
+            message.starts_with("mako already handles notifications"),
+            "{message}"
+        );
+        assert!(message.contains("Stop mako"));
+        assert!(message.contains("Preferences"));
+
+        let unknown = name_conflict_message(None);
+        assert!(unknown.starts_with("Another notification daemon"));
+        assert_eq!(name_conflict_message(Some("  ")), unknown);
+
+        // NixOS wrappers, whole and cut to the 15-byte comm limit.
+        assert!(name_conflict_message(Some(".mako-wrapped")).starts_with("mako already"));
+        assert!(
+            name_conflict_message(Some(".zeshicast-gtk-")).starts_with("zeshicast-gtk already")
+        );
+        assert!(name_conflict_message(Some(".swaync-wrappe")).starts_with("swaync already"));
+
+        let hostile = name_conflict_message(Some("evil\u{1b}[2J\u{7}"));
+        assert!(!hostile.chars().any(char::is_control), "{hostile:?}");
     }
 
     #[test]

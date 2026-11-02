@@ -64,12 +64,41 @@ pub fn install_notification_server() {
         gio::BusNameOwnerFlags::REPLACE,
         |connection, _name| register_object(&connection),
         |_connection, _name| crate::services::notifications::mark_server_active(),
-        |_connection, _name| {
-            eprintln!("notifications: name lost — another daemon owns {NAME}");
+        |connection, _name| {
             crate::services::notifications::mark_server_inactive();
+            match connection {
+                Some(connection) => report_name_owner(&connection),
+                None => log::warn!("notifications: no session bus; the server is off"),
+            }
         },
     );
     OWNER.with(|cell| *cell.borrow_mut() = Some(owner));
+}
+
+/// Another process holds the name (mako, swaync, dunst…), which silently
+/// turned off history and DND before (Q3.2). Find out who, then say so in
+/// the journal and once on screen, with the two ways out.
+fn report_name_owner(connection: &gio::DBusConnection) {
+    connection.call(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionUnixProcessID",
+        Some(&(NAME,).to_variant()),
+        glib::VariantTy::new("(u)").ok(),
+        gio::DBusCallFlags::NONE,
+        2_000,
+        None::<&gio::Cancellable>,
+        |result| {
+            let owner = result
+                .ok()
+                .and_then(|reply| reply.get::<(u32,)>())
+                .and_then(|(pid,)| std::fs::read_to_string(format!("/proc/{pid}/comm")).ok());
+            let message = crate::services::notifications::name_conflict_message(owner.as_deref());
+            log::warn!("notifications: {message}");
+            crate::ui::show_toast_osd(None, &message);
+        },
+    );
 }
 
 fn register_object(connection: &gio::DBusConnection) {
