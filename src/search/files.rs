@@ -1,5 +1,4 @@
-use std::collections::HashSet;
-use std::env;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -90,71 +89,123 @@ pub(crate) fn search_files(files: &[FileEntry], query: &str, explicit: bool) -> 
     matches
 }
 
-pub(crate) fn load_file_index(home: &Path) -> Vec<FileEntry> {
-    let mut files = Vec::new();
-    let mut seen = HashSet::new();
-    let mut roots = Vec::new();
+/// Folders under `$HOME` that get a guaranteed share of the index before the
+/// rest of `$HOME` is walked: a large tree elsewhere (`~/Git`, `~/Code/…`) must
+/// not starve the places users actually look for files they just saved.
+const PRIORITY_DIRS: [&str; 5] = ["Desktop", "Downloads", "Documents", "Projects", "Code"];
 
-    if let Ok(cwd) = env::current_dir() {
-        if let Some(parent) = cwd.parent() {
-            roots.push(parent.to_path_buf());
-        }
-        roots.push(cwd);
-    }
-
-    for name in ["Code", "Documents", "Downloads", "Desktop", "Projects"] {
-        roots.push(home.join(name));
-    }
-    roots.push(home.to_path_buf());
-
-    for root in roots {
-        visit_files(&root, 0, &mut files, &mut seen);
-        if files.len() >= MAX_INDEXED_FILES {
-            break;
-        }
-    }
-
-    files
+/// The index roots for `home`: the priority folders, then `home` itself.
+///
+/// Deliberately independent of the working directory. The daemon inherits it
+/// from systemd or the compositor, so it says nothing about the user's intent,
+/// and walking `cwd.parent()` from `$HOME` (or `/`) used to fill the whole
+/// budget before `~/Downloads` was ever reached (Q0.1).
+pub(crate) fn default_roots(home: &Path) -> Vec<PathBuf> {
+    PRIORITY_DIRS
+        .iter()
+        .map(|name| home.join(name))
+        .chain(std::iter::once(home.to_path_buf()))
+        .collect()
 }
 
-fn visit_files(dir: &Path, depth: usize, files: &mut Vec<FileEntry>, seen: &mut HashSet<PathBuf>) {
-    if depth > MAX_FILE_DEPTH || files.len() >= MAX_INDEXED_FILES {
-        return;
-    }
+pub(crate) fn load_file_index(home: &Path) -> Vec<FileEntry> {
+    load_file_index_from(&default_roots(home), MAX_INDEXED_FILES)
+}
 
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
+/// Index `roots` into at most `limit` entries.
+///
+/// The last root is the catch-all (`$HOME`); the others are priority roots
+/// nested inside it. Every root gets an equal guaranteed share, filled
+/// breadth-first so shallow entries win over deep ones. Whatever budget is
+/// left then goes to the priority roots' overflow first, and to the catch-all
+/// last.
+pub(crate) fn load_file_index_from(roots: &[PathBuf], limit: usize) -> Vec<FileEntry> {
+    let Some((catch_all, priority)) = roots.split_last() else {
+        return Vec::new();
     };
+    let mut walk = IndexWalk {
+        files: Vec::new(),
+        seen: HashSet::new(),
+        roots: roots.iter().cloned().collect(),
+    };
+    let share = limit / roots.len();
+    let start = |root: &PathBuf| VecDeque::from([(root.clone(), 0)]);
 
-    for entry in entries.flatten() {
-        if files.len() >= MAX_INDEXED_FILES {
-            return;
+    let mut overflow = Vec::new();
+    for root in priority {
+        let cap = (walk.files.len() + share).min(limit);
+        overflow.push(walk.run(start(root), cap));
+    }
+    let cap = (walk.files.len() + share).min(limit);
+    let catch_all_rest = walk.run(start(catch_all), cap);
+    for rest in overflow {
+        walk.run(rest, limit);
+    }
+    walk.run(catch_all_rest, limit);
+
+    walk.files
+}
+
+struct IndexWalk {
+    files: Vec<FileEntry>,
+    /// Every path already considered, so a resumed walk and nested roots never
+    /// index an entry twice.
+    seen: HashSet<PathBuf>,
+    /// Index roots: when one walk meets another root it records the folder but
+    /// leaves its contents to that root's own walk and budget.
+    roots: HashSet<PathBuf>,
+}
+
+impl IndexWalk {
+    /// Walk `queue` breadth-first until the index holds `cap` entries. Returns
+    /// the unfinished part of the queue so the walk can resume later.
+    fn run(
+        &mut self,
+        mut queue: VecDeque<(PathBuf, usize)>,
+        cap: usize,
+    ) -> VecDeque<(PathBuf, usize)> {
+        while let Some((dir, depth)) = queue.pop_front() {
+            if depth > MAX_FILE_DEPTH {
+                continue;
+            }
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
+
+            for entry in entries.flatten() {
+                if self.files.len() >= cap {
+                    // Re-read this folder on resume; `seen` skips what is done.
+                    queue.push_front((dir, depth));
+                    return queue;
+                }
+
+                let path = entry.path();
+                if !self.seen.insert(path.clone()) {
+                    continue;
+                }
+
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy();
+                if should_skip_file(&name) {
+                    continue;
+                }
+
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
+                if file_type.is_symlink() {
+                    continue;
+                }
+
+                let is_dir = file_type.is_dir();
+                if is_dir && !self.roots.contains(&path) {
+                    queue.push_back((path.clone(), depth + 1));
+                }
+                self.files
+                    .push(FileEntry::new(name.to_string(), path, is_dir));
+            }
         }
-
-        let path = entry.path();
-        if !seen.insert(path.clone()) {
-            continue;
-        }
-
-        let file_name = entry.file_name();
-        let name = file_name.to_string_lossy();
-        if should_skip_file(&name) {
-            continue;
-        }
-
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_symlink() {
-            continue;
-        }
-
-        let is_dir = file_type.is_dir();
-        files.push(FileEntry::new(name.to_string(), path.clone(), is_dir));
-
-        if is_dir {
-            visit_files(&path, depth + 1, files, seen);
-        }
+        queue
     }
 }
 
@@ -193,6 +244,103 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    fn touch(path: &Path) {
+        fs::create_dir_all(path.parent().expect("test paths have a parent"))
+            .expect("create test folder");
+        fs::write(path, b"").expect("create test file");
+    }
+
+    fn crowd(dir: &Path, count: usize) {
+        for i in 0..count {
+            touch(&dir.join(format!("crowd-{i}.txt")));
+        }
+    }
+
+    fn indexed(files: &[FileEntry], name: &str) -> bool {
+        files.iter().any(|file| file.name == name)
+    }
+
+    #[test]
+    fn default_roots_stay_inside_home_and_ignore_the_working_directory() {
+        let home = Path::new("/home/user");
+        let roots = default_roots(home);
+
+        assert!(roots.iter().all(|root| root.starts_with(home)));
+        assert_eq!(roots.last().map(PathBuf::as_path), Some(home));
+        assert!(roots.contains(&home.join("Downloads")));
+    }
+
+    #[test]
+    fn priority_folders_are_indexed_even_when_home_is_crowded() {
+        // Q0.1: a big tree elsewhere in $HOME used to exhaust the budget before
+        // ~/Downloads was reached, so freshly downloaded files were unfindable.
+        let home = tempfile::tempdir().expect("temp home");
+        crowd(&home.path().join("Git/big"), 300);
+        touch(&home.path().join("Downloads/deep/er/needle.pdf"));
+
+        let files = load_file_index_from(&default_roots(home.path()), 60);
+
+        assert!(indexed(&files, "needle.pdf"), "~/Downloads must be indexed");
+        assert!(files.len() <= 60);
+    }
+
+    #[test]
+    fn a_huge_priority_folder_does_not_starve_home() {
+        let home = tempfile::tempdir().expect("temp home");
+        crowd(&home.path().join("Code/monorepo"), 300);
+        touch(&home.path().join("notes.md"));
+
+        let files = load_file_index_from(&default_roots(home.path()), 60);
+
+        assert!(
+            indexed(&files, "notes.md"),
+            "top-level home files keep a share"
+        );
+        assert!(files.len() <= 60);
+    }
+
+    #[test]
+    fn spare_budget_finishes_a_priority_folder_before_deep_home_content() {
+        let home = tempfile::tempdir().expect("temp home");
+        crowd(&home.path().join("Downloads"), 40);
+        crowd(&home.path().join("Git/a/b/c"), 300);
+
+        // 6 roots → a share of 10 each; Downloads needs 40.
+        let files = load_file_index_from(&default_roots(home.path()), 60);
+
+        let downloads = files
+            .iter()
+            .filter(|file| file.path.parent() == Some(&home.path().join("Downloads")))
+            .count();
+        assert_eq!(downloads, 40, "overflow of a priority folder is resumed");
+        assert!(files.len() <= 60);
+    }
+
+    #[test]
+    fn index_has_no_duplicates_and_records_priority_folders_once() {
+        let home = tempfile::tempdir().expect("temp home");
+        touch(&home.path().join("Downloads/a.txt"));
+        touch(&home.path().join("Documents/b.txt"));
+        touch(&home.path().join("c.txt"));
+
+        let files = load_file_index_from(&default_roots(home.path()), 1_000);
+
+        let unique: HashSet<_> = files.iter().map(|file| &file.path).collect();
+        assert_eq!(unique.len(), files.len());
+        for name in ["a.txt", "b.txt", "c.txt", "Downloads", "Documents"] {
+            assert!(indexed(&files, name), "{name} is indexed");
+        }
+    }
+
+    #[test]
+    fn a_zero_budget_or_no_roots_yields_an_empty_index() {
+        let home = tempfile::tempdir().expect("temp home");
+        touch(&home.path().join("Downloads/a.txt"));
+
+        assert!(load_file_index_from(&default_roots(home.path()), 0).is_empty());
+        assert!(load_file_index_from(&[], 100).is_empty());
     }
 
     #[test]
