@@ -225,6 +225,11 @@ pub(crate) struct CappedRun {
     pub(crate) stderr_truncated: bool,
 }
 
+/// How long [`run_capped`] still waits for its readers after killing the
+/// command's process group.
+#[cfg(any(feature = "gui", test))]
+const READER_GRACE: Duration = Duration::from_millis(200);
+
 /// Run `command` with a deadline, draining stdout and stderr on their own
 /// threads while keeping at most `stdout_cap`/`stderr_cap` bytes each.
 ///
@@ -240,10 +245,24 @@ pub(crate) fn run_capped(
     stdout_cap: usize,
     stderr_cap: usize,
 ) -> io::Result<CappedRun> {
+    use std::os::unix::process::CommandExt;
     use std::process::Stdio;
 
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Own process group (pgid = pid), so the deadline can take down the
+    // grandchildren too: a shell that does not exec its last command (Ubuntu's
+    // dash) or a backgrounded job keeps the pipes open after `sh` dies, and
+    // the reader threads below would block until it exits on its own (N-5).
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
     let mut child = command.spawn()?;
+    let group = rustix::process::Pid::from_raw(child.id() as i32);
+    let kill_group = || {
+        if let Some(group) = group {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+        }
+    };
 
     let stdout_reader = child
         .stdout
@@ -262,18 +281,47 @@ pub(crate) fn run_capped(
         }
         if Instant::now() >= deadline {
             timed_out = true;
+            kill_group();
             let _ = child.kill();
             break child.wait()?;
         }
         std::thread::sleep(Duration::from_millis(10));
     };
 
-    let (stdout, stdout_truncated) = stdout_reader
-        .map(|handle| handle.join().unwrap_or_default())
-        .unwrap_or_default();
-    let (stderr, stderr_truncated) = stderr_reader
-        .map(|handle| handle.join().unwrap_or_default())
-        .unwrap_or_default();
+    // The direct child is gone, but a grandchild may still hold the pipes.
+    // Give the readers until the deadline, then end the group so they finish.
+    let readers_done = || {
+        stdout_reader
+            .as_ref()
+            .is_none_or(|reader| reader.is_finished())
+            && stderr_reader
+                .as_ref()
+                .is_none_or(|reader| reader.is_finished())
+    };
+    let mut killed_at: Option<Instant> = None;
+    while !readers_done() {
+        match killed_at {
+            None if Instant::now() >= deadline => {
+                kill_group();
+                killed_at = Some(Instant::now());
+            }
+            // Something outside the group (it called setsid) still holds a
+            // pipe: stop waiting rather than block the caller forever.
+            Some(killed) if killed.elapsed() >= READER_GRACE => break,
+            _ => {}
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // A reader that is still blocked is left to finish on its own; its output
+    // is reported as truncated instead of being waited for.
+    let collect = |reader: Option<std::thread::JoinHandle<(Vec<u8>, bool)>>| match reader {
+        Some(handle) if handle.is_finished() => handle.join().unwrap_or_default(),
+        Some(_) => (Vec::new(), true),
+        None => (Vec::new(), false),
+    };
+    let (stdout, stdout_truncated) = collect(stdout_reader);
+    let (stderr, stderr_truncated) = collect(stderr_reader);
 
     Ok(CappedRun {
         status,
@@ -549,14 +597,53 @@ mod tests {
 
     #[test]
     fn run_capped_kills_a_child_that_outlives_the_deadline() {
+        // `; true` keeps `sleep` a grandchild in every shell: bash execs the
+        // last command of `-c`, Ubuntu's dash 0.5.12 does not, and the
+        // grandchild holding the pipes is what used to defeat the deadline.
         let mut command = Command::new("sh");
-        command.arg("-c").arg("sleep 5");
+        command.arg("-c").arg("sleep 5; true");
         let started = Instant::now();
         let run =
             run_capped(&mut command, Duration::from_millis(200), 1024, 1024).expect("run sleep");
 
         assert!(run.timed_out);
         assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn run_capped_does_not_wait_for_a_background_grandchild_holding_the_pipes() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("sleep 5 & echo done");
+        let started = Instant::now();
+        let run = run_capped(&mut command, Duration::from_millis(300), 1024, 1024).expect("run sh");
+
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "done\n");
+        assert!(run.status.success(), "the shell itself finished normally");
+    }
+
+    #[test]
+    fn run_capped_returns_even_if_a_pipe_holder_left_the_group() {
+        // `setsid` puts the sleeper in a new session, out of reach of the
+        // group kill; the call must still return instead of blocking.
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("setsid sleep 5 & echo done");
+        let started = Instant::now();
+        let run = run_capped(&mut command, Duration::from_millis(300), 1024, 1024).expect("run sh");
+
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(
+            run.stdout_truncated,
+            "the blocked reader is reported, not awaited"
+        );
     }
 
     #[test]

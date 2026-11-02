@@ -9,6 +9,13 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Script and JSON command timeouts now hold: a command whose shell does not
+  exec its last command (Ubuntu's dash), or that leaves a background job on
+  its output, is killed with its whole process group at the deadline instead
+  of blocking until the leftover process exits.
+
 ## [0.2.0] — 2026-11-02
 
 ### Added
