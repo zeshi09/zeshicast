@@ -155,6 +155,16 @@ fn load_commands_and_scripts(
     (commands, scripts)
 }
 
+/// A runnable entry and its stable id (Q1.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandRef {
+    /// `<kind>/<slug>`, see [`crate::deeplink::command_id`].
+    pub id: String,
+    pub kind: String,
+    pub category: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct CommandSummary {
     pub kind: String,
@@ -316,6 +326,46 @@ impl Zeshicast {
         self.search_data().search(query)
     }
 
+    /// Commands and scripts addressable by id (Q1.5), in `list_commands`
+    /// order.
+    pub fn command_refs(&self) -> Vec<CommandRef> {
+        self.list_commands()
+            .into_iter()
+            .map(|summary| CommandRef {
+                id: crate::deeplink::command_id(&summary.kind, &summary.name),
+                kind: summary.kind,
+                category: summary.category,
+                name: summary.name,
+            })
+            .collect()
+    }
+
+    /// Resolve `id` to its entry and to the action Enter would run for it.
+    ///
+    /// The action comes from the ordinary search, so the capability ceiling,
+    /// argument forms and risk classes apply exactly as when the row is picked
+    /// by hand. Unknown and ambiguous ids are errors, never a best guess.
+    pub fn resolve_command(&self, id: &str) -> Result<(CommandRef, Action), String> {
+        let mut matches = self
+            .command_refs()
+            .into_iter()
+            .filter(|entry| entry.id == id);
+        let entry = matches
+            .next()
+            .ok_or_else(|| format!("unknown command id `{id}` (see --cmd list)"))?;
+        if matches.next().is_some() {
+            return Err(format!(
+                "command id `{id}` is ambiguous: rename one of the entries"
+            ));
+        }
+        let action = self
+            .search(&entry.name)
+            .into_iter()
+            .find(|action| action.title == entry.name && action.category == entry.category)
+            .ok_or_else(|| format!("command `{}` is not available right now", entry.name))?;
+        Ok((entry, action))
+    }
+
     pub fn list_commands(&self) -> Vec<CommandSummary> {
         let mut summaries = self
             .commands
@@ -412,6 +462,67 @@ mod tests {
             files: Vec::new(),
             config_dir,
         }
+    }
+
+    fn command_with(name: &str, permissions: &str) -> crate::search::commands::CommandEntry {
+        crate::search::commands::parse_command_entry(&format!(
+            "name = \"{name}\"\nmode = \"shell\"\ncommand = \"docker ps\"\n\
+             category = \"Docker\"\npermissions = [{permissions}]\n"
+        ))
+        .expect("valid command")
+    }
+
+    fn command(name: &str) -> crate::search::commands::CommandEntry {
+        command_with(name, "\"shell\"")
+    }
+
+    #[test]
+    fn command_ids_resolve_to_the_action_search_would_run() {
+        let mut app = test_app(PathBuf::from("/tmp/zeshicast-test"), HashMap::new());
+        app.commands = vec![command("Docker PS"), command("Docker Images")];
+
+        let ids: Vec<String> = app
+            .command_refs()
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert!(ids.contains(&"command/docker-ps".to_string()), "{ids:?}");
+
+        let (entry, action) = app.resolve_command("command/docker-ps").expect("resolves");
+        assert_eq!(entry.name, "Docker PS");
+        assert_eq!(action.title, "Docker PS");
+        assert_eq!(action.category, "Docker");
+        // Same gate as a hand-picked row: a command asks before it runs.
+        assert!(
+            action.risk.requires_confirmation(),
+            "{:?} {:?}",
+            action.kind,
+            action.risk
+        );
+    }
+
+    #[test]
+    fn a_command_id_cannot_bypass_the_capability_ceiling() {
+        let mut app = test_app(PathBuf::from("/tmp/zeshicast-test"), HashMap::new());
+        app.commands = vec![command_with("Docker PS", "")];
+
+        // Without the `shell` permission the row is blocked; resolving it by
+        // id hands back that same blocked row, not a runnable one.
+        let (_, action) = app.resolve_command("command/docker-ps").expect("resolves");
+        assert!(matches!(action.kind, ActionKind::None), "{:?}", action.kind);
+    }
+
+    #[test]
+    fn unknown_and_ambiguous_command_ids_are_errors() {
+        let mut app = test_app(PathBuf::from("/tmp/zeshicast-test"), HashMap::new());
+        app.commands = vec![command("Docker PS"), command("docker-ps")];
+
+        let unknown = app.resolve_command("command/nope").expect_err("unknown id");
+        assert!(unknown.contains("--cmd list"), "{unknown}");
+        let ambiguous = app
+            .resolve_command("command/docker-ps")
+            .expect_err("two entries share the slug");
+        assert!(ambiguous.contains("ambiguous"), "{ambiguous}");
     }
 
     fn copy_row(category: &str) -> Action {

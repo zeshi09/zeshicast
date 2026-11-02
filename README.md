@@ -214,6 +214,45 @@ zeshicast-gtk --view dashboard      # --dashboard, --network, --media, --audio,
 zeshicast-gtk --view media          # --ai, --system, --notifications, --emoji, --fonts
 ```
 
+## Commands by id and `zeshicast://` links
+
+Every command and script has a stable id, `<kind>/<slug of its name>`:
+
+```bash
+zeshicast-gtk --cmd list                    # command/docker-containers	Docker Containers …
+zeshicast-gtk --cmd run command/weather     # run it as if picked with Enter
+```
+
+`--cmd run` takes exactly the path Enter takes: commands that run code still
+ask for confirmation, and missing arguments still open the form. An unknown or
+ambiguous id is reported on your terminal with exit code 1. Bind one to a key:
+
+```kdl
+binds { Mod+W { spawn "zeshicast-gtk" "--cmd" "run" "command/weather"; } }
+```
+
+The desktop entry registers the `zeshicast://` scheme:
+
+```text
+zeshicast://view/clipboard                  open a view
+zeshicast://search?q=invoice                open the palette with a query
+zeshicast://command/command/weather         put a command in the search
+```
+
+A link never runs anything by itself, because it can come from any web page or
+chat message: a command link only selects the command, and you press Enter.
+
+## dmenu mode
+
+```bash
+git branch --format='%(refname:short)' | zeshicast-gtk --dmenu -p Branch
+```
+
+Prints the chosen line and exits 0; Esc exits 1. With no matching line, Enter
+prints what you typed. `--password` hides the input and prints it (no list
+needed). Runs as its own short-lived process, so it works with or without the
+daemon.
+
 ## CLI usage
 
 ```bash

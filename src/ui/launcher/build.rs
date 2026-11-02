@@ -1138,6 +1138,53 @@ pub(crate) fn build_ui(
         })
     };
 
+    // Runs an action the way Enter runs the selected row (`--cmd run`, Q1.5).
+    let run_action: Rc<dyn Fn(Action)> = {
+        let window = window.clone();
+        let launcher = Rc::clone(&launcher);
+        let hold = Rc::clone(hold);
+        let entry = entry.clone();
+        let list = list.clone();
+        let results = Rc::clone(&results);
+        let navigation = navigation.clone();
+        let action_bar = action_bar.clone();
+        let ai_chat_view = ai_chat_view.clone();
+        let audio_view = audio_view.clone();
+        let dashboard_view = dashboard_view.clone();
+        let emoji_view = emoji_view.clone();
+        let font_view = font_view.clone();
+        let system_monitor_view = system_monitor_view.clone();
+        let media_view = media_view.clone();
+        let network_list = network_view.list.clone();
+        let notifications_view = notifications_view.clone();
+        let script_output_view = script_output_view.clone();
+        let window_grid_view = window_grid_view.clone();
+        Rc::new(move |action: Action| {
+            super::run::dispatch_action_with_views(
+                &window,
+                &launcher,
+                &hold,
+                &entry,
+                &list,
+                &results,
+                &navigation,
+                &action_bar,
+                &ai_chat_view,
+                &audio_view,
+                &dashboard_view,
+                &emoji_view,
+                &font_view,
+                &system_monitor_view,
+                &media_view,
+                &network_list,
+                &notifications_view,
+                &script_output_view,
+                &window_grid_view,
+                action,
+            );
+        })
+    };
+
     GuiState {
         launcher,
         results,
@@ -1147,6 +1194,7 @@ pub(crate) fn build_ui(
         action_bar,
         navigation,
         open_view,
+        run_action,
     }
 }
 

@@ -106,6 +106,39 @@ fn main() -> glib::ExitCode {
         println!("{}", help_text());
         return glib::ExitCode::SUCCESS;
     }
+    // Q1.5: `--cmd` and `zeshicast://` links are validated here, in the
+    // invoking process, so a mistake is reported on this terminal with exit
+    // 1. Only valid requests are forwarded to the (possibly running) daemon.
+    match parse_cmd(&args) {
+        Some(Err(error)) => {
+            eprintln!("zeshicast-gtk: {error}");
+            return glib::ExitCode::FAILURE;
+        }
+        Some(Ok(CmdRequest::List)) => {
+            for line in zeshicast::ui::command_list_lines() {
+                println!("{line}");
+            }
+            return glib::ExitCode::SUCCESS;
+        }
+        Some(Ok(CmdRequest::Run(id))) => {
+            if let Err(error) = zeshicast::ui::check_command_id(&id) {
+                eprintln!("zeshicast-gtk: {error}");
+                return glib::ExitCode::FAILURE;
+            }
+        }
+        None => {}
+    }
+    if let Some(link) = deep_link_arg(&args) {
+        let checked = zeshicast::deeplink::parse_deep_link(link).and_then(|link| match link {
+            zeshicast::deeplink::DeepLink::Command { id } => zeshicast::ui::check_command_id(&id),
+            _ => Ok(()),
+        });
+        if let Err(error) = checked {
+            eprintln!("zeshicast-gtk: {error}");
+            return glib::ExitCode::FAILURE;
+        }
+    }
+
     if let Some(options) = zeshicast::dmenu::parse_dmenu_args(&args) {
         let items = match zeshicast::dmenu::read_items(std::io::stdin().lock()) {
             Ok(items) => items,
@@ -164,10 +197,23 @@ fn main() -> glib::ExitCode {
             );
 
             if !daemon && let Some(state) = state.borrow().as_ref() {
-                if toggle && existed {
-                    zeshicast::ui::toggle_launcher(state, &hold, view.as_deref());
+                // Already validated by the invoking process; an error here
+                // means the configuration changed in between.
+                let outcome = if let Some(Ok(CmdRequest::Run(id))) = parse_cmd(&args) {
+                    zeshicast::ui::run_command_by_id(state, &id)
+                } else if let Some(link) = deep_link_arg(&args) {
+                    zeshicast::deeplink::parse_deep_link(link)
+                        .and_then(|link| zeshicast::ui::open_deep_link(state, &link))
                 } else {
-                    zeshicast::ui::present_launcher_view(state, view.as_deref());
+                    if toggle && existed {
+                        zeshicast::ui::toggle_launcher(state, &hold, view.as_deref());
+                    } else {
+                        zeshicast::ui::present_launcher_view(state, view.as_deref());
+                    }
+                    Ok(())
+                };
+                if let Err(error) = outcome {
+                    log::warn!("command line request failed: {error}");
                 }
             }
 
@@ -184,6 +230,35 @@ fn main() -> glib::ExitCode {
 
 fn wants_help(args: &[String]) -> bool {
     args.iter().any(|arg| arg == "--help" || arg == "-h")
+}
+
+/// `--cmd list` / `--cmd run <id>` (Q1.5).
+#[derive(Debug, PartialEq, Eq)]
+enum CmdRequest {
+    List,
+    Run(String),
+}
+
+fn parse_cmd(args: &[String]) -> Option<Result<CmdRequest, String>> {
+    let position = args.iter().position(|arg| arg == "--cmd")?;
+    let usage = "usage: --cmd list | --cmd run <id>";
+    Some(match args.get(position + 1).map(String::as_str) {
+        Some("list") => Ok(CmdRequest::List),
+        Some("run") => match args.get(position + 2) {
+            Some(id) if !id.trim().is_empty() && !id.starts_with("--") => {
+                Ok(CmdRequest::Run(id.trim().to_string()))
+            }
+            _ => Err(format!("missing command id; {usage}")),
+        },
+        _ => Err(usage.to_string()),
+    })
+}
+
+/// The first `zeshicast://` argument (`%u` from the desktop file).
+fn deep_link_arg(args: &[String]) -> Option<&str> {
+    args.iter()
+        .map(String::as_str)
+        .find(|arg| zeshicast::deeplink::is_deep_link(arg))
 }
 
 /// `--toggle`: hide the palette when it is shown, show it when hidden (Q1.2).
@@ -242,6 +317,16 @@ Usage:
   zeshicast-gtk --toggle   Show the launcher, or hide it if it is already shown
                            (bind this to your launcher hotkey)
   zeshicast-gtk --quit     Stop the running daemon
+
+Commands and links:
+  zeshicast-gtk --cmd list         Print `id<TAB>name` for commands and scripts
+  zeshicast-gtk --cmd run <id>     Run one as if picked and confirmed with Enter
+                                   (risky ones still ask; forms still open)
+  zeshicast-gtk zeshicast://view/<name>
+  zeshicast-gtk zeshicast://search?q=<text>
+  zeshicast-gtk zeshicast://command/<id>
+                                   Links only open the palette; a command link
+                                   puts the command in the search, Enter runs it
 
 Pick a line from stdin (dmenu/rofi style; prints the choice, exit 1 on Esc):
   zeshicast-gtk --dmenu [--prompt TEXT | -p TEXT] [--password]
@@ -325,6 +410,41 @@ mod tests {
         assert!(!wants_toggle(&args(&["zeshicast-gtk"])));
         assert!(!wants_toggle(&args(&["zeshicast-gtk", "--daemon"])));
         assert!(help_text().contains("--toggle"));
+    }
+
+    #[test]
+    fn cmd_requests_are_parsed_and_mistakes_explained() {
+        assert_eq!(parse_cmd(&args(&["zeshicast-gtk"])), None);
+        assert_eq!(
+            parse_cmd(&args(&["zeshicast-gtk", "--cmd", "list"])),
+            Some(Ok(CmdRequest::List))
+        );
+        assert_eq!(
+            parse_cmd(&args(&[
+                "zeshicast-gtk",
+                "--cmd",
+                "run",
+                "command/docker-ps"
+            ])),
+            Some(Ok(CmdRequest::Run("command/docker-ps".to_string())))
+        );
+        for bad in [
+            &["zeshicast-gtk", "--cmd"][..],
+            &["zeshicast-gtk", "--cmd", "launch", "x"],
+            &["zeshicast-gtk", "--cmd", "run"],
+            &["zeshicast-gtk", "--cmd", "run", "--toggle"],
+        ] {
+            assert!(matches!(parse_cmd(&args(bad)), Some(Err(_))), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_first_deep_link_argument_is_found() {
+        assert_eq!(
+            deep_link_arg(&args(&["zeshicast-gtk", "zeshicast://view/clipboard"])),
+            Some("zeshicast://view/clipboard")
+        );
+        assert_eq!(deep_link_arg(&args(&["zeshicast-gtk", "--toggle"])), None);
     }
 
     #[test]

@@ -47,6 +47,14 @@
           preFixup = ''
             gappsWrapperArgs+=(--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.wl-clipboard pkgs.wtype ]})
           '';
+          # The launcher's desktop entry: an app-menu entry and the handler
+          # for `zeshicast://` links (MimeType=x-scheme-handler/zeshicast, Q1.5).
+          postInstall = ''
+            install -Dm0644 packaging/zeshicast-gtk.desktop \
+              $out/share/applications/zeshicast-gtk.desktop
+            substituteInPlace $out/share/applications/zeshicast-gtk.desktop \
+              --replace-fail "@BIN@" "$out/bin"
+          '';
           meta = {
             description =
               "Raycast-like launcher + freedesktop notification daemon for Wayland/niri";

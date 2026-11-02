@@ -2,9 +2,10 @@
 Type=Application
 Name=Zeshicast
 Comment=Raycast-like launcher for Linux
-Exec=@BIN@/zeshicast-gtk
+Exec=@BIN@/zeshicast-gtk %u
 Icon=system-search-symbolic
 Terminal=false
 Categories=Utility;
+MimeType=x-scheme-handler/zeshicast;
 StartupNotify=false
 StartupWMClass=dev.zeshi.Zeshicast

@@ -67,6 +67,7 @@ pub struct GuiState {
     action_bar: GtkBox,
     navigation: crate::ui::NavigationStack,
     open_view: Rc<dyn Fn(&str) -> bool>,
+    run_action: Rc<dyn Fn(Action)>,
 }
 
 pub fn ensure_ui(
@@ -97,8 +98,8 @@ pub fn present_launcher(state: &GuiState) {
 
 /// Present the window, optionally jumping straight to a named view
 /// (e.g. "clipboard", "dashboard"). Falls back to the search view when
-/// `view` is `None` or unrecognised.
-pub fn present_launcher_view(state: &GuiState, view: Option<&str>) {
+/// `view` is `None` or unrecognised. Returns whether `view` was opened.
+pub fn present_launcher_view(state: &GuiState, view: Option<&str>) -> bool {
     state.entry.set_text("");
     show_root_view(&state.navigation, &state.entry, &state.action_bar);
     update_results(
@@ -113,6 +114,64 @@ pub fn present_launcher_view(state: &GuiState, view: Option<&str>) {
         state.entry.grab_focus();
     }
     state.window.present();
+    opened
+}
+
+/// Present the palette with `query` typed into the search (deep links).
+pub fn present_launcher_with_query(state: &GuiState, query: &str) {
+    present_launcher_view(state, None);
+    state.entry.set_text(query);
+    state.entry.set_position(-1);
+}
+
+/// `zeshicast-gtk --cmd run <id>` (Q1.5): resolve the id through the normal
+/// search and run the action as Enter would, gates and forms included. The
+/// palette is shown first so a confirmation or a form has somewhere to go.
+pub fn run_command_by_id(state: &GuiState, id: &str) -> Result<(), String> {
+    let (_, action) = state.launcher.borrow().resolve_command(id)?;
+    present_launcher_view(state, None);
+    (state.run_action)(action);
+    Ok(())
+}
+
+/// Open a `zeshicast://` link (Q1.5). A link never runs anything: a command
+/// link only puts that command in the search for the user to confirm with
+/// Enter, because links can come from untrusted pages.
+pub fn open_deep_link(state: &GuiState, link: &crate::deeplink::DeepLink) -> Result<(), String> {
+    use crate::deeplink::DeepLink;
+
+    match link {
+        DeepLink::View { name } => {
+            if !present_launcher_view(state, Some(name)) {
+                return Err(format!("unknown view `{name}`"));
+            }
+        }
+        DeepLink::Search { query } => present_launcher_with_query(state, query),
+        DeepLink::Command { id } => {
+            let (entry, _) = state.launcher.borrow().resolve_command(id)?;
+            present_launcher_with_query(state, &entry.name);
+        }
+    }
+    Ok(())
+}
+
+/// Check that `id` names exactly one available entry, from the invoking
+/// process, so `--cmd run` and command links report a typo in the user's
+/// terminal instead of the daemon's journal.
+pub fn check_command_id(id: &str) -> Result<(), String> {
+    Zeshicast::load_deferred_files()
+        .resolve_command(id)
+        .map(|_| ())
+}
+
+/// `id<TAB>name` for every runnable entry, for `zeshicast-gtk --cmd list`.
+/// Loads the configuration without the file index, which ids never need.
+pub fn command_list_lines() -> Vec<String> {
+    Zeshicast::load_deferred_files()
+        .command_refs()
+        .into_iter()
+        .map(|entry| format!("{}\t{}", entry.id, entry.name))
+        .collect()
 }
 
 /// What `zeshicast-gtk --toggle` does to a palette that already exists (Q1.2).
@@ -141,7 +200,9 @@ pub fn toggle_launcher(
 ) {
     match launcher_toggle_action(state.window.is_visible()) {
         LauncherToggle::Hide => run::finish_interaction(&state.window, hold),
-        LauncherToggle::Show => present_launcher_view(state, view),
+        LauncherToggle::Show => {
+            present_launcher_view(state, view);
+        }
     }
 }
 

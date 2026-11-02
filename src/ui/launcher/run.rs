@@ -160,87 +160,138 @@ pub(crate) fn run_selected_with_views(
     window_grid_view: &crate::ui::WindowGridView,
 ) {
     if let Some(action) = selected_action(list, results) {
-        if let Some(command) = action.launcher_command() {
-            match command {
-                crate::action::LauncherCommand::CreateSnippet(content) => {
-                    crate::ui::show_snippet_editor_panel(
-                        window,
-                        launcher,
-                        None,
-                        "",
-                        "",
-                        &content,
-                        || {},
-                    );
-                }
-                crate::action::LauncherCommand::AiChatWithPrompt(prompt) => {
-                    run_launcher_command(
-                        crate::action::LauncherCommand::AiChatWithPrompt(prompt),
-                        navigation,
-                        entry,
-                        action_bar,
-                        ai_chat_view,
-                        audio_view,
-                        dashboard_view,
-                        emoji_view,
-                        font_view,
-                        system_monitor_view,
-                        media_view,
-                        network_list,
-                        notifications_view,
-                        window_grid_view,
-                    );
-                    ask_ai_from_view(launcher, ai_chat_view);
-                }
-                other => {
-                    run_launcher_command(
-                        other,
-                        navigation,
-                        entry,
-                        action_bar,
-                        ai_chat_view,
-                        audio_view,
-                        dashboard_view,
-                        emoji_view,
-                        font_view,
-                        system_monitor_view,
-                        media_view,
-                        network_list,
-                        notifications_view,
-                        window_grid_view,
-                    );
-                }
+        dispatch_action_with_views(
+            window,
+            launcher,
+            hold,
+            entry,
+            list,
+            results,
+            navigation,
+            action_bar,
+            ai_chat_view,
+            audio_view,
+            dashboard_view,
+            emoji_view,
+            font_view,
+            system_monitor_view,
+            media_view,
+            network_list,
+            notifications_view,
+            script_output_view,
+            window_grid_view,
+            action,
+        );
+    }
+}
+
+/// Run `action` exactly as Enter runs a selected row: launcher commands open
+/// their view, forms ask for arguments, JSON commands and scripts stream into
+/// their views, everything else goes through `run_action_or_confirm` with
+/// its risk gate. `--cmd run` uses this so it can never take a shortcut
+/// (Q1.5).
+pub(crate) fn dispatch_action_with_views(
+    window: &ApplicationWindow,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    entry: &Entry,
+    list: &ListBox,
+    results: &Rc<RefCell<Vec<Action>>>,
+    navigation: &crate::ui::NavigationStack,
+    action_bar: &GtkBox,
+    ai_chat_view: &crate::ui::AiChatView,
+    audio_view: &crate::ui::AudioView,
+    dashboard_view: &crate::ui::DashboardView,
+    emoji_view: &crate::ui::EmojiPickerView,
+    font_view: &crate::ui::FontBrowserView,
+    system_monitor_view: &crate::ui::SystemMonitorView,
+    media_view: &crate::ui::MediaView,
+    network_list: &ListBox,
+    notifications_view: &crate::ui::NotificationsView,
+    script_output_view: &crate::ui::ScriptOutputView,
+    window_grid_view: &crate::ui::WindowGridView,
+    action: Action,
+) {
+    if let Some(command) = action.launcher_command() {
+        match command {
+            crate::action::LauncherCommand::CreateSnippet(content) => {
+                crate::ui::show_snippet_editor_panel(
+                    window,
+                    launcher,
+                    None,
+                    "",
+                    "",
+                    &content,
+                    || {},
+                );
             }
-        } else if action.form_data().is_some() {
-            show_form_for_action(
-                window,
-                launcher,
-                hold,
-                entry,
-                list,
-                results,
-                navigation,
-                action_bar,
-                script_output_view,
-                action,
-            );
-        } else if action.json_command_data().is_some() {
-            run_json_command_action_or_confirm(window, entry, list, results, action);
-        } else if action.category == "Script" || action.script_mode().is_some() {
-            execute_script_action(
-                window,
-                launcher,
-                hold,
-                navigation,
-                entry,
-                action_bar,
-                script_output_view,
-                action,
-                Vec::new(),
-            );
-        } else {
-            run_action_or_confirm(window, launcher, hold, action);
+            crate::action::LauncherCommand::AiChatWithPrompt(prompt) => {
+                run_launcher_command(
+                    crate::action::LauncherCommand::AiChatWithPrompt(prompt),
+                    navigation,
+                    entry,
+                    action_bar,
+                    ai_chat_view,
+                    audio_view,
+                    dashboard_view,
+                    emoji_view,
+                    font_view,
+                    system_monitor_view,
+                    media_view,
+                    network_list,
+                    notifications_view,
+                    window_grid_view,
+                );
+                ask_ai_from_view(launcher, ai_chat_view);
+            }
+            other => {
+                run_launcher_command(
+                    other,
+                    navigation,
+                    entry,
+                    action_bar,
+                    ai_chat_view,
+                    audio_view,
+                    dashboard_view,
+                    emoji_view,
+                    font_view,
+                    system_monitor_view,
+                    media_view,
+                    network_list,
+                    notifications_view,
+                    window_grid_view,
+                );
+            }
         }
+    } else if action.form_data().is_some() {
+        show_form_for_action(
+            window,
+            launcher,
+            hold,
+            entry,
+            list,
+            results,
+            navigation,
+            action_bar,
+            script_output_view,
+            action,
+        );
+    } else if action.json_command_data().is_some() {
+        run_json_command_action_or_confirm(window, entry, list, results, action);
+    } else if action.category == "Script" || action.script_mode().is_some() {
+        execute_script_action(
+            window,
+            launcher,
+            hold,
+            navigation,
+            entry,
+            action_bar,
+            script_output_view,
+            action,
+            Vec::new(),
+        );
+    } else {
+        run_action_or_confirm(window, launcher, hold, action);
     }
 }
 
