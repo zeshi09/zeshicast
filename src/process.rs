@@ -630,6 +630,13 @@ mod tests {
     fn run_capped_returns_even_if_a_pipe_holder_left_the_group() {
         // `setsid` puts the sleeper in a new session, out of reach of the
         // group kill; the call must still return instead of blocking.
+        // util-linux provides it (the flake adds it to the check inputs).
+        // Probed directly: `which` (behind command_exists) is not in the Nix
+        // build sandbox either.
+        if Command::new("setsid").arg("--version").output().is_err() {
+            eprintln!("skipping: `setsid` (util-linux) is not on PATH");
+            return;
+        }
         let mut command = Command::new("sh");
         command.arg("-c").arg("setsid sleep 5 & echo done");
         let started = Instant::now();

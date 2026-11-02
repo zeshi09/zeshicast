@@ -30,6 +30,8 @@
           cargoLock.lockFile = ./Cargo.lock;
           buildFeatures = [ "gui" "layer-shell" ];
           nativeBuildInputs = with pkgs; [ pkg-config wrapGAppsHook4 ];
+          # `setsid` for the run_capped test of a pipe holder outside the group.
+          nativeCheckInputs = with pkgs; [ util-linux ];
           buildInputs = with pkgs; [
             gtk4
             gtk4-layer-shell
