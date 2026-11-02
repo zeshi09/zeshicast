@@ -185,7 +185,9 @@ the executable name finds the app.
 ## GTK shortcuts
 
 ```text
-Enter        Run selected result (opens form panel for commands with missing args)
+Enter        Run selected result (opens form panel for commands with missing args);
+             on a clipboard or snippet row: paste it into the previous window
+             (Preferences → General → "Enter on clipboard & snippets": Paste/Copy)
 Ctrl+Enter   Copy selected value
 Ctrl+K       Action panel — pin, unpin, set alias, secondary actions
 Ctrl+B       Extension browser — list all custom commands
@@ -293,10 +295,12 @@ Runtime integrations use session tools when present:
 - `nmcli` and `ip` for NetworkManager/network views;
 - `brightnessctl` for brightness actions;
 - `grim`/`slurp` for screenshot actions in some compositor command sets;
-- `wtype` for the optional "type text" secondary action;
+- `wtype` to paste clipboard/snippet rows into the active window (Enter) and
+  for the "type text" secondary action; without it Enter only copies and says
+  so. The flake package already puts it on `PATH`;
 - `tar` for import/export.
 
-The Nix package wraps `wl-clipboard` into PATH. The other tools are expected to
+The Nix package wraps `wl-clipboard` and `wtype` into PATH. The other tools are expected to
 come from the user's graphical session or system packages; missing tools usually
 make the related action fail or disappear rather than preventing the launcher
 from starting.

@@ -321,6 +321,17 @@ pub(crate) fn run_action_or_confirm(
     hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
     action: Action,
 ) {
+    // Q1.3: Enter on a clipboard/snippet row pastes into the window the
+    // palette was opened over. Hide first so focus can return to it.
+    if launcher.borrow().enter_pastes(&action) {
+        finish_interaction(window, hold);
+        let outcome = launcher.borrow_mut().paste_action(&action);
+        if outcome == crate::app::PasteOutcome::CopiedOnly {
+            crate::ui::show_toast_osd(None, "✓ Copied — install wtype to paste automatically");
+        }
+        return;
+    }
+
     if !action.risk.requires_confirmation() {
         finish_interaction(window, hold);
         if action.category == "Window" {

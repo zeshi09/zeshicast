@@ -24,13 +24,17 @@ use crate::search::scripts::{ScriptEntry, load_extension_script_entries, load_sc
 use crate::search::snapshot::SearchData;
 pub use crate::services::clipboard_store::*;
 use crate::services::storage;
-use crate::services::text_input::{is_wtype_available, type_text_via_wtype};
+use crate::services::text_input::{is_wtype_available, paste_via_wtype, type_text_via_wtype};
 
 mod clipboard;
 mod launch;
 mod preferences;
 mod snippets;
 
+#[cfg(feature = "gui")]
+pub use self::launch::PasteOutcome;
+#[cfg(test)]
+use self::launch::enter_pastes_value;
 /// Reached by path from outside `app` (see `search/snapshot.rs`).
 pub(crate) use self::preferences::preference_enabled_value;
 use self::preferences::{load_calc_history, preference_script_dirs};
@@ -408,6 +412,63 @@ mod tests {
             files: Vec::new(),
             config_dir,
         }
+    }
+
+    fn copy_row(category: &str) -> Action {
+        Action::new(category, "hello", ActionKind::Copy("hello".to_string()), 1)
+    }
+
+    #[test]
+    fn enter_pastes_clipboard_and_snippet_rows_by_default() {
+        let preferences = HashMap::new();
+        assert!(enter_pastes_value(&preferences, &copy_row("Clipboard")));
+        assert!(enter_pastes_value(&preferences, &copy_row("Snippet")));
+    }
+
+    #[test]
+    fn enter_copies_when_the_preference_says_copy() {
+        for value in ["copy", " COPY "] {
+            let preferences =
+                HashMap::from([("clipboard_enter_action".to_string(), value.to_string())]);
+            assert!(
+                !enter_pastes_value(&preferences, &copy_row("Clipboard")),
+                "{value:?}"
+            );
+        }
+        // Anything else keeps the default instead of disabling paste by typo.
+        let preferences =
+            HashMap::from([("clipboard_enter_action".to_string(), "paste".to_string())]);
+        assert!(enter_pastes_value(&preferences, &copy_row("Snippet")));
+    }
+
+    #[test]
+    fn enter_never_pastes_other_rows() {
+        let preferences = HashMap::new();
+        // A calculator result is a Copy action too, but not a text row.
+        assert!(!enter_pastes_value(&preferences, &copy_row("Calculator")));
+        let url = Action::new(
+            "Clipboard",
+            "link",
+            ActionKind::OpenUrl("https://example.com".to_string()),
+            1,
+        );
+        assert!(!enter_pastes_value(&preferences, &url));
+    }
+
+    #[test]
+    fn paste_is_offered_for_text_rows_only_and_without_wtype_too() {
+        let app = test_app(PathBuf::from("/tmp/zeshicast-test"), HashMap::new());
+        let offers_paste = |action: &Action| {
+            app.available_secondary_actions(action)
+                .iter()
+                .any(|secondary| secondary.kind == SecondaryActionKind::Paste)
+        };
+
+        // Independent of whether `wtype` is installed on the test machine.
+        assert!(offers_paste(&copy_row("Clipboard")));
+        assert!(offers_paste(&copy_row("Snippet")));
+        assert!(!offers_paste(&copy_row("Calculator")));
+        assert!(!offers_paste(&copy_row("Application")));
     }
 
     /// Search must read launcher preferences by reference:

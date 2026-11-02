@@ -40,11 +40,12 @@
             cairo
             wayland
           ];
-          # Runtime tools the launcher shells out to. wl-clipboard is the one we
-          # rely on (clipboard copy / image paste-back); the rest (niri, wpctl,
-          # nmcli, …) come from the user's graphical session.
+          # Runtime tools the launcher shells out to. wl-clipboard (clipboard
+          # copy / image paste-back) and wtype (Enter pastes a clipboard or
+          # snippet row into the previous window, Q1.3) are core; the rest
+          # (niri, wpctl, nmcli, …) come from the user's graphical session.
           preFixup = ''
-            gappsWrapperArgs+=(--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.wl-clipboard ]})
+            gappsWrapperArgs+=(--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.wl-clipboard pkgs.wtype ]})
           '';
           meta = {
             description =
@@ -80,7 +81,8 @@
           '';
           description = ''
             Extra command-line tools made available to zeshicast runtime
-            integrations. The package wrapper already includes wl-clipboard;
+            integrations. The package wrapper already includes wl-clipboard
+            and wtype;
             add tools here for audio, networking, brightness, Bluetooth,
             screenshot, typing, and fallback clipboard actions.
           '';

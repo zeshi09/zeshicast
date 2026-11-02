@@ -18,6 +18,7 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("clipboard_private_mode", "false"),
     ("clipboard_retention", "100"),
     ("clipboard_capture_images", "true"),
+    ("clipboard_enter_action", "paste"),
     ("export_include_secrets", "false"),
     ("ai_enabled", "true"),
     ("ai_provider", "ollama"),
@@ -45,6 +46,7 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
             ("status_items", "Status items"),
             ("dashboard_enabled", "Dashboard enabled"),
             ("dashboard_poll_interval_ms", "Refresh interval (ms)"),
+            ("clipboard_enter_action", "Enter on clipboard & snippets"),
         ],
     },
     PrefSection {
@@ -208,6 +210,12 @@ fn preference_field_row(
     } else if key == "ui_theme" {
         row.append(&segmented_choice(
             &[("system", "System"), ("dark", "Dark"), ("light", "Light")],
+            effective_val,
+            &entry,
+        ));
+    } else if key == "clipboard_enter_action" {
+        row.append(&segmented_choice(
+            &[("paste", "Paste"), ("copy", "Copy")],
             effective_val,
             &entry,
         ));

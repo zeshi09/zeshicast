@@ -508,6 +508,10 @@ mod tests {
             ActionRisk::Normal
         );
         assert_eq!(
+            secondary_action_risk(&clipboard, SecondaryActionKind::Paste),
+            ActionRisk::Normal
+        );
+        assert_eq!(
             secondary_action_risk(&clipboard, SecondaryActionKind::DeleteClipboardItem),
             ActionRisk::Destructive
         );
@@ -599,6 +603,8 @@ pub enum SecondaryActionKind {
     Run,
     RunInTerminal,
     CopyValue,
+    /// Copy, then send Ctrl+V to the window that regains focus (Q1.3).
+    Paste,
     TypeText,
     OpenParent,
     Pin,

@@ -34,6 +34,30 @@ impl Zeshicast {
         decision
     }
 
+    /// Whether Enter on `action` should paste it into the previous window
+    /// rather than only copy it (Q1.3): clipboard and snippet rows, unless
+    /// the `clipboard_enter_action` preference says `copy`.
+    pub fn enter_pastes(&self, action: &Action) -> bool {
+        enter_pastes_value(&self.preferences, action)
+    }
+
+    /// Put `action`'s value on the clipboard and paste it with Ctrl+V into
+    /// the window that regains focus. Without `wtype` the value is still
+    /// copied and the caller is told so it can explain the missing step.
+    pub fn paste_action(&mut self, action: &Action) -> PasteOutcome {
+        action.copy_value();
+        let outcome = if is_wtype_available() {
+            paste_via_wtype();
+            PasteOutcome::Pasted
+        } else {
+            PasteOutcome::CopiedOnly
+        };
+        if let Err(error) = self.record_recent(action) {
+            log::warn!("failed to record recent action: {error}");
+        }
+        outcome
+    }
+
     pub fn available_secondary_actions(&self, action: &Action) -> Vec<SecondaryAction> {
         use crate::action::ActionPanelSection as S;
         let can_type = is_wtype_available();
@@ -52,6 +76,17 @@ impl Zeshicast {
                 S::Primary,
             ),
         ];
+
+        if is_text_action {
+            // Offered without `wtype` too: it then degrades to a copy and
+            // says why, instead of silently missing from the panel.
+            actions.push(SecondaryAction::new(
+                SecondaryActionKind::Paste,
+                "Paste to Active Window",
+                "edit-paste-symbolic",
+                S::Primary,
+            ));
+        }
 
         if can_type && is_text_action {
             actions.push(SecondaryAction::new(
@@ -160,6 +195,10 @@ impl Zeshicast {
             }
             SecondaryActionKind::CopyValue => {
                 action.copy_value();
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::Paste => {
+                self.paste_action(action);
                 Ok(ExecutionDecision::RunNow)
             }
             SecondaryActionKind::TypeText => {
@@ -295,4 +334,24 @@ impl Zeshicast {
         *self.frequencies.entry(identity).or_insert(0) += 1;
         Ok(())
     }
+}
+
+/// Result of [`Zeshicast::paste_action`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteOutcome {
+    /// Copied and Ctrl+V sent.
+    Pasted,
+    /// Copied only: `wtype` is not installed.
+    CopiedOnly,
+}
+
+/// [`Zeshicast::enter_pastes`] over a preference map, for tests and callers
+/// that hold a snapshot.
+pub(crate) fn enter_pastes_value(preferences: &HashMap<String, String>, action: &Action) -> bool {
+    let pastes_by_preference = !preferences
+        .get("clipboard_enter_action")
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("copy"));
+    pastes_by_preference
+        && matches!(action.category.as_str(), "Clipboard" | "Snippet")
+        && matches!(action.kind, ActionKind::Copy(_))
 }
