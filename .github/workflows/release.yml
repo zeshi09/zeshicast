@@ -1,0 +1,53 @@
+name: Release
+
+# Q4.2: pushing a `vX.Y.Z` tag publishes a GitHub release with the headless
+# CLI, the source archive, SHA256SUMS, and the CHANGELOG section as notes.
+# The GTK launcher ships through the Nix flake (it needs gtk4-layer-shell).
+
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege by default; only the release job may write.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and upload its assets
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false # zizmor: artipacked
+
+      - name: Check the tag matches Cargo.toml
+        run: scripts/release-notes.sh --check-version "$GITHUB_REF_NAME"
+
+      - name: Build the CLI
+        run: cargo build --release --locked --bin zeshicast
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="zeshicast-${GITHUB_REF_NAME}-x86_64-linux"
+          mkdir -p "dist/$name"
+          cp target/release/zeshicast README.md CHANGELOG.md "dist/$name/"
+          cp -r packaging "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          git archive --format=tar.gz --prefix="zeshicast-${GITHUB_REF_NAME}/" \
+            -o "dist/zeshicast-${GITHUB_REF_NAME}-source.tar.gz" HEAD
+          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
+
+      - name: Release notes from CHANGELOG
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+            --title "zeshicast $GITHUB_REF_NAME" --notes-file notes.md --verify-tag

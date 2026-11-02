@@ -9,6 +9,8 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-02
+
 ### Added
 
 - `zeshicast-gtk --toggle`: one hotkey shows and hides the palette; ready-made
