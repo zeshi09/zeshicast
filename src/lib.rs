@@ -2,6 +2,7 @@ mod action;
 mod app;
 pub mod cli;
 mod config;
+pub mod dmenu;
 mod extensions;
 pub mod logging;
 mod placeholders;

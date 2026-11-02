@@ -1,5 +1,6 @@
 mod action_panel_controller;
 mod clipboard_capture;
+mod dmenu;
 mod fonts;
 mod forms;
 pub(crate) mod icons;
@@ -20,6 +21,7 @@ mod style;
 mod views;
 mod widgets;
 
+pub use dmenu::run_dmenu;
 pub use forms::show_form_panel;
 pub use launcher::{
     GuiState, LauncherToggle, ensure_ui, launcher_toggle_action, present_launcher,

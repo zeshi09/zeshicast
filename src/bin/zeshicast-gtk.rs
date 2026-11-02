@@ -95,6 +95,24 @@ fn main() -> glib::ExitCode {
         unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
     }
 
+    // Q1.4: `--dmenu` is a separate, short-lived picker process. It is
+    // handled before the unique application exists, so it never forwards to
+    // (or wakes) a running daemon and keeps its own stdin/stdout.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(options) = zeshicast::dmenu::parse_dmenu_args(&args) {
+        let items = match zeshicast::dmenu::read_items(std::io::stdin().lock()) {
+            Ok(items) => items,
+            Err(error) => {
+                eprintln!("zeshicast-gtk --dmenu: cannot read stdin: {error}");
+                return glib::ExitCode::FAILURE;
+            }
+        };
+        return match zeshicast::ui::run_dmenu(options, items) {
+            zeshicast::dmenu::EXIT_CHOSEN => glib::ExitCode::SUCCESS,
+            _ => glib::ExitCode::FAILURE,
+        };
+    }
+
     let state = Rc::new(RefCell::new(None::<zeshicast::ui::GuiState>));
     let hold = Rc::new(RefCell::new(None::<gio::ApplicationHoldGuard>));
 
@@ -218,6 +236,11 @@ Usage:
   zeshicast-gtk --toggle   Show the launcher, or hide it if it is already shown
                            (bind this to your launcher hotkey)
   zeshicast-gtk --quit     Stop the running daemon
+
+Pick a line from stdin (dmenu/rofi style; prints the choice, exit 1 on Esc):
+  zeshicast-gtk --dmenu [--prompt TEXT | -p TEXT] [--password]
+                           e.g.  git branch --format='%(refname:short)' |
+                                 zeshicast-gtk --dmenu -p Branch
 
 Open a specific view directly (works against a running --daemon too):
   --view <name>            clipboard | dashboard | network | media | audio
