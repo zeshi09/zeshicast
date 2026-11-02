@@ -35,6 +35,9 @@ the section under a version heading and tags it `vX.Y.Z`.
   to turn them into a report.
 - Tips under the empty search (Ctrl+K, prefixes, `--toggle`, paste, views),
   one per opening, 30 in total; Preferences → General → Tips turns them off.
+- Search in Preferences: matches labels, keys (`clipboard_retention`) and
+  keyboard shortcuts, opens the first matching section, and says so when
+  nothing matches.
 - Preferences → Appearance → Renderer (Cairo, the default, or GL);
   `GSK_RENDERER` still overrides it.
 

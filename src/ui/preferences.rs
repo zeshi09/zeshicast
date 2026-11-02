@@ -154,7 +154,7 @@ fn preference_field_row(
     current: &HashMap<String, String>,
     fields_box: &GtkBox,
     fields: &mut Vec<(String, Entry)>,
-) {
+) -> GtkBox {
     let row = GtkBox::new(Orientation::Horizontal, 10);
     row.add_css_class("pref-field-row");
 
@@ -264,6 +264,84 @@ fn preference_field_row(
 
     fields.push((key.to_string(), entry));
     fields_box.append(&row);
+    row
+}
+
+/// Whether a settings row matches the search (Q3.3): every word of `query`
+/// appears, case-insensitively, in the section name or the row's text. An
+/// empty query matches everything.
+pub(crate) fn settings_row_matches(query: &str, section: &str, text: &str) -> bool {
+    let haystack = format!("{section} {text}").to_lowercase();
+    query
+        .to_lowercase()
+        .split_whitespace()
+        .all(|word| haystack.contains(word))
+}
+
+/// Search text of a preference field: its label, its key, and the key with
+/// underscores as spaces (`clipboard_enter_action` → "clipboard enter action").
+fn field_search_text(key: &str, description: &str) -> String {
+    format!("{description} {key} {}", key.replace('_', " "))
+}
+
+/// One section's sidebar row and its searchable rows.
+struct SearchableSection {
+    name: &'static str,
+    sidebar_row: gtk::ListBoxRow,
+    rows: Vec<(gtk::Widget, String)>,
+}
+
+/// Stack page shown when no setting matches the search.
+const NO_MATCH_PAGE: &str = "no-match";
+
+/// Show only matching rows and sections, open the first matching section,
+/// or explain that nothing matched. An empty query restores everything.
+fn filter_settings(
+    query: &str,
+    sections: &[SearchableSection],
+    sidebar: &gtk::ListBox,
+    stack: &Stack,
+    no_match: &Label,
+) {
+    let mut first_match: Option<&SearchableSection> = None;
+    for section in sections {
+        let mut any = false;
+        for (row, text) in &section.rows {
+            let matches = settings_row_matches(query, section.name, text);
+            row.set_visible(matches);
+            any |= matches;
+        }
+        // Sections without rows (none today) stay listed for an empty query.
+        let shown = any || query.trim().is_empty();
+        section.sidebar_row.set_visible(shown);
+        if shown && first_match.is_none() {
+            first_match = Some(section);
+        }
+    }
+
+    match first_match {
+        Some(section) => {
+            if query.trim().is_empty() {
+                // Back to the section the user had selected.
+                let selected = sidebar
+                    .selected_row()
+                    .and_then(|row| usize::try_from(row.index()).ok())
+                    .and_then(|index| sections.get(index))
+                    .unwrap_or(section);
+                stack.set_visible_child_name(selected.name);
+            } else {
+                sidebar.select_row(Some(&section.sidebar_row));
+                stack.set_visible_child_name(section.name);
+            }
+        }
+        None => {
+            no_match.set_text(&format!(
+                "No setting matches “{}”. Try a shorter word, or a key such as clipboard_retention.",
+                query.trim()
+            ));
+            stack.set_visible_child_name(NO_MATCH_PAGE);
+        }
+    }
 }
 
 pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
@@ -290,8 +368,10 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
     content_stack.set_hexpand(true);
 
     let mut fields = Vec::new();
+    let mut searchable: Vec<SearchableSection> = Vec::new();
 
     for section in PREFERENCE_SECTIONS {
+        let mut rows: Vec<(gtk::Widget, String)> = Vec::new();
         let sidebar_row = gtk::ListBoxRow::new();
         sidebar_row.add_css_class("pref-sidebar-row");
         let sidebar_label = Label::new(Some(section.name));
@@ -332,6 +412,7 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                 lbl.set_margin_start(14);
                 lbl.set_margin_top(14);
                 fields_box.append(&lbl);
+                rows.push((lbl.upcast(), format!("about version {about_text}")));
             }
             "Keyboard" => {
                 let shortcuts = [
@@ -365,6 +446,7 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                     kbd.set_xalign(1.0);
                     row.append(&kbd);
                     fields_box.append(&row);
+                    rows.push((row.upcast(), format!("{desc} {key} shortcut")));
                 }
             }
             "Privacy" => {
@@ -395,17 +477,22 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
                     text.append(&detail_lbl);
                     row.append(&text);
                     fields_box.append(&row);
+                    rows.push((row.upcast(), format!("{name} {detail}")));
                 }
                 // Dynamic keys of this section (e.g. export_include_secrets)
                 // render through the same auto-saving field mechanism as the
                 // generic sections so the toggle actually exists in the UI.
                 for (key, description) in section.keys {
-                    preference_field_row(key, description, current, &fields_box, &mut fields);
+                    let row =
+                        preference_field_row(key, description, current, &fields_box, &mut fields);
+                    rows.push((row.upcast(), field_search_text(key, description)));
                 }
             }
             _ => {
                 for (key, description) in section.keys {
-                    preference_field_row(key, description, current, &fields_box, &mut fields);
+                    let row =
+                        preference_field_row(key, description, current, &fields_box, &mut fields);
+                    rows.push((row.upcast(), field_search_text(key, description)));
                 }
             }
         }
@@ -417,7 +504,18 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
             .build();
         content_scroller.set_vexpand(true);
         content_stack.add_named(&content_scroller, Some(section.name));
+        searchable.push(SearchableSection {
+            name: section.name,
+            sidebar_row,
+            rows,
+        });
     }
+
+    let no_match = Label::new(None);
+    no_match.add_css_class("result-subtitle");
+    no_match.set_wrap(true);
+    no_match.set_margin_top(24);
+    content_stack.add_named(&no_match, Some(NO_MATCH_PAGE));
 
     let sidebar_scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -444,7 +542,28 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
         content_stack.set_visible_child_name(first.name);
     }
 
-    paned.set_start_child(Some(&sidebar_scroller));
+    let search = gtk::SearchEntry::new();
+    search.set_placeholder_text(Some("Search settings"));
+    search.add_css_class("pref-search");
+    let start_pane = GtkBox::new(Orientation::Vertical, 6);
+    start_pane.append(&search);
+    start_pane.append(&sidebar_scroller);
+
+    {
+        let sidebar = sidebar.clone();
+        let content_stack = content_stack.clone();
+        search.connect_search_changed(move |search| {
+            filter_settings(
+                search.text().as_str(),
+                &searchable,
+                &sidebar,
+                &content_stack,
+                &no_match,
+            );
+        });
+    }
+
+    paned.set_start_child(Some(&start_pane));
     paned.set_end_child(Some(&content_stack));
     outer.append(&paned);
 
@@ -453,5 +572,65 @@ pub fn preferences_view(current: &HashMap<String, String>) -> PreferencesView {
     PreferencesView {
         root: outer,
         fields,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_match_on_label_key_section_and_every_word() {
+        let text = field_search_text("clipboard_retention", "Clipboard retention");
+        assert!(settings_row_matches("retention", "Privacy", &text));
+        assert!(settings_row_matches(
+            "CLIPBOARD_RETENTION",
+            "Privacy",
+            &text
+        ));
+        // Every word must appear, in any order.
+        assert!(settings_row_matches(
+            "retention clipboard",
+            "Privacy",
+            &text
+        ));
+        assert!(!settings_row_matches("retention ollama", "Privacy", &text));
+        // The section name matches all of its rows.
+        assert!(settings_row_matches("privacy", "Privacy", "Export secrets"));
+        // An empty query matches everything.
+        assert!(settings_row_matches("", "General", "anything"));
+        assert!(settings_row_matches("   ", "General", "anything"));
+    }
+
+    #[test]
+    fn every_preference_key_is_findable_by_its_key() {
+        for section in PREFERENCE_SECTIONS {
+            for (key, description) in section.keys {
+                let text = field_search_text(key, description);
+                assert!(
+                    settings_row_matches(key, section.name, &text),
+                    "{key} in {}",
+                    section.name
+                );
+                assert!(
+                    settings_row_matches(&key.replace('_', " "), section.name, &text),
+                    "{key} by words"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_listed_preference_has_a_default() {
+        for section in PREFERENCE_SECTIONS {
+            for (key, _) in section.keys {
+                assert!(
+                    PREFERENCE_DEFAULTS
+                        .iter()
+                        .any(|(default, _)| default == key),
+                    "{key} has no default"
+                );
+            }
+        }
     }
 }
