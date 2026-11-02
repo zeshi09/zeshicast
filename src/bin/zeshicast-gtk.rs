@@ -99,6 +99,13 @@ fn main() -> glib::ExitCode {
     // handled before the unique application exists, so it never forwards to
     // (or wakes) a running daemon and keeps its own stdin/stdout.
     let args: Vec<String> = std::env::args().collect();
+    // Printed here, in the invoking process: inside `connect_command_line` a
+    // running daemon handled it, so the text went to the daemon's journal
+    // and the terminal stayed empty.
+    if wants_help(&args) {
+        println!("{}", help_text());
+        return glib::ExitCode::SUCCESS;
+    }
     if let Some(options) = zeshicast::dmenu::parse_dmenu_args(&args) {
         let items = match zeshicast::dmenu::read_items(std::io::stdin().lock()) {
             Ok(items) => items,
@@ -137,11 +144,6 @@ fn main() -> glib::ExitCode {
                 .map(|arg| arg.to_string_lossy().into_owned())
                 .collect();
 
-            if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-                println!("{}", help_text());
-                return glib::ExitCode::SUCCESS;
-            }
-
             if args.iter().any(|arg| arg == "--quit") {
                 app.quit();
                 return glib::ExitCode::SUCCESS;
@@ -178,6 +180,10 @@ fn main() -> glib::ExitCode {
     install_termination_handlers(&app);
 
     app.run()
+}
+
+fn wants_help(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--help" || arg == "-h")
 }
 
 /// `--toggle`: hide the palette when it is shown, show it when hidden (Q1.2).
@@ -319,6 +325,14 @@ mod tests {
         assert!(!wants_toggle(&args(&["zeshicast-gtk"])));
         assert!(!wants_toggle(&args(&["zeshicast-gtk", "--daemon"])));
         assert!(help_text().contains("--toggle"));
+    }
+
+    #[test]
+    fn help_is_recognised_in_both_spellings() {
+        assert!(wants_help(&args(&["zeshicast-gtk", "--help"])));
+        assert!(wants_help(&args(&["zeshicast-gtk", "-h"])));
+        assert!(!wants_help(&args(&["zeshicast-gtk", "--toggle"])));
+        assert!(help_text().contains("--dmenu"));
     }
 
     #[test]
