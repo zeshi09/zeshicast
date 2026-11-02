@@ -25,7 +25,7 @@ use crate::placeholders::PlaceholderContext;
 use crate::search::apps::{AppEntry, search_apps};
 use crate::search::clipboard::search_clipboard;
 use crate::search::commands::{CommandEntry, search_commands};
-use crate::search::files::{FileEntry, search_files};
+use crate::search::files::{FileEntry, is_file_query, search_files};
 use crate::search::media::search_media_actions;
 use crate::search::named_values::{ActionTarget, NamedValue, search_named_values};
 use crate::search::notifications::search_notification_actions;
@@ -203,9 +203,9 @@ pub(crate) struct FilesProvider<'a> {
 impl SearchProvider for FilesProvider<'_> {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         let query = context.query;
-        let lower = query.trim().to_lowercase();
-        if lower.starts_with("file ") || lower.starts_with("find ") {
+        if is_file_query(query) {
             let needle = query
+                .trim_start()
                 .split_once(' ')
                 .map(|(_, value)| value.trim())
                 .unwrap_or_default();

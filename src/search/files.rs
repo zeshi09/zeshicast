@@ -44,6 +44,13 @@ pub(crate) fn is_dedicated_query(query: &str) -> bool {
     .any(|prefix| lower.starts_with(prefix))
 }
 
+/// `true` for an explicit file query (`file …` / `find …`), which only the
+/// file provider answers (Q0.3).
+pub(crate) fn is_file_query(query: &str) -> bool {
+    let lower = query.trim_start().to_lowercase();
+    lower.starts_with("file ") || lower.starts_with("find ")
+}
+
 pub(crate) fn search_files(files: &[FileEntry], query: &str, explicit: bool) -> Vec<Action> {
     // Lowercased once per search, not once per entry (M-6).
     let query = query.trim().to_lowercase();

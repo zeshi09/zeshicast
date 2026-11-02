@@ -73,17 +73,19 @@ impl SearchData {
 
         if trimmed.is_empty() {
             actions.extend(self.default_actions(&context));
-            for action in &mut actions {
-                action.score += self.config_score(action, trimmed);
-            }
-            actions.sort_by(|left, right| {
-                right
-                    .score
-                    .cmp(&left.score)
-                    .then_with(|| left.title.cmp(&right.title))
-            });
-            actions.truncate(MAX_RESULTS);
-            return actions;
+            return self.rank(actions, trimmed);
+        }
+
+        // Q0.3: `file `/`find ` asks for files only. Without this the
+        // clipboard, apps and every other fuzzy provider answered too, and could
+        // push the files the user asked for out of the list.
+        if files::is_file_query(trimmed) {
+            let search_context = SearchContext {
+                query: trimmed,
+                placeholders: &context,
+            };
+            let files = FilesProvider { files: &self.files }.search(&search_context);
+            return self.rank(files, trimmed);
         }
 
         actions.extend(self.launcher_actions(trimmed));
@@ -188,10 +190,15 @@ impl SearchData {
             }
         }
 
-        for action in &mut actions {
-            action.score += self.config_score(action, trimmed);
-        }
+        self.rank(actions, trimmed)
+    }
 
+    /// Apply aliases/pins/usage scoring, sort best-first and keep the top
+    /// `MAX_RESULTS`.
+    fn rank(&self, mut actions: Vec<Action>, query: &str) -> Vec<Action> {
+        for action in &mut actions {
+            action.score += self.config_score(action, query);
+        }
         actions.sort_by(|left, right| {
             right
                 .score
@@ -412,5 +419,73 @@ impl SearchData {
         }
 
         score
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn data_matching_everywhere() -> SearchData {
+        let app = crate::search::apps::parse_desktop_content(
+            "[Desktop Entry]\nType=Application\nName=Invoice Maker\nExec=invoice-maker\n",
+        )
+        .expect("valid desktop entry");
+        SearchData {
+            apps: vec![app],
+            quicklinks: Vec::new(),
+            snippets: Vec::new(),
+            commands: Vec::new(),
+            scripts: Vec::new(),
+            clipboard_history: vec!["invoice for march".to_string()],
+            preferences: HashMap::new(),
+            aliases: HashMap::new(),
+            pins: HashSet::new(),
+            recent: Vec::new(),
+            frequencies: HashMap::new(),
+            extensions: Vec::new(),
+            files: vec![FileEntry::new(
+                "invoice.pdf",
+                PathBuf::from("/home/user/Downloads/invoice.pdf"),
+                false,
+            )],
+            calc_history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn file_prefix_returns_only_files() {
+        let data = data_matching_everywhere();
+
+        for query in ["file invoice", "find invoice", "  FILE invoice"] {
+            let results = data.search(query);
+            assert!(!results.is_empty(), "{query}: the file is found");
+            assert!(
+                results
+                    .iter()
+                    .all(|action| matches!(action.category.as_str(), "File" | "Folder")),
+                "{query}: only files, got {:?}",
+                results.iter().map(|a| &a.category).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn unprefixed_queries_still_mix_providers() {
+        let data = data_matching_everywhere();
+
+        let categories: HashSet<String> = data
+            .search("invoice")
+            .into_iter()
+            .map(|action| action.category)
+            .collect();
+
+        for category in ["File", "Clipboard"] {
+            assert!(
+                categories.contains(category),
+                "{category} in {categories:?}"
+            );
+        }
     }
 }
