@@ -68,6 +68,7 @@ pub struct GuiState {
     navigation: crate::ui::NavigationStack,
     open_view: Rc<dyn Fn(&str) -> bool>,
     run_action: Rc<dyn Fn(Action)>,
+    hint_label: Label,
 }
 
 pub fn ensure_ui(
@@ -112,6 +113,10 @@ pub fn present_launcher_view(state: &GuiState, view: Option<&str>) -> bool {
     let opened = view.map(|name| (state.open_view)(name)).unwrap_or(false);
     if !opened {
         state.entry.grab_focus();
+        // Q3.1: a fresh tip for every opening of the search, until spent.
+        let hint = state.launcher.borrow_mut().next_launcher_hint();
+        state.hint_label.set_text(hint.unwrap_or_default());
+        state.hint_label.set_visible(hint.is_some());
     }
     state.window.present();
     opened

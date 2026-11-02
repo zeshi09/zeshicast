@@ -33,6 +33,8 @@ the section under a version heading and tags it `vX.Y.Z`.
 - `ZESHICAST_TRACE=1` timing marks (startup, show → first frame,
   keystroke → results p50/p95, index builds, RSS) and `scripts/measure.sh`
   to turn them into a report.
+- Tips under the empty search (Ctrl+K, prefixes, `--toggle`, paste, views),
+  one per opening, 30 in total; Preferences → General → Tips turns them off.
 - Preferences → Appearance → Renderer (Cairo, the default, or GL);
   `GSK_RENDERER` still overrides it.
 

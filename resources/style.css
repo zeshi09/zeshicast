@@ -244,6 +244,12 @@ entry, entry:focus, entry:focus-visible {
   min-height: 22px;
 }
 
+.launcher-hint {
+  font-size: __SUBTITLE_SIZE__px;
+  color: alpha(@window_fg_color, 0.450);
+  padding: 6px 14px 2px 14px;
+}
+
 .result-subtitle {
   font-size: __SUBTITLE_SIZE__px;
   color: alpha(@window_fg_color, 0.400);

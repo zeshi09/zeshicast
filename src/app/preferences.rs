@@ -22,6 +22,29 @@ fn parse_bool_preference(value: &str) -> Option<bool> {
     }
 }
 
+/// Tips shown under the empty search, one per palette opening (Q3.1).
+pub(crate) const LAUNCHER_HINTS: &[&str] = &[
+    "Bind zeshicast-gtk --toggle to a key: one press shows the palette, the next hides it",
+    "Ctrl+K opens actions for the selected row: paste, pin, alias, hotkey binding",
+    "Prefixes narrow the search: file · calc · clip · win · proc · shell · ai",
+    "Enter on a clipboard or snippet row pastes it; Ctrl+Enter only copies",
+    "Ctrl+D dashboard · Ctrl+T system monitor · Ctrl+H clipboard · Ctrl+U notifications",
+    "Typed in the wrong layout? ашкуащч still finds Firefox",
+];
+
+/// How many openings show a tip before they stop for good.
+pub(crate) const MAX_HINT_SHOWS: u32 = 30;
+
+/// The tip for the `shown`-th opening, cycling through the list, or `None`
+/// once the budget is spent.
+pub(crate) fn hint_for(shown: u32) -> Option<&'static str> {
+    if shown >= MAX_HINT_SHOWS {
+        return None;
+    }
+    let index = usize::try_from(shown).ok()? % LAUNCHER_HINTS.len();
+    LAUNCHER_HINTS.get(index).copied()
+}
+
 pub(crate) fn load_calc_history(path: &std::path::Path) -> Vec<CalcHistoryEntry> {
     let Ok(content) = std::fs::read_to_string(path) else {
         return Vec::new();
@@ -161,6 +184,27 @@ impl Zeshicast {
         self.preference_enabled("clipboard_capture_images", true)
             && self.clipboard_history_enabled()
             && !self.clipboard_private_mode()
+    }
+
+    /// The tip for this palette opening, counting it (Q3.1). `None` when tips
+    /// are off (`ui_hints = false`) or all have been shown enough. The count
+    /// is state, so it lives in `hints_shown`, not in `preferences.toml`.
+    pub fn next_launcher_hint(&mut self) -> Option<&'static str> {
+        if !self.preference_enabled("ui_hints", true) {
+            return None;
+        }
+        let path = self.config_dir.join("hints_shown");
+        let shown = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| text.trim().parse::<u32>().ok())
+            .unwrap_or(0);
+        let hint = hint_for(shown)?;
+        if let Err(error) =
+            crate::config::write_file_atomic(&path, (shown + 1).to_string().as_bytes(), 0o600)
+        {
+            log::warn!("could not record the shown tip: {error}");
+        }
+        Some(hint)
     }
 
     pub fn notifications_history_enabled(&self) -> bool {

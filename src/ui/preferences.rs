@@ -5,6 +5,7 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("ui_theme", "system"),
     ("ui_renderer", "cairo"),
     ("show_status_strip", "true"),
+    ("ui_hints", "true"),
     (
         "status_items",
         "clock,date,network,battery,audio,media,layout",
@@ -44,6 +45,7 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
         name: "General",
         keys: &[
             ("show_status_strip", "Show status strip"),
+            ("ui_hints", "Tips under the search"),
             ("status_items", "Status items"),
             ("dashboard_enabled", "Dashboard enabled"),
             ("dashboard_poll_interval_ms", "Refresh interval (ms)"),

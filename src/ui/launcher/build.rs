@@ -89,6 +89,13 @@ pub(crate) fn build_ui(
     let navigation = crate::ui::NavigationStack::new();
     let search_page = GtkBox::new(Orientation::Vertical, 0);
     search_page.set_vexpand(true);
+    // Q3.1: one tip per opening under the empty search; hidden while typing.
+    let hint_label = Label::new(None);
+    hint_label.add_css_class("launcher-hint");
+    hint_label.set_xalign(0.0);
+    hint_label.set_wrap(true);
+    hint_label.set_visible(false);
+    search_page.append(&hint_label);
     let results_scroller = crate::ui::scrollable_list(&list);
     search_page.append(&results_scroller);
 
@@ -229,9 +236,11 @@ pub(crate) fn build_ui(
         let mode_badge = mode_badge.clone();
         let result_counter = result_counter.clone();
         let search_flow = crate::ui::search_flow::SearchFlow::new();
+        let hint_label = hint_label.clone();
         entry.connect_changed(move |entry| {
             let query = entry.text().to_string();
             update_mode_badge(&mode_badge, &query);
+            hint_label.set_visible(query.is_empty() && !hint_label.text().is_empty());
 
             // Debounced (M-1): a burst of keystrokes runs one search, and a
             // result that a newer query made stale is not rendered.
@@ -1202,6 +1211,7 @@ pub(crate) fn build_ui(
         navigation,
         open_view,
         run_action,
+        hint_label,
     }
 }
 

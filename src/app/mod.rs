@@ -565,6 +565,52 @@ mod tests {
         assert!(!offers(&app, &row));
     }
 
+    #[test]
+    fn hints_cycle_then_stop() {
+        use self::preferences::{LAUNCHER_HINTS, MAX_HINT_SHOWS, hint_for};
+
+        assert_eq!(hint_for(0), Some(LAUNCHER_HINTS[0]));
+        assert_eq!(
+            hint_for(LAUNCHER_HINTS.len() as u32),
+            Some(LAUNCHER_HINTS[0]),
+            "the list cycles"
+        );
+        assert!(hint_for(MAX_HINT_SHOWS - 1).is_some());
+        assert_eq!(hint_for(MAX_HINT_SHOWS), None);
+    }
+
+    #[test]
+    fn each_opening_counts_and_the_preference_turns_hints_off() {
+        let dir = test_cache_dir("hints");
+        fs::create_dir_all(&dir).expect("temp config dir");
+        let mut app = test_app(dir.clone(), HashMap::new());
+
+        let first = app.next_launcher_hint();
+        let second = app.next_launcher_hint();
+        assert!(first.is_some() && second.is_some());
+        assert_ne!(first, second, "the next opening shows the next tip");
+        assert_eq!(
+            fs::read_to_string(dir.join("hints_shown")).ok().as_deref(),
+            Some("2")
+        );
+
+        fs::write(dir.join("hints_shown"), "999").expect("write count");
+        assert_eq!(app.next_launcher_hint(), None, "budget spent");
+
+        let mut off = test_app(
+            dir.clone(),
+            HashMap::from([("ui_hints".to_string(), "false".to_string())]),
+        );
+        fs::write(dir.join("hints_shown"), "0").expect("reset count");
+        assert_eq!(off.next_launcher_hint(), None);
+        assert_eq!(
+            fs::read_to_string(dir.join("hints_shown")).ok().as_deref(),
+            Some("0"),
+            "a disabled tip is not counted"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn copy_row(category: &str) -> Action {
         Action::new(category, "hello", ActionKind::Copy("hello".to_string()), 1)
     }
