@@ -57,6 +57,26 @@ Off by default and free when off. For the daemon:
 `systemctl --user stop zeshicast && ZESHICAST_TRACE=1 zeshicast-gtk --daemon`,
 then `zeshicast-gtk --quit` prints the summary. `scripts/measure.sh` automates it.
 
+## Measured Performance
+
+`scripts/measure.sh --gui`, release build, 2026-11-02, AMD Ryzen 7 5700X,
+kernel 6.18.52, niri, 10 runs, typing at 120 ms per key:
+
+| metric | before (`dd050c5`) | after (Q2.4) |
+| --- | --- | --- |
+| show (toggle → first frame), median | 34.4 ms | 34.3 ms |
+| show, first after daemon start (cold) | 203–252 ms | 243 ms |
+| keystroke → results, p50 | 108.3 ms | 8.8 ms |
+| keystroke → results, p95 | 109.3 ms | 24.4 ms |
+| RSS while hidden, cairo | 114 MiB | 121 MiB |
+| RSS while hidden, ngl | 249 MiB | — |
+| file index build (CLI) | 16 ms | 16 ms |
+
+"Before" keystroke latency was almost entirely the fixed 80 ms debounce plus
+the 25 ms result poll; Q2.4 made the debounce leading-edge (50 ms only inside
+a burst) and the poll 5 ms. The cold first show is still well above target
+and is the next thing to profile.
+
 ## Feature Flags
 
 - Default build: headless CLI, no GTK and no D-Bus services.

@@ -181,6 +181,15 @@ Settings:
 - Future two-pane layout with sections:
   General, Appearance, Features, AI, Integrations, Extensions.
 
+## Renderer Decision (Q2.3, 2026-11-02)
+
+Cairo stays the default GSK renderer. Measured with `scripts/measure.sh --gui`
+(see `docs/development.md`): NGL shows the palette no faster (median 33.6 ms
+vs 34.4 ms; cold first show 252 vs 203 ms) and keystroke latency is the same,
+but the resident memory more than doubles (249 MiB vs 114 MiB), and NGL clips
+glyph tops on some drivers. GL remains available as Preferences → Appearance
+→ Renderer, and `GSK_RENDERER` overrides both.
+
 ## Acceptance Criteria
 
 - Text never clips with Linux fallback fonts.

@@ -20,11 +20,25 @@ use gtk::glib;
 
 use crate::action::Action;
 
-/// How long the entry has to stay unchanged before the search runs.
-pub(crate) const SEARCH_DEBOUNCE: Duration = Duration::from_millis(80);
+/// How long the entry has to stay unchanged, inside a burst of keystrokes,
+/// before the search runs. Was 80 ms; measure.sh showed keystroke → results
+/// at 108 ms, almost all of it this delay plus the poll below (Q2.4).
+pub(crate) const SEARCH_DEBOUNCE: Duration = Duration::from_millis(50);
 
-/// How often the main loop checks whether the worker finished.
-pub(crate) const SEARCH_POLL: Duration = Duration::from_millis(25);
+/// How often the main loop checks whether the worker finished. The timer only
+/// exists while a search is in flight, so a short period costs nothing idle.
+pub(crate) const SEARCH_POLL: Duration = Duration::from_millis(5);
+
+/// Leading-edge debounce (Q2.4): a keystroke after a pause of at least
+/// [`SEARCH_DEBOUNCE`] searches at once; only keystrokes inside a burst wait,
+/// so the burst still runs one search instead of ten.
+#[must_use]
+pub(crate) fn debounce_delay(since_previous_keystroke: Option<Duration>) -> Duration {
+    match since_previous_keystroke {
+        Some(gap) if gap < SEARCH_DEBOUNCE => SEARCH_DEBOUNCE,
+        _ => Duration::ZERO,
+    }
+}
 
 /// A finished search may be shown only while its generation is still the
 /// current one.
@@ -163,6 +177,8 @@ fn deliver_when_current<Deliver>(
 pub(crate) struct SearchFlow {
     generation: Generation,
     debounce: Debounce,
+    /// When the previous request arrived, for [`debounce_delay`].
+    last_request: Rc<std::cell::Cell<Option<std::time::Instant>>>,
 }
 
 impl SearchFlow {
@@ -170,6 +186,7 @@ impl SearchFlow {
         Self {
             generation: Generation::default(),
             debounce: Debounce::new(),
+            last_request: Rc::default(),
         }
     }
 
@@ -179,6 +196,7 @@ impl SearchFlow {
         Self {
             generation: Generation::default(),
             debounce: Debounce::with_arm_fn(arm),
+            last_request: Rc::default(),
         }
     }
 
@@ -232,8 +250,13 @@ impl SearchFlow {
         Search: FnOnce(&Data, &str) -> Vec<Action> + Send + 'static,
         Deliver: FnOnce(Vec<Action>) + 'static,
     {
+        let now = std::time::Instant::now();
+        let gap = self
+            .last_request
+            .replace(Some(now))
+            .map(|previous| now.duration_since(previous));
         let generation = self.generation.clone();
-        self.debounce.arm(SEARCH_DEBOUNCE, move || {
+        self.debounce.arm(debounce_delay(gap), move || {
             let token = generation.begin();
             let data = snapshot();
             let receiver = spawn_search(move || search(&data, &query));
@@ -246,6 +269,20 @@ impl SearchFlow {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn a_keystroke_after_a_pause_searches_at_once_a_burst_waits() {
+        assert_eq!(debounce_delay(None), Duration::ZERO, "first keystroke");
+        assert_eq!(
+            debounce_delay(Some(Duration::from_millis(400))),
+            Duration::ZERO
+        );
+        assert_eq!(debounce_delay(Some(SEARCH_DEBOUNCE)), Duration::ZERO);
+        assert_eq!(
+            debounce_delay(Some(Duration::from_millis(20))),
+            SEARCH_DEBOUNCE
+        );
+    }
 
     /// Callbacks queued by the fake timer; cancelling empties a slot.
     type Queue = Rc<RefCell<Vec<Option<Box<dyn FnOnce()>>>>>;

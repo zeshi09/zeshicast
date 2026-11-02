@@ -16,7 +16,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNS=10
 GUI=0
 BIN_DIR="$ROOT_DIR/target/release"
+RENDERERS=(cairo ngl)
 QUERIES=(firefox "file invoice" "calc 2+2" term clip)
+# Delay between typed keys: a brisk human pace, so every keystroke is a
+# sample (a 25 ms burst would only measure the end of the debounce).
+KEY_DELAY_MS=120
 
 usage() {
   cat <<'USAGE'
@@ -24,6 +28,7 @@ Usage: scripts/measure.sh [--gui] [--runs N] [--bin DIR]
 
   --gui       also measure the palette (needs Wayland, wtype, no running daemon)
   --runs N    repetitions per measurement (default 10)
+  --renderer R  measure only GSK renderer R (cairo, ngl); default both
   --bin DIR   directory with zeshicast and zeshicast-gtk (default target/release;
               built with `--features gui,layer-shell` when missing)
 USAGE
@@ -33,6 +38,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --gui) GUI=1 ;;
     --runs) RUNS="${2:?--runs needs a number}"; shift ;;
+    --renderer) RENDERERS=("${2:?--renderer needs a name}"); shift ;;
     --bin) BIN_DIR="${2:?--bin needs a directory}"; shift ;;
     -h | --help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -109,7 +115,7 @@ if app_running; then
 fi
 
 GTK="$BIN_DIR/zeshicast-gtk"
-for renderer in cairo ngl; do
+for renderer in "${RENDERERS[@]}"; do
   LOG="$WORK/gui-$renderer.log"
   ZESHICAST_TRACE=1 GSK_RENDERER="$renderer" "$GTK" --daemon >/dev/null 2>"$LOG" &
   DAEMON=$!
@@ -119,7 +125,7 @@ for renderer in cairo ngl; do
     "$GTK" --toggle
     sleep 0.6
     for query in "${QUERIES[@]}"; do
-      wtype -d 25 "$query"
+      wtype -d "$KEY_DELAY_MS" "$query"
       sleep 0.4
       wtype -M ctrl a -m ctrl -k BackSpace
       sleep 0.2

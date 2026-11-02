@@ -53,6 +53,8 @@ the section under a version heading and tags it `vX.Y.Z`.
   of bytes (no double penalty for Cyrillic), and no longer matches letters
   scattered across a long name.
 - `file …` / `find …` return only files.
+- Results appear about 9 ms after a keystroke (p50, was 108 ms): the search
+  starts at once after a pause and only debounces (50 ms) inside a burst.
 
 ### Fixed
 
