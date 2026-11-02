@@ -83,7 +83,7 @@ fn build_osd(app: &Application) -> Osd {
         .resizable(false)
         .build();
     window.add_css_class("osd-window");
-    configure_layer_shell(&window);
+    super::layer_shell::configure_osd(&window);
 
     let label = Label::new(None);
     label.add_css_class("osd-pill-label");
@@ -178,7 +178,7 @@ fn build_toast_osd(app: &Application) -> ToastOsd {
         .resizable(false)
         .build();
     window.add_css_class("osd-window");
-    configure_layer_shell(&window);
+    super::layer_shell::configure_osd(&window);
 
     let label = Label::new(None);
     label.add_css_class("osd-toast-label");
@@ -489,7 +489,7 @@ fn build_notification_osd(app: Option<&Application>) -> NotificationOsd {
     let window = builder.build();
     window.set_default_size(1, 1);
     window.add_css_class("osd-window");
-    configure_notification_layer_shell(&window);
+    super::layer_shell::configure_notification(&window);
 
     let card = GtkBox::new(Orientation::Horizontal, 12);
     card.add_css_class("osd-notification");
@@ -596,68 +596,6 @@ fn build_notification_osd(app: Option<&Application>) -> NotificationOsd {
         is_hovered,
     }
 }
-
-// ── Layer-shell configuration ────────────────────────────────────────────────
-
-#[cfg(feature = "layer-shell")]
-unsafe extern "C" {
-    fn gtk_layer_is_supported() -> i32;
-    fn gtk_layer_init_for_window(window: *mut std::ffi::c_void);
-    fn gtk_layer_set_layer(window: *mut std::ffi::c_void, layer: u32);
-    fn gtk_layer_set_keyboard_mode(window: *mut std::ffi::c_void, mode: u32);
-    fn gtk_layer_set_namespace(window: *mut std::ffi::c_void, name_space: *const i8);
-    fn gtk_layer_set_anchor(window: *mut std::ffi::c_void, edge: u32, anchor_to_edge: i32);
-    fn gtk_layer_set_margin(window: *mut std::ffi::c_void, edge: u32, margin_size: i32);
-}
-
-#[cfg(feature = "layer-shell")]
-fn configure_layer_shell(window: &Window) {
-    const LAYER_OVERLAY: u32 = 3;
-    const KEYBOARD_MODE_NONE: u32 = 0;
-
-    let ptr = window.as_ptr() as *mut std::ffi::c_void;
-    unsafe {
-        if gtk_layer_is_supported() == 0 {
-            return;
-        }
-        gtk_layer_init_for_window(ptr);
-        gtk_layer_set_layer(ptr, LAYER_OVERLAY);
-        // No anchors set → the compositor centers the surface.
-        gtk_layer_set_keyboard_mode(ptr, KEYBOARD_MODE_NONE);
-        let ns = c"zeshicast-osd";
-        gtk_layer_set_namespace(ptr, ns.as_ptr());
-    }
-}
-
-#[cfg(not(feature = "layer-shell"))]
-fn configure_layer_shell(_window: &Window) {}
-
-#[cfg(feature = "layer-shell")]
-fn configure_notification_layer_shell(window: &Window) {
-    const LAYER_OVERLAY: u32 = 3;
-    const KEYBOARD_MODE_NONE: u32 = 0;
-    const EDGE_RIGHT: u32 = 1;
-    const EDGE_TOP: u32 = 2;
-
-    let ptr = window.as_ptr() as *mut std::ffi::c_void;
-    unsafe {
-        if gtk_layer_is_supported() == 0 {
-            return;
-        }
-        gtk_layer_init_for_window(ptr);
-        gtk_layer_set_layer(ptr, LAYER_OVERLAY);
-        gtk_layer_set_keyboard_mode(ptr, KEYBOARD_MODE_NONE);
-        let ns = c"zeshicast-notification";
-        gtk_layer_set_namespace(ptr, ns.as_ptr());
-        gtk_layer_set_anchor(ptr, EDGE_TOP, 1);
-        gtk_layer_set_anchor(ptr, EDGE_RIGHT, 1);
-        gtk_layer_set_margin(ptr, EDGE_TOP, 8);
-        gtk_layer_set_margin(ptr, EDGE_RIGHT, 8);
-    }
-}
-
-#[cfg(not(feature = "layer-shell"))]
-fn configure_notification_layer_shell(_window: &Window) {}
 
 #[cfg(test)]
 mod tests {

@@ -1,42 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use gtk::Application;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use gtk::{Application, ApplicationWindow};
 
 const APP_ID: &str = "dev.zeshi.Zeshicast";
-
-// GTK layer shell enum values from the C headers
-#[cfg(feature = "layer-shell")]
-const GTK_LAYER_SHELL_LAYER_OVERLAY: u32 = 3;
-#[cfg(feature = "layer-shell")]
-const GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE: u32 = 1;
-
-#[cfg(feature = "layer-shell")]
-unsafe extern "C" {
-    fn gtk_layer_is_supported() -> i32;
-    fn gtk_layer_init_for_window(window: *mut std::ffi::c_void);
-    fn gtk_layer_set_layer(window: *mut std::ffi::c_void, layer: u32);
-    fn gtk_layer_set_keyboard_mode(window: *mut std::ffi::c_void, mode: u32);
-}
-
-#[cfg(feature = "layer-shell")]
-fn configure_layer_shell(window: &ApplicationWindow) {
-    let ptr = window.as_ptr() as *mut std::ffi::c_void;
-    unsafe {
-        if gtk_layer_is_supported() == 0 {
-            return;
-        }
-        gtk_layer_init_for_window(ptr);
-        gtk_layer_set_layer(ptr, GTK_LAYER_SHELL_LAYER_OVERLAY);
-        gtk_layer_set_keyboard_mode(ptr, GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE);
-    }
-}
-
-#[cfg(not(feature = "layer-shell"))]
-fn configure_layer_shell(_window: &ApplicationWindow) {}
 
 // GLib's `glib-unix.h` signal sources are not exposed by the `glib` crate
 // (0.22 binds neither `g_unix_signal_add` nor `unix_signal_add_local`), so bind
@@ -161,7 +131,13 @@ fn main() -> glib::ExitCode {
 
             let daemon = args.iter().any(|arg| arg == "--daemon");
             let view = parse_view(&args);
-            zeshicast::ui::ensure_ui(app, &state, &hold, daemon, configure_layer_shell);
+            zeshicast::ui::ensure_ui(
+                app,
+                &state,
+                &hold,
+                daemon,
+                zeshicast::ui::configure_launcher,
+            );
 
             if !daemon && let Some(state) = state.borrow().as_ref() {
                 zeshicast::ui::present_launcher_view(state, view.as_deref());

@@ -7,6 +7,7 @@ mod keybindings;
 mod launcher;
 mod launcher_helpers;
 mod launcher_views;
+mod layer_shell;
 mod markdown;
 mod navigation;
 mod notify_server;
@@ -21,6 +22,7 @@ mod widgets;
 
 pub use forms::show_form_panel;
 pub use launcher::{GuiState, ensure_ui, present_launcher, present_launcher_view};
+pub use layer_shell::configure_launcher;
 pub use navigation::{LauncherView, NavigationStack};
 pub use osd::{dismiss_notification_osd, show_layout_osd, show_notification_osd, show_toast_osd};
 pub use panels::{show_alias_panel, show_confirmation_panel, show_snippet_editor_panel};
