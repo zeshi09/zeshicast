@@ -966,10 +966,12 @@ pub(crate) fn build_ui(
         let navigation = navigation.clone();
         let current_action = Rc::clone(&current_action);
         let displayed_action_panel_rows = Rc::clone(&displayed_action_panel_rows);
+        let hold = Rc::clone(hold);
         action_panel_view.list.connect_row_activated(move |_, row| {
             run_action_panel_row(
                 &window,
                 &launcher,
+                &hold,
                 &entry,
                 &list,
                 &results,

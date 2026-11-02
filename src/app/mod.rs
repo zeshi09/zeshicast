@@ -340,6 +340,17 @@ impl Zeshicast {
             .collect()
     }
 
+    /// The id of the command or script behind a result row, when exactly one
+    /// entry has that name and category (an ambiguous id could not be run).
+    pub fn command_ref_for(&self, action: &Action) -> Option<CommandRef> {
+        let refs = self.command_refs();
+        let entry = refs
+            .iter()
+            .find(|entry| entry.name == action.title && entry.category == action.category)?;
+        let unique = refs.iter().filter(|other| other.id == entry.id).count() == 1;
+        unique.then(|| entry.clone())
+    }
+
     /// Resolve `id` to its entry and to the action Enter would run for it.
     ///
     /// The action comes from the ordinary search, so the capability ceiling,
@@ -523,6 +534,29 @@ mod tests {
             .resolve_command("command/docker-ps")
             .expect_err("two entries share the slug");
         assert!(ambiguous.contains("ambiguous"), "{ambiguous}");
+    }
+
+    #[test]
+    fn hotkey_binding_is_offered_for_commands_with_a_unique_id() {
+        let offers = |app: &Zeshicast, action: &Action| {
+            app.available_secondary_actions(action)
+                .iter()
+                .any(|secondary| secondary.kind == SecondaryActionKind::CopyHotkeyBinding)
+        };
+
+        let mut app = test_app(PathBuf::from("/tmp/zeshicast-test"), HashMap::new());
+        app.commands = vec![command("Docker PS")];
+        let (_, row) = app.resolve_command("command/docker-ps").expect("resolves");
+        assert!(offers(&app, &row));
+        assert_eq!(
+            app.command_ref_for(&row).map(|entry| entry.id),
+            Some("command/docker-ps".to_string())
+        );
+        assert!(!offers(&app, &copy_row("Clipboard")));
+
+        // Two entries share the slug: `--cmd run` would refuse, so no binding.
+        app.commands = vec![command("Docker PS"), command("docker-ps")];
+        assert!(!offers(&app, &row));
     }
 
     fn copy_row(category: &str) -> Action {

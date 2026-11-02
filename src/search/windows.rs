@@ -425,6 +425,17 @@ fn load_window_snapshot() -> Option<WindowSnapshot> {
     None
 }
 
+/// The running compositor's name (`niri`, `hyprland`, `sway`) when the
+/// environment identifies exactly one (Q1.6).
+pub(crate) fn detected_compositor() -> Option<&'static str> {
+    match window_backend_candidates().as_slice() {
+        [WindowBackend::Niri] => Some("niri"),
+        [WindowBackend::Hyprland] => Some("hyprland"),
+        [WindowBackend::Sway] => Some("sway"),
+        _ => None,
+    }
+}
+
 fn window_backend_candidates() -> Vec<WindowBackend> {
     let env = std::env::vars().collect::<HashMap<_, _>>();
     window_backend_candidates_from_env(&env)

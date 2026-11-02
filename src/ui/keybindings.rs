@@ -319,6 +319,7 @@ fn handle_view_key(
         extension_list,
         snippet_list,
         snippet_items,
+        hold,
         ..
     } = *ui;
     let action_panel_list = &action_panel_view.list;
@@ -340,6 +341,7 @@ fn handle_view_key(
                     run_action_panel_row(
                         window,
                         launcher,
+                        hold,
                         entry,
                         list,
                         results,

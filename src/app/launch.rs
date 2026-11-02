@@ -110,6 +110,15 @@ impl Zeshicast {
             ));
         }
 
+        if self.command_ref_for(action).is_some() {
+            actions.push(SecondaryAction::new(
+                SecondaryActionKind::CopyHotkeyBinding,
+                "Copy Hotkey Binding",
+                "input-keyboard-symbolic",
+                S::Manage,
+            ));
+        }
+
         if action.parent_dir().is_some() {
             actions.push(SecondaryAction::new(
                 SecondaryActionKind::OpenParent,
@@ -195,6 +204,14 @@ impl Zeshicast {
             }
             SecondaryActionKind::CopyValue => {
                 action.copy_value();
+                Ok(ExecutionDecision::RunNow)
+            }
+            SecondaryActionKind::CopyHotkeyBinding => {
+                let entry = self.command_ref_for(action).ok_or_else(|| {
+                    io::Error::other(format!("`{}` has no unique command id", action.title))
+                })?;
+                let compositor = crate::search::windows::detected_compositor();
+                crate::action::copy_text(&crate::deeplink::hotkey_binding(compositor, &entry.id));
                 Ok(ExecutionDecision::RunNow)
             }
             SecondaryActionKind::Paste => {

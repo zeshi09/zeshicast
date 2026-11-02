@@ -1,7 +1,8 @@
 #![allow(clippy::too_many_arguments)]
 
 use super::launcher::{
-    run_secondary_action_or_confirm, selected_action, show_root_view, update_results,
+    finish_interaction, run_secondary_action_or_confirm, selected_action, show_root_view,
+    update_results,
 };
 use crate::action::{Action, ActionPanelSection, SecondaryActionKind};
 use crate::app::Zeshicast;
@@ -166,6 +167,7 @@ pub(crate) fn action_panel_display_items(
 pub(crate) fn run_action_panel_row(
     window: &ApplicationWindow,
     launcher: &Rc<RefCell<Zeshicast>>,
+    hold: &Rc<RefCell<Option<gtk::gio::ApplicationHoldGuard>>>,
     entry: &Entry,
     list: &ListBox,
     results: &Rc<RefCell<Vec<Action>>>,
@@ -185,6 +187,23 @@ pub(crate) fn run_action_panel_row(
     };
 
     match item.kind {
+        // Synthetic input lands in the focused window, so the palette hides
+        // first and focus returns to the window it was opened over (Q1.3).
+        ActionPanelItemKind::Secondary(SecondaryActionKind::Paste) => {
+            finish_interaction(window, hold);
+            if launcher.borrow_mut().paste_action(&action) == crate::app::PasteOutcome::CopiedOnly {
+                crate::ui::show_toast_osd(None, "✓ Copied — install wtype to paste automatically");
+            }
+        }
+        ActionPanelItemKind::Secondary(SecondaryActionKind::TypeText) => {
+            finish_interaction(window, hold);
+            if let Err(error) = launcher
+                .borrow_mut()
+                .run_secondary_action(&action, SecondaryActionKind::TypeText)
+            {
+                log::warn!("type text failed: {error}");
+            }
+        }
         ActionPanelItemKind::Secondary(kind) => {
             let entry = entry.clone();
             let list = list.clone();
@@ -193,6 +212,9 @@ pub(crate) fn run_action_panel_row(
             let action_bar = action_bar.clone();
             let launcher_for_done = Rc::clone(launcher);
             run_secondary_action_or_confirm(window, launcher, action, kind, move || {
+                if kind == SecondaryActionKind::CopyHotkeyBinding {
+                    crate::ui::show_toast_osd(None, "✓ Hotkey binding copied");
+                }
                 update_results(
                     &launcher_for_done.borrow(),
                     &results,

@@ -98,6 +98,21 @@ pub fn command_id(kind: &str, name: &str) -> String {
     format!("{}/{}", slug(kind), slug(name))
 }
 
+/// A ready-to-paste key binding that runs `id` (Q1.6), in the syntax of
+/// `compositor` (`niri`, `hyprland`, `sway`), or a plain shell command when
+/// the compositor is unknown. The key is a placeholder to change. Ids are
+/// slugs, so they need no escaping inside the quotes.
+pub fn hotkey_binding(compositor: Option<&str>, id: &str) -> String {
+    match compositor {
+        Some("niri") => {
+            format!("Mod+Shift+X {{ spawn \"zeshicast-gtk\" \"--cmd\" \"run\" \"{id}\"; }}")
+        }
+        Some("hyprland") => format!("bind = SUPER SHIFT, X, exec, zeshicast-gtk --cmd run {id}"),
+        Some("sway") => format!("bindsym $mod+Shift+x exec zeshicast-gtk --cmd run {id}"),
+        _ => format!("zeshicast-gtk --cmd run {id}"),
+    }
+}
+
 fn slug(text: &str) -> String {
     let mut slug = String::new();
     for c in text.chars().flat_map(char::to_lowercase) {
@@ -173,6 +188,31 @@ mod tests {
         assert!(is_deep_link("Zeshicast://search"));
         assert!(!is_deep_link("--view"));
         assert!(!is_deep_link("zeshi"));
+    }
+
+    #[test]
+    fn hotkey_bindings_match_each_compositor_syntax() {
+        let id = "command/weather";
+        assert_eq!(
+            hotkey_binding(Some("niri"), id),
+            r#"Mod+Shift+X { spawn "zeshicast-gtk" "--cmd" "run" "command/weather"; }"#
+        );
+        assert_eq!(
+            hotkey_binding(Some("hyprland"), id),
+            "bind = SUPER SHIFT, X, exec, zeshicast-gtk --cmd run command/weather"
+        );
+        assert_eq!(
+            hotkey_binding(Some("sway"), id),
+            "bindsym $mod+Shift+x exec zeshicast-gtk --cmd run command/weather"
+        );
+        assert_eq!(
+            hotkey_binding(None, id),
+            "zeshicast-gtk --cmd run command/weather"
+        );
+        assert_eq!(
+            hotkey_binding(Some("kwin"), id),
+            "zeshicast-gtk --cmd run command/weather"
+        );
     }
 
     #[test]
