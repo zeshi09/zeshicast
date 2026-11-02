@@ -1,0 +1,5 @@
+# Pin the edition for every rustfmt invocation, not just `cargo fmt`.
+# A bare `rustfmt` (editors, agents, pre-commit tools) does not read the
+# edition from Cargo.toml and falls back to the 2015 style, which sorts
+# imports differently and twice left `cargo fmt --check` red (Q0.2).
+edition = "2024"

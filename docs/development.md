@@ -94,6 +94,18 @@ nix develop --command cargo clippy --all-targets --features gui -- -D warnings
 nix develop --command cargo check --features gui,layer-shell
 ```
 
+A fast subset of this (`cargo fmt --check` and clippy on the default build)
+runs as a git hook. Install it once per checkout:
+
+```bash
+ln -s ../../scripts/pre-commit .git/hooks/pre-commit
+```
+
+`rustfmt.toml` pins `edition = "2024"`, so a bare `rustfmt` started by an
+editor or a tool formats exactly like `cargo fmt`. Without it rustfmt falls
+back to the 2015 style and reorders imports, which turns `cargo fmt --check`
+red.
+
 Use focused unit tests for parsers, placeholder expansion, capability checks,
 storage migrations, and action execution policy. Use GUI-feature tests when a
 change touches GTK-facing structs, launcher actions, or daemon behavior.
