@@ -20,7 +20,9 @@
 
 ### 🗺 План развития (Roadmaps & Features)
 
-- [📄 Product Plan 2026-09-19 (`product-plan-2026-09-19.md`)](product-plan-2026-09-19.md) — План развития по итогам сравнения: фазы P0–P5, non-goals, критерии приёмки и решения владельца.
+- [📄 Product Plan 2026-11-02 (`product-plan-2026-11-02.md`)](product-plan-2026-11-02.md) — **Актуальный** пошаговый план: фазы Q0–Q8, гейты владельца, метрики успеха, перенос шагов из плана 2026-09-19.
+- [📄 Product Review 2026-11-02 (`product-review-2026-11-02.md`)](product-review-2026-11-02.md) — Ревью кода и продуктовое сравнение с Raycast 2.0 и Vicinae v0.29.2; основание плана 2026-11-02.
+- [📄 Product Plan 2026-09-19 (`product-plan-2026-09-19.md`)](product-plan-2026-09-19.md) — План развития по итогам сравнения: фазы P0–P5 (заменён планом 2026-11-02).
 - [📄 Vicinae Product Comparison 2026-09-19 (`vicinae-comparison-2026-09-19.md`)](vicinae-comparison-2026-09-19.md) — Продуктовое сравнение с Vicinae v0.29.0: матрица возможностей, где мы сильнее, цены догоняния, три стратегии и приоритизированный бэклог.
 - [📄 Vicinae Parity Roadmap (`vicinae-parity-roadmap.md`)](vicinae-parity-roadmap.md) — Дорожная карта паритета с командными центрами (Vicinae/Raycast), метрики покрытия тестами.
 - [📄 Linux Command Center Vision (`linux-command-center-plan.md`)](linux-command-center-plan.md) — Концепция превращения Zeshicast в полноценный системный командный центр.
