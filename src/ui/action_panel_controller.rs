@@ -190,10 +190,10 @@ pub(crate) fn run_action_panel_row(
         // Synthetic input lands in the focused window, so the palette hides
         // first and focus returns to the window it was opened over (Q1.3).
         ActionPanelItemKind::Secondary(SecondaryActionKind::Paste) => {
-            finish_interaction(window, hold);
-            if launcher.borrow_mut().paste_action(&action) == crate::app::PasteOutcome::CopiedOnly {
-                crate::ui::show_toast_osd(None, "✓ Copied — install wtype to paste automatically");
-            }
+            crate::ui::launcher::paste_clipboard_row(window, hold, launcher, &action, false);
+        }
+        ActionPanelItemKind::Secondary(SecondaryActionKind::PasteAsPlainText) => {
+            crate::ui::launcher::paste_clipboard_row(window, hold, launcher, &action, true);
         }
         ActionPanelItemKind::Secondary(SecondaryActionKind::TypeText) => {
             finish_interaction(window, hold);

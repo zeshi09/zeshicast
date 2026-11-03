@@ -259,8 +259,8 @@ mod tests {
     use super::{
         ActionPanelItem, ActionPanelItemKind, DisplayedActionPanelRow, ScriptCaptureOutcome,
         action_index_from_tag, action_panel_display_items, action_panel_display_rows,
-        calc_row_action, decode_clipboard_text, empty_state_fallback_actions, read_png_from_stream,
-        run_script_capture, secondary_action_risk, watch_clipboard_text_with, with_calc_row_first,
+        calc_row_action, decode_clipboard_text, empty_state_fallback_actions, run_script_capture,
+        secondary_action_risk, with_calc_row_first,
     };
     use crate::action::{
         Action, ActionKind, ActionPanelSection, ActionRisk, ExecutionDecision, ExecutionPolicy,
@@ -268,59 +268,6 @@ mod tests {
     };
     use crate::app::Zeshicast;
     use crate::ui::ActionPanelDisplayItem;
-
-    #[test]
-    fn oversized_clipboard_record_is_truncated_without_killing_the_watcher() {
-        // Regression guard for the read cap: an oversized record used to leave
-        // the producer blocked writing into a pipe nobody drained while this
-        // thread sat in child.wait() forever — a silently dead watcher. The
-        // deadlock lives in std's pipe/wait interaction, so this needs a real
-        // child process; pure-logic coverage of the truncation itself is
-        // already provided by decode_clipboard_text tests.
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut first_spawn = true;
-        watch_clipboard_text_with(tx, move || {
-            // First spawn produces an oversized record with no NUL terminator;
-            // the second spawn fails so the watcher thread ends and closes the
-            // channel — proving the reconnect loop ran instead of hanging.
-            if !std::mem::take(&mut first_spawn) {
-                return Err(std::io::Error::other("test: stop reconnecting"));
-            }
-            std::process::Command::new("sh")
-                .args(["-c", "yes | head -c 2000000"])
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-        });
-
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let mut saw_truncated_record = false;
-        let mut reached_reconnect_probe = false;
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            match rx.recv_timeout(remaining) {
-                Ok(message) if message.is_empty() => {
-                    reached_reconnect_probe = true;
-                    break;
-                }
-                Ok(_) => saw_truncated_record = true,
-                // Channel closed: watcher thread finished.
-                Err(_) => break,
-            }
-        }
-
-        assert!(
-            saw_truncated_record,
-            "truncated record must be processed as a normal entry"
-        );
-        assert!(
-            reached_reconnect_probe,
-            "watcher must reach its reconnect probe instead of hanging on wait()"
-        );
-    }
 
     #[test]
     fn script_activation_gates_execution_behind_confirmation() {
@@ -430,42 +377,6 @@ mod tests {
         assert!(decode_clipboard_text(b"\x89PNG\r\n\x1a\n").is_none());
         assert!(decode_clipboard_text(b"\xff\xd8\xff\xe0").is_none());
         assert!(decode_clipboard_text(b"GIF89a").is_none());
-    }
-
-    #[test]
-    fn png_stream_parser_reads_complete_png() {
-        // Minimal valid 1x1 RGBA PNG (67 bytes)
-        let png_1x1: &[u8] = &[
-            137, 80, 78, 71, 13, 10, 26, 10, // signature
-            0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 99,
-            52, // IHDR
-            0, 0, 0, 10, 73, 68, 65, 84, 120, 156, 99, 0, 1, 0, 0, 5, 0, 1, 13, 10, 45,
-            180, // IDAT
-            0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130, // IEND
-        ];
-
-        // 1. Valid stream reads exact bytes
-        let mut cursor = std::io::Cursor::new(png_1x1);
-        let parsed = read_png_from_stream(&mut cursor).unwrap();
-        assert_eq!(parsed.as_deref(), Some(png_1x1));
-
-        // 2. Trailing data after IEND remains unconsumed in stream
-        let mut with_trailing = png_1x1.to_vec();
-        with_trailing.extend_from_slice(b"extra non-png data");
-        let mut cursor = std::io::Cursor::new(with_trailing);
-        let parsed = read_png_from_stream(&mut cursor).unwrap();
-        assert_eq!(parsed.as_deref(), Some(png_1x1));
-        let mut rest = Vec::new();
-        std::io::Read::read_to_end(&mut cursor, &mut rest).unwrap();
-        assert_eq!(rest, b"extra non-png data");
-
-        // 3. Non-PNG stream returns Ok(None) without panicking
-        let mut invalid = std::io::Cursor::new(b"not a png signature at all");
-        assert!(read_png_from_stream(&mut invalid).unwrap().is_none());
-
-        // 4. Empty stream returns Ok(None)
-        let mut empty = std::io::Cursor::new(b"");
-        assert!(read_png_from_stream(&mut empty).unwrap().is_none());
     }
 
     #[test]

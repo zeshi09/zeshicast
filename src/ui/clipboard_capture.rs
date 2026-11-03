@@ -40,231 +40,283 @@ pub(crate) fn install_clipboard_monitor(launcher: &Rc<RefCell<Zeshicast>>) {
     });
 }
 
-/// Background clipboard capture via `wl-paste --watch`.
-/// Text copies use `--type text` so images never pollute text history with
-/// raw binary fragments. Image copies use `--type image/png` and are streamed
-/// directly into the content-addressed cache.
+/// Put a clipboard entry back in its original format, offered next to its
+/// plain text so a terminal still gets text (Q6.4). `wl-copy` offers one
+/// type per call, gdk offers several. It must run while a zeshicast window
+/// has keyboard focus: Wayland lets only the focused client set the
+/// selection, and the selection stays ours after the window hides.
+pub(crate) fn offer_rich_clipboard(mime: &str, data: &[u8], plain: &str) -> bool {
+    let Some(display) = gdk::Display::default() else {
+        return false;
+    };
+    let bytes = |data: &[u8]| glib::Bytes::from(data);
+    let mut providers = vec![gdk::ContentProvider::for_bytes(mime, &bytes(data))];
+    if mime == crate::services::clipboard_formats::URI_LIST {
+        // What Nautilus and other GTK file managers paste from.
+        let uris = String::from_utf8_lossy(data).replace("\r\n", "\n");
+        let gnome = format!("copy\n{}", uris.trim_end());
+        providers.push(gdk::ContentProvider::for_bytes(
+            "x-special/gnome-copied-files",
+            &bytes(gnome.as_bytes()),
+        ));
+    }
+    providers.push(gdk::ContentProvider::for_bytes(
+        "text/plain;charset=utf-8",
+        &bytes(plain.as_bytes()),
+    ));
+    // The GType string provider adds text/plain, UTF8_STRING and friends.
+    providers.push(gdk::ContentProvider::for_value(&plain.to_value()));
+    let union = gdk::ContentProvider::new_union(&providers);
+    let clipboard = display.clipboard();
+    clipboard.set_content(Some(&union)).is_ok() && clipboard.is_local()
+}
+
+/// The comma separated `clipboard_ignore_apps`, mirrored here from the main
+/// thread like [`IMAGE_CAPTURE_ALLOWED`], for the watcher thread to read.
+static IGNORED_APPS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Set once `wl-paste --watch` runs: the gdk monitor then stays out of the
+/// way, since it cannot tell which app a copy came from.
+static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn set_ignored_apps(apps: Vec<String>) {
+    if let Ok(mut ignored) = IGNORED_APPS.lock() {
+        *ignored = apps;
+    }
+}
+
+fn ignored_apps() -> Vec<String> {
+    IGNORED_APPS
+        .lock()
+        .map(|apps| apps.clone())
+        .unwrap_or_default()
+}
+
+/// One clipboard change worth keeping, as the watcher hands it over.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Captured {
+    /// Text, with its original format when it had a richer one.
+    Text {
+        text: String,
+        extra: Option<(&'static str, Vec<u8>)>,
+    },
+    /// PNG bytes, saved into the cache by the caller.
+    Image(Vec<u8>),
+}
+
+/// How the watcher reads the clipboard; tests pass a fake.
+pub(crate) trait ClipboardSource {
+    /// The offered MIME types.
+    fn types(&self) -> Vec<String>;
+    /// The content as `mime`, at most `cap` bytes; `None` when it is not
+    /// offered, fails or is larger than `cap`.
+    fn read(&self, mime: &str, cap: usize) -> Option<Vec<u8>>;
+    /// Like [`Self::read`], but a longer content is cut to its first `cap`
+    /// bytes instead of refused: a huge text copy is kept, shortened.
+    fn read_prefix(&self, mime: &str, cap: usize) -> Option<Vec<u8>>;
+    fn focused_app(&self) -> Option<String>;
+}
+
+const MAX_IMAGE_BYTES: usize = 50 * 1024 * 1024;
+/// The HTML of a rich copy is kept up to this size; above it, only the text.
+const MAX_HTML_BYTES: usize = 1024 * 1024;
+
+/// Decide what one change is (Q6.4) and read just that: the richest kept
+/// format, nothing for a password or an ignored app.
+pub(crate) fn capture_change(
+    source: &dyn ClipboardSource,
+    ignored: &[String],
+    images_allowed: bool,
+) -> Option<Captured> {
+    use crate::services::clipboard_formats::{
+        Capture, HTML, PNG, URI_LIST, choose, uri_list_paths,
+    };
+    let text_cap = crate::search::clipboard::MAX_CLIPBOARD_TEXT_BYTES + 4096;
+    let types = source.types();
+    // Asking the compositor costs a process; only when someone is ignored.
+    let app = if ignored.is_empty() {
+        None
+    } else {
+        source.focused_app()
+    };
+    let read_text = |mime: &str| {
+        let bytes = source.read_prefix(mime, text_cap)?;
+        // A cut can land inside a UTF-8 character.
+        let valid = match std::str::from_utf8(&bytes) {
+            Ok(_) => bytes.len(),
+            Err(error) => error.valid_up_to(),
+        };
+        decode_clipboard_text(&bytes[..valid])
+    };
+    match choose(&types, app.as_deref(), ignored) {
+        Capture::Skip(_) => None,
+        Capture::Image => {
+            if !images_allowed {
+                return None;
+            }
+            let bytes = source.read(PNG, MAX_IMAGE_BYTES)?;
+            bytes
+                .starts_with(b"\x89PNG\r\n\x1a\n")
+                .then_some(Captured::Image(bytes))
+        }
+        Capture::Files => {
+            let raw = source.read(URI_LIST, text_cap)?;
+            let list = String::from_utf8(raw.clone()).ok()?;
+            let paths = uri_list_paths(&list);
+            if paths.is_empty() {
+                return None;
+            }
+            Some(Captured::Text {
+                text: paths.join("\n"),
+                extra: Some((URI_LIST, raw)),
+            })
+        }
+        Capture::Html => {
+            let text = read_text("text")?;
+            let extra = source
+                .read(HTML, MAX_HTML_BYTES)
+                .filter(|html| std::str::from_utf8(html).is_ok())
+                .map(|html| (HTML, html));
+            Some(Captured::Text { text, extra })
+        }
+        Capture::Text => Some(Captured::Text {
+            text: read_text("text")?,
+            extra: None,
+        }),
+    }
+}
+
+/// The live clipboard, through `wl-paste` and the compositor.
+struct WlPaste;
+
+impl ClipboardSource for WlPaste {
+    fn types(&self) -> Vec<String> {
+        wl_paste(&["--list-types"], 64 * 1024)
+            .map(|(bytes, _)| {
+                String::from_utf8_lossy(&bytes)
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn read(&self, mime: &str, cap: usize) -> Option<Vec<u8>> {
+        wl_paste(&["--no-newline", "--type", mime], cap)
+            .filter(|(_, truncated)| !truncated)
+            .map(|(bytes, _)| bytes)
+    }
+
+    fn read_prefix(&self, mime: &str, cap: usize) -> Option<Vec<u8>> {
+        wl_paste(&["--no-newline", "--type", mime], cap).map(|(bytes, _)| bytes)
+    }
+
+    fn focused_app(&self) -> Option<String> {
+        crate::services::compositor::focused_app_id()
+    }
+}
+
+/// `wl-paste args`, at most `cap` bytes of stdout: `(bytes, truncated)`.
+/// A truncated run was killed at the cap, which is not a failure.
+fn wl_paste(args: &[&str], cap: usize) -> Option<(Vec<u8>, bool)> {
+    let mut command = std::process::Command::new("wl-paste");
+    command.args(args);
+    let run =
+        crate::process::run_capped(&mut command, std::time::Duration::from_secs(3), cap, 4096)
+            .ok()?;
+    if run.stdout_truncated {
+        return Some((run.stdout, true));
+    }
+    (run.status.success() && !run.timed_out).then_some((run.stdout, false))
+}
+
+/// Background clipboard capture (Q6.4): `wl-paste --watch` only signals a
+/// change; each change is then read in the format worth keeping, and skipped
+/// for passwords and `clipboard_ignore_apps`.
 pub(crate) fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshicast>>) {
     if !launcher.borrow().clipboard_history_enabled() {
         return;
     }
 
-    let (tx_text, rx_text) = std::sync::mpsc::channel::<String>();
-    std::thread::spawn(move || watch_clipboard_text(tx_text));
-
-    let (tx_img, rx_img) = std::sync::mpsc::channel::<String>();
     set_image_capture_allowed(launcher.borrow().clipboard_capture_images());
-    if launcher.borrow().clipboard_capture_images() {
-        std::thread::spawn(move || watch_clipboard_image(tx_img));
-    }
+    set_ignored_apps(launcher.borrow().clipboard_ignored_apps());
+    let (tx, rx) = std::sync::mpsc::channel::<Option<Captured>>();
+    std::thread::Builder::new()
+        .name("clipboard-watch".to_string())
+        .spawn(move || watch_clipboard(tx))
+        .ok();
 
     let launcher = Rc::clone(launcher);
     glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
-        // Mirror the current preference into the watcher's view, so toggling
-        // private mode off/on stops or resumes cached images without a restart.
-        let capture_images = launcher.borrow().clipboard_capture_images();
-        set_image_capture_allowed(capture_images);
-        while let Ok(text) = rx_text.try_recv() {
-            if !text.is_empty()
-                && let Err(error) = launcher.borrow_mut().add_clipboard_text(&text)
-            {
-                eprintln!("failed to save clipboard history: {error}");
-            }
-        }
-        while let Ok(path) = rx_img.try_recv() {
-            if !path.is_empty()
-                && let Err(error) = launcher.borrow_mut().add_clipboard_image(&path)
-            {
-                eprintln!("failed to save clipboard image: {error}");
+        // Mirror the preferences into the watcher's view, so private mode,
+        // image capture and the ignore list apply without a restart.
+        set_image_capture_allowed(launcher.borrow().clipboard_capture_images());
+        set_ignored_apps(launcher.borrow().clipboard_ignored_apps());
+        while let Ok(captured) = rx.try_recv() {
+            let result = match captured {
+                None => continue,
+                Some(Captured::Text { text, extra }) => launcher
+                    .borrow_mut()
+                    .add_clipboard_entry(
+                        &text,
+                        extra.as_ref().map(|(mime, data)| (*mime, data.as_slice())),
+                    )
+                    .map(drop),
+                Some(Captured::Image(bytes)) => {
+                    // Saved here, after the private-mode check the watcher saw
+                    // may have gone stale.
+                    if !launcher.borrow().clipboard_capture_images() {
+                        continue;
+                    }
+                    crate::services::clipboard_store::save_clipboard_image(&bytes)
+                        .and_then(|path| launcher.borrow_mut().add_clipboard_image(&path).map(drop))
+                }
+            };
+            if let Err(error) = result {
+                log::warn!("failed to save clipboard history: {error}");
             }
         }
         glib::ControlFlow::Continue
     });
 }
 
-fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
-    watch_clipboard_text_with(tx, || {
-        crate::process::die_with_parent(&mut std::process::Command::new("wl-paste"))
-            .args(["--type", "text", "--watch", "sh", "-c", "cat; printf '\\0'"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-    })
-}
-
-fn watch_clipboard_image(tx: std::sync::mpsc::Sender<String>) {
-    watch_clipboard_image_with(tx, || {
-        crate::process::die_with_parent(&mut std::process::Command::new("wl-paste"))
-            .args(["--type", "image/png", "--watch", "cat"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-    })
-}
-
-pub(crate) fn watch_clipboard_image_with(
-    tx: std::sync::mpsc::Sender<String>,
-    mut spawn: impl FnMut() -> std::io::Result<std::process::Child>,
-) {
-    loop {
-        let mut child = match spawn() {
-            Ok(child) => child,
-            Err(_) => return,
-        };
-        let Some(stdout) = child.stdout.take() else {
-            return;
-        };
-
-        let mut reader = std::io::BufReader::new(stdout);
-        while let Ok(Some(png_bytes)) = read_png_from_stream(&mut reader) {
-            // Private mode (or images/history off) must not leave a cached PNG
-            // behind: the main thread's guard only stops the history insert.
-            if !image_capture_allowed() {
-                continue;
-            }
-            if let Ok(path) = crate::services::clipboard_store::save_clipboard_image(&png_bytes)
-                && tx.send(path).is_err()
-            {
-                return;
-            }
-        }
-
-        let _ = child.kill();
-        let _ = child.wait();
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        if tx.send(String::new()).is_err() {
-            return;
-        }
-    }
-}
-
-pub(crate) fn read_png_from_stream<R: std::io::Read>(
-    reader: &mut R,
-) -> std::io::Result<Option<Vec<u8>>> {
-    let mut sig = [0u8; 8];
-    match reader.read_exact(&mut sig) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e),
-    }
-
-    const PNG_SIG: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
-    if sig != PNG_SIG {
-        return Ok(None);
-    }
-
-    let mut data = Vec::with_capacity(65536);
-    data.extend_from_slice(&sig);
-
-    const MAX_IMAGE_BYTES: usize = 50 * 1024 * 1024; // 50 MB safety cap
-
-    loop {
-        let mut chunk_header = [0u8; 8];
-        match reader.read_exact(&mut chunk_header) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-            Err(e) => return Err(e),
-        }
-        let chunk_len = u32::from_be_bytes([
-            chunk_header[0],
-            chunk_header[1],
-            chunk_header[2],
-            chunk_header[3],
-        ]) as usize;
-        let is_iend = &chunk_header[4..8] == b"IEND";
-
-        data.extend_from_slice(&chunk_header);
-
-        if data.len() + chunk_len + 4 > MAX_IMAGE_BYTES {
-            return Err(std::io::Error::other("image exceeded maximum size"));
-        }
-
-        let old_len = data.len();
-        data.resize(old_len + chunk_len + 4, 0);
-        reader.read_exact(&mut data[old_len..])?;
-
-        if is_iend {
-            break;
-        }
-    }
-
-    Ok(Some(data))
-}
-
-pub(crate) fn watch_clipboard_text_with(
-    tx: std::sync::mpsc::Sender<String>,
-    mut spawn: impl FnMut() -> std::io::Result<std::process::Child>,
-) {
+fn watch_clipboard(tx: std::sync::mpsc::Sender<Option<Captured>>) {
     use std::io::BufRead;
-    use std::io::Read;
-    /// Hard cap on bytes read per clipboard record: `MAX_CLIPBOARD_TEXT_BYTES`
-    /// plus slack for the NUL terminator, so a multi-gigabyte paste cannot
-    /// balloon the read buffer.
-    const CLIPBOARD_RECORD_READ_LIMIT: u64 =
-        (crate::search::clipboard::MAX_CLIPBOARD_TEXT_BYTES + 4096) as u64;
     loop {
-        // Each selection change runs the command with the new content on stdin;
-        // we frame entries with a trailing NUL (clipboard text never contains
-        // one) so multi-line values stay intact.
-        let mut child = match spawn() {
-            Ok(child) => child,
-            // wl-clipboard not installed — leave the gdk monitor as the only path.
-            Err(_) => return,
-        };
-        let Some(stdout) = child.stdout.take() else {
+        // The command only marks the change; its stdin (whatever type
+        // wl-paste picked) is thrown away and read again in the right one.
+        let child = crate::process::die_with_parent(&mut std::process::Command::new("wl-paste"))
+            .args(["--watch", "sh", "-c", "cat >/dev/null; echo"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        let Ok(mut child) = child else {
+            // wl-clipboard not installed: the gdk monitor is the only path.
+            WATCHER_RUNNING.store(false, Ordering::Relaxed);
             return;
         };
-
-        let record_truncated;
-        {
-            let mut reader = std::io::BufReader::new(stdout).take(CLIPBOARD_RECORD_READ_LIMIT);
-            let mut buf: Vec<u8> = Vec::new();
-            let mut truncated = false;
-            loop {
-                buf.clear();
-                match reader.read_until(0, &mut buf) {
-                    Ok(0) => break, // producer exited or the read cap was exhausted
-                    Ok(_) => {
-                        let terminated = buf.last() == Some(&0);
-                        if terminated {
-                            buf.pop();
-                        }
-                        // A record clipped by the read cap can end mid-UTF-8
-                        // character; trim to the last valid boundary so it decodes
-                        // like any other entry instead of being dropped.
-                        let valid_len = match std::str::from_utf8(&buf) {
-                            Ok(_) => buf.len(),
-                            Err(error) => error.valid_up_to(),
-                        };
-                        if let Some(text) = decode_clipboard_text(&buf[..valid_len])
-                            && tx.send(text).is_err()
-                        {
-                            return; // receiver gone, stop the thread
-                        }
-                        if !terminated {
-                            truncated = true;
-                            break; // oversized record: nothing else in this batch
-                        }
-                    }
-                    Err(_) => break,
+        WATCHER_RUNNING.store(true, Ordering::Relaxed);
+        if let Some(stdout) = child.stdout.take() {
+            for line in std::io::BufReader::new(stdout).lines() {
+                if line.is_err() {
+                    break;
+                }
+                let captured = capture_change(&WlPaste, &ignored_apps(), image_capture_allowed());
+                if captured.is_some() && tx.send(captured).is_err() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return;
                 }
             }
-            record_truncated = truncated;
-        } // reader dropped here: our pipe end closes before we reap the child
-        if record_truncated {
-            // Log the event only; never echo clipboard content here.
-            eprintln!("clipboard record exceeded {CLIPBOARD_RECORD_READ_LIMIT} bytes; truncated");
         }
-        // Kill before reaping: an oversized record leaves the producer blocked
-        // writing into a pipe nobody drains any more, so a plain wait() would
-        // hang forever and silently kill this watcher thread. kill() is also
-        // harmless when the child already exited on its own.
         let _ = child.kill();
         let _ = child.wait();
-        // wl-paste died (e.g. compositor restart); reconnect shortly, unless the
-        // receiver is gone (empty probe doubles as a liveness check).
+        // wl-paste died (a compositor restart): reconnect shortly, unless the
+        // receiver is gone (the empty probe doubles as a liveness check).
         std::thread::sleep(std::time::Duration::from_secs(1));
-        if tx.send(String::new()).is_err() {
+        if tx.send(None).is_err() {
             return;
         }
     }
@@ -308,8 +360,17 @@ fn capture_clipboard(
     {
         return;
     }
+    // The wl-paste watcher sees every copy with its source app; this path
+    // would only re-add what is on the clipboard when the palette opens,
+    // including copies from ignored apps.
+    if WATCHER_RUNNING.load(Ordering::Relaxed) {
+        return;
+    }
 
     let formats = clipboard.formats();
+    if formats.contain_mime_type(crate::services::clipboard_formats::PASSWORD_HINT) {
+        return;
+    }
     if formats.contain_mime_type("image/png") || formats.contains_type(gdk::Texture::static_type())
     {
         capture_clipboard_image(clipboard, launcher, last);
@@ -381,56 +442,159 @@ fn capture_clipboard_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::{Command, Stdio};
+    use std::collections::HashMap;
 
-    /// P3: while capture is disallowed (private mode, images off), the watcher
-    /// must not write a cached PNG or forward a path. It still has to drain the
-    /// stream so the child does not block on a full pipe.
-    #[test]
-    fn disabled_image_capture_writes_nothing() {
-        set_image_capture_allowed(false);
+    struct Fake {
+        offers: HashMap<&'static str, Vec<u8>>,
+        app: Option<&'static str>,
+        app_asked: std::cell::Cell<bool>,
+    }
 
-        // A minimal PNG byte stream: signature, an IHDR chunk, an IEND chunk.
-        let png: Vec<u8> = [
-            b"\x89PNG\r\n\x1a\n".as_slice(),
-            &0u32.to_be_bytes(),
-            b"IHDR",
-            &[0u8; 4],
-            &0u32.to_be_bytes(),
-            b"IEND",
-            &[0u8; 4],
-        ]
-        .concat();
-        let dir =
-            std::env::temp_dir().join(format!("zeshicast-capture-gate-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let source = dir.join("frame.png");
-        std::fs::write(&source, &png).expect("write png");
-
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        let spawned = std::cell::Cell::new(false);
-        let mut spawn = || {
-            if spawned.get() {
-                // Second spawn ends the watcher loop.
-                return Err(std::io::Error::other("stop"));
+    impl Fake {
+        fn new(offers: &[(&'static str, &[u8])], app: Option<&'static str>) -> Self {
+            Self {
+                offers: offers
+                    .iter()
+                    .map(|(mime, data)| (*mime, data.to_vec()))
+                    .collect(),
+                app,
+                app_asked: std::cell::Cell::new(false),
             }
-            spawned.set(true);
-            Command::new("cat")
-                .arg(&source)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-        };
-        watch_clipboard_image_with(tx, &mut spawn);
+        }
+    }
 
-        let forwarded: Vec<String> = rx.try_iter().filter(|m| !m.is_empty()).collect();
-        assert!(
-            forwarded.is_empty(),
-            "a disabled capture must not forward a cached path: {forwarded:?}"
+    impl ClipboardSource for Fake {
+        fn types(&self) -> Vec<String> {
+            self.offers.keys().map(|mime| mime.to_string()).collect()
+        }
+
+        fn read(&self, mime: &str, cap: usize) -> Option<Vec<u8>> {
+            self.read_prefix(mime, usize::MAX)
+                .filter(|data| data.len() <= cap)
+        }
+
+        fn read_prefix(&self, mime: &str, cap: usize) -> Option<Vec<u8>> {
+            // `--type text` is wl-paste's "best text type".
+            let mime = if mime == "text" { "text/plain" } else { mime };
+            let data = self.offers.get(mime)?;
+            Some(data[..data.len().min(cap)].to_vec())
+        }
+
+        fn focused_app(&self) -> Option<String> {
+            self.app_asked.set(true);
+            self.app.map(str::to_string)
+        }
+    }
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\nrest";
+
+    #[test]
+    fn each_change_is_read_in_the_format_worth_keeping() {
+        let html = Fake::new(&[("text/html", b"<b>Hi</b>"), ("text/plain", b"Hi")], None);
+        assert_eq!(
+            capture_change(&html, &[], true),
+            Some(Captured::Text {
+                text: "Hi".to_string(),
+                extra: Some(("text/html", b"<b>Hi</b>".to_vec())),
+            })
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
-        set_image_capture_allowed(true);
+        let files = Fake::new(
+            &[
+                (
+                    "text/uri-list",
+                    b"file:///home/me/a%20b.pdf\r\nfile:///tmp/c\r\n",
+                ),
+                ("text/plain", b"x"),
+            ],
+            None,
+        );
+        let Some(Captured::Text { text, extra }) = capture_change(&files, &[], true) else {
+            panic!("files are kept");
+        };
+        assert_eq!(text, "/home/me/a b.pdf\n/tmp/c");
+        assert_eq!(extra.unwrap().0, "text/uri-list");
+
+        let image = Fake::new(&[("image/png", PNG), ("text/plain", b"x")], None);
+        assert_eq!(
+            capture_change(&image, &[], true),
+            Some(Captured::Image(PNG.to_vec()))
+        );
+
+        let plain = Fake::new(&[("text/plain", b"just text")], None);
+        assert_eq!(
+            capture_change(&plain, &[], true),
+            Some(Captured::Text {
+                text: "just text".to_string(),
+                extra: None
+            })
+        );
+    }
+
+    #[test]
+    fn passwords_and_ignored_apps_leave_nothing() {
+        let password = Fake::new(
+            &[
+                ("text/plain", b"hunter2"),
+                ("x-kde-passwordManagerHint", b"secret"),
+            ],
+            Some("firefox"),
+        );
+        assert_eq!(capture_change(&password, &[], true), None);
+
+        let ignored = vec!["KeePassXC".to_string()];
+        let from_keepass = Fake::new(
+            &[("text/plain", b"hunter2")],
+            Some("org.keepassxc.KeePassXC"),
+        );
+        assert_eq!(capture_change(&from_keepass, &ignored, true), None);
+
+        let from_editor = Fake::new(&[("text/plain", b"notes")], Some("dev.zed.Zed"));
+        assert!(capture_change(&from_editor, &ignored, true).is_some());
+
+        let nobody_ignored = Fake::new(&[("text/plain", b"notes")], Some("x"));
+        capture_change(&nobody_ignored, &[], true);
+        assert!(
+            !nobody_ignored.app_asked.get(),
+            "no compositor call without an ignore list"
+        );
+    }
+
+    /// P3: with image capture off (private mode, images disabled) nothing is
+    /// read into a PNG to be cached.
+    #[test]
+    fn disabled_image_capture_reads_no_image() {
+        let image = Fake::new(&[("image/png", PNG)], None);
+        assert_eq!(capture_change(&image, &[], false), None);
+        let not_png = Fake::new(&[("image/png", b"GIF89a")], None);
+        assert_eq!(capture_change(&not_png, &[], true), None);
+    }
+
+    #[test]
+    fn a_huge_text_copy_is_kept_shortened() {
+        let mut huge = "ж".repeat(40_000).into_bytes();
+        huge.extend_from_slice(b"tail");
+        let text = Fake::new(&[("text/plain", &huge)], None);
+        let Some(Captured::Text { text, .. }) = capture_change(&text, &[], true) else {
+            panic!("kept");
+        };
+        assert!(text.len() <= crate::search::clipboard::MAX_CLIPBOARD_TEXT_BYTES + 4096);
+        assert!(
+            text.chars().all(|c| c == 'ж'),
+            "cut on a character boundary"
+        );
+    }
+
+    #[test]
+    fn oversized_html_keeps_the_text_only() {
+        let big = vec![b'a'; MAX_HTML_BYTES + 1];
+        let html = Fake::new(&[("text/html", &big), ("text/plain", b"short")], None);
+        assert_eq!(
+            capture_change(&html, &[], true),
+            Some(Captured::Text {
+                text: "short".to_string(),
+                extra: None
+            })
+        );
     }
 }

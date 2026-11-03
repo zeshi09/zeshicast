@@ -186,6 +186,18 @@ impl Zeshicast {
             && !self.clipboard_private_mode()
     }
 
+    /// Apps whose copies are not recorded (`clipboard_ignore_apps`, Q6.4);
+    /// password managers when the preference is not set.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub(crate) fn clipboard_ignored_apps(&self) -> Vec<String> {
+        crate::services::clipboard_formats::parse_ignored_apps(
+            self.preferences
+                .get("clipboard_ignore_apps")
+                .map(String::as_str)
+                .unwrap_or(crate::services::clipboard_formats::DEFAULT_IGNORED_APPS),
+        )
+    }
+
     /// The tip for this palette opening, counting it (Q3.1). `None` when tips
     /// are off (`ui_hints = false`) or all have been shown enough. The count
     /// is state, so it lives in `hints_shown`, not in `preferences.toml`.

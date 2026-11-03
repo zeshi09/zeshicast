@@ -6,6 +6,7 @@
 pub mod audio;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod battery;
+pub(crate) mod clipboard_formats;
 pub mod clipboard_store;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod compositor;

@@ -21,6 +21,10 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("clipboard_retention", "100"),
     ("clipboard_capture_images", "true"),
     ("clipboard_enter_action", "paste"),
+    (
+        "clipboard_ignore_apps",
+        crate::services::clipboard_formats::DEFAULT_IGNORED_APPS,
+    ),
     ("export_include_secrets", "false"),
     ("ai_enabled", "true"),
     ("ai_provider", "ollama"),
@@ -94,6 +98,7 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
             ("clipboard_private_mode", "Pause clipboard capture"),
             ("clipboard_retention", "Clipboard retention"),
             ("clipboard_capture_images", "Clipboard images"),
+            ("clipboard_ignore_apps", "Never record copies from"),
             ("notifications_history_enabled", "Notification history"),
             ("files_in_root", "Files in root search"),
             ("files_exclude", "Exclude from file search"),

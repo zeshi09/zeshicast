@@ -58,6 +58,21 @@ impl Zeshicast {
         outcome
     }
 
+    /// Send Ctrl+V for content the caller already put on the clipboard (a
+    /// rich clipboard entry, Q6.4); [`Self::paste_action`] copies first.
+    pub fn paste_offered(&mut self, action: &Action) -> PasteOutcome {
+        let outcome = if is_wtype_available() {
+            paste_via_wtype();
+            PasteOutcome::Pasted
+        } else {
+            PasteOutcome::CopiedOnly
+        };
+        if let Err(error) = self.record_recent(action) {
+            log::warn!("failed to record recent action: {error}");
+        }
+        outcome
+    }
+
     pub fn available_secondary_actions(&self, action: &Action) -> Vec<SecondaryAction> {
         use crate::action::ActionPanelSection as S;
         let can_type = is_wtype_available();
@@ -83,6 +98,17 @@ impl Zeshicast {
             actions.push(SecondaryAction::new(
                 SecondaryActionKind::Paste,
                 "Paste to Active Window",
+                "edit-paste-symbolic",
+                S::Primary,
+            ));
+        }
+
+        // Q6.4: a rich copy (HTML, files) pastes in its original format; this
+        // is the way to get only its text.
+        if action.category == "Clipboard" && self.clipboard_format(&action.value()).is_some() {
+            actions.push(SecondaryAction::new(
+                SecondaryActionKind::PasteAsPlainText,
+                "Paste as Plain Text",
                 "edit-paste-symbolic",
                 S::Primary,
             ));
@@ -214,7 +240,7 @@ impl Zeshicast {
                 crate::action::copy_text(&crate::deeplink::hotkey_binding(compositor, &entry.id));
                 Ok(ExecutionDecision::RunNow)
             }
-            SecondaryActionKind::Paste => {
+            SecondaryActionKind::Paste | SecondaryActionKind::PasteAsPlainText => {
                 self.paste_action(action);
                 Ok(ExecutionDecision::RunNow)
             }

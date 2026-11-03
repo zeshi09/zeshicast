@@ -291,6 +291,12 @@ the key lives.
   <!-- test: a_loosened_key_file_is_tightened -->
 - The key is exported only together with the history.
   <!-- test: safe_export_excludes_clipboard_db -->
+- Copies marked as passwords and copies from `clipboard_ignore_apps` are
+  never recorded; private mode keeps every format out.
+  <!-- test: passwords_and_ignored_apps_leave_nothing -->
+  <!-- test: passwords_and_ignored_apps_are_never_kept -->
+  <!-- test: private_mode_keeps_rich_copies_out_too -->
+  <!-- test: password_managers_are_ignored_by_default -->
 - Snippets are no longer mirrored to a plaintext `snippets.txt`.
   <!-- test: snippets_are_not_mirrored_to_a_plaintext_file -->
 

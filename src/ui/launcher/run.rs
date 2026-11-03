@@ -373,11 +373,7 @@ pub(crate) fn run_action_or_confirm(
     // Q1.3: Enter on a clipboard/snippet row pastes into the window the
     // palette was opened over. Hide first so focus can return to it.
     if launcher.borrow().enter_pastes(&action) {
-        finish_interaction(window, hold);
-        let outcome = launcher.borrow_mut().paste_action(&action);
-        if outcome == crate::app::PasteOutcome::CopiedOnly {
-            crate::ui::show_toast_osd(None, "✓ Copied — install wtype to paste automatically");
-        }
+        paste_clipboard_row(window, hold, launcher, &action, false);
         return;
     }
 
@@ -537,6 +533,36 @@ pub(crate) fn clipboard_item_action(value: &str) -> Action {
         ActionKind::Copy(value.to_string()),
         0,
     )
+}
+
+/// Paste a clipboard or snippet row into the window the palette was opened
+/// over. A clipboard entry with a stored original format (HTML, files) goes
+/// back in it, offered while our window still has focus; `plain_only`, or a
+/// refused offer, pastes the text (Q6.4).
+pub(crate) fn paste_clipboard_row(
+    window: &ApplicationWindow,
+    hold: &Rc<RefCell<Option<gio::ApplicationHoldGuard>>>,
+    launcher: &Rc<RefCell<Zeshicast>>,
+    action: &Action,
+    plain_only: bool,
+) {
+    let offered = !plain_only
+        && action.category == "Clipboard"
+        && launcher
+            .borrow()
+            .clipboard_format(&action.value())
+            .is_some_and(|(mime, data)| {
+                crate::ui::clipboard_capture::offer_rich_clipboard(&mime, &data, &action.value())
+            });
+    finish_interaction(window, hold);
+    let outcome = if offered {
+        launcher.borrow_mut().paste_offered(action)
+    } else {
+        launcher.borrow_mut().paste_action(action)
+    };
+    if outcome == crate::app::PasteOutcome::CopiedOnly {
+        crate::ui::show_toast_osd(None, "✓ Copied — install wtype to paste automatically");
+    }
 }
 
 pub(crate) fn finish_interaction(

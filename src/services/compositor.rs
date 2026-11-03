@@ -93,6 +93,47 @@ fn workspace_sway() -> Option<WorkspaceSnapshot> {
     })
 }
 
+// ── Focused window ───────────────────────────────────────────────────────────
+
+/// App id of the focused window (Wayland `app_id`, Hyprland `class`), for
+/// `clipboard_ignore_apps` (Q6.4). `None` when no compositor answers.
+pub fn focused_app_id() -> Option<String> {
+    run("niri", &["msg", "--json", "focused-window"])
+        .and_then(|json| app_id_from_niri(&json))
+        .or_else(|| {
+            run("hyprctl", &["-j", "activewindow"]).and_then(|json| {
+                let window: serde_json::Value = serde_json::from_str(&json).ok()?;
+                non_empty(window["class"].as_str())
+            })
+        })
+        .or_else(|| run("swaymsg", &["-t", "get_tree"]).and_then(|json| app_id_from_sway(&json)))
+}
+
+fn non_empty(value: Option<&str>) -> Option<String> {
+    value.filter(|value| !value.is_empty()).map(str::to_string)
+}
+
+fn app_id_from_niri(json: &str) -> Option<String> {
+    let window: serde_json::Value = serde_json::from_str(json).ok()?;
+    non_empty(window["app_id"].as_str())
+}
+
+/// The focused leaf of a sway tree: its `app_id`, or the X11 `class`.
+fn app_id_from_sway(json: &str) -> Option<String> {
+    fn walk(node: &serde_json::Value) -> Option<String> {
+        if node["focused"].as_bool() == Some(true) {
+            return non_empty(node["app_id"].as_str())
+                .or_else(|| non_empty(node["window_properties"]["class"].as_str()));
+        }
+        ["nodes", "floating_nodes"]
+            .iter()
+            .filter_map(|key| node[*key].as_array())
+            .flatten()
+            .find_map(walk)
+    }
+    walk(&serde_json::from_str(json).ok()?)
+}
+
 // ── Keyboard layout ──────────────────────────────────────────────────────────
 
 /// Short code for the currently active keyboard layout (e.g. "en", "ru"),
@@ -329,6 +370,20 @@ fn run(program: &str, args: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_focused_app_id_is_read_from_niri_and_sway() {
+        assert_eq!(
+            app_id_from_niri(r#"{"id":1,"app_id":"org.keepassxc.KeePassXC","is_focused":true}"#),
+            Some("org.keepassxc.KeePassXC".to_string())
+        );
+        assert_eq!(app_id_from_niri("null"), None);
+        let tree = r#"{"focused":false,"nodes":[{"focused":false,"nodes":[
+            {"focused":false,"app_id":"foot"},
+            {"focused":true,"app_id":null,"window_properties":{"class":"Bitwarden"}}]}],
+            "floating_nodes":[]}"#;
+        assert_eq!(app_id_from_sway(tree), Some("Bitwarden".to_string()));
+    }
 
     #[test]
     fn layout_codes_map_common_names() {

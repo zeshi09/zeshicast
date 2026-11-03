@@ -903,6 +903,50 @@ mod tests {
     }
 
     #[test]
+    fn private_mode_keeps_rich_copies_out_too() {
+        let dir = test_cache_dir("private-rich");
+        let mut app = test_app(
+            dir.clone(),
+            HashMap::from([("clipboard_private_mode".to_string(), "true".to_string())]),
+        );
+        let stored = app
+            .add_clipboard_entry("Report", Some(("text/html", b"<b>Report</b>".as_slice())))
+            .unwrap();
+        assert!(!stored);
+        assert!(app.clipboard_history.is_empty());
+        assert_eq!(app.clipboard_format("Report"), None);
+
+        app.preferences.remove("clipboard_private_mode");
+        app.add_clipboard_entry(
+            "/tmp/a.pdf",
+            Some(("text/uri-list", b"file:///tmp/a.pdf".as_slice())),
+        )
+        .unwrap();
+        assert_eq!(
+            app.clipboard_format("/tmp/a.pdf").map(|(mime, _)| mime),
+            Some("text/uri-list".to_string())
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn password_managers_are_ignored_by_default() {
+        let app = test_app(test_cache_dir("ignore-default"), HashMap::new());
+        let ignored = app.clipboard_ignored_apps();
+        assert!(crate::services::clipboard_formats::is_ignored_app(
+            "org.keepassxc.KeePassXC",
+            &ignored
+        ));
+        let mut app = app;
+        app.preferences
+            .insert("clipboard_ignore_apps".to_string(), String::new());
+        assert!(
+            app.clipboard_ignored_apps().is_empty(),
+            "an empty list ignores nothing"
+        );
+    }
+
+    #[test]
     fn private_mode_does_not_turn_off_the_extension_audit_log() {
         let _ = crate::audit::take_test_log();
         let mut app = test_app(

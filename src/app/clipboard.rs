@@ -5,6 +5,17 @@ use super::*;
 
 impl Zeshicast {
     pub fn add_clipboard_text(&mut self, text: &str) -> io::Result<bool> {
+        self.add_clipboard_entry(text, None)
+    }
+
+    /// Record a copy with its original format (`text/html`, `text/uri-list`)
+    /// when it had one (Q6.4). Private mode and a disabled history keep
+    /// every format out, not only the text.
+    pub fn add_clipboard_entry(
+        &mut self,
+        text: &str,
+        extra: Option<(&str, &[u8])>,
+    ) -> io::Result<bool> {
         if !self.clipboard_history_enabled() || self.clipboard_private_mode() {
             return Ok(false);
         }
@@ -14,15 +25,27 @@ impl Zeshicast {
         if text.is_empty() {
             return Ok(false);
         }
-        self.store_clipboard_entry(text)
+        self.store_clipboard_entry(text, extra)
+    }
+
+    /// The original format stored with a clipboard value, if any.
+    pub(crate) fn clipboard_format(&self, value: &str) -> Option<(String, Vec<u8>)> {
+        storage::clipboard_extra(&self.config_dir, value)
+            .map_err(|error| log::warn!("cannot read the clipboard format: {error}"))
+            .ok()
+            .flatten()
     }
 
     /// Retention/insertion tail shared by text and image entries. The caller is
     /// responsible for sanitizing untrusted input; the image sentinel is added
     /// by [`Self::add_clipboard_image`] after sanitization, not parsed from it.
-    fn store_clipboard_entry(&mut self, text: String) -> io::Result<bool> {
+    fn store_clipboard_entry(
+        &mut self,
+        text: String,
+        extra: Option<(&str, &[u8])>,
+    ) -> io::Result<bool> {
         let retention = self.clipboard_retention();
-        storage::clipboard_insert_with_limit(&self.config_dir, &text, retention)
+        storage::clipboard_insert_entry(&self.config_dir, &text, extra, retention)
             .map_err(|e| io::Error::other(e.to_string()))?;
         self.clipboard_timestamps
             .entry(text.clone())
@@ -88,7 +111,7 @@ impl Zeshicast {
         // The entry is built here rather than sanitized from input, so the
         // sentinel survives and the cached PNG is recognised (and kept by the
         // pruner) instead of degrading into a text entry.
-        self.store_clipboard_entry(format!("{CLIPBOARD_IMAGE_PREFIX}{path}"))
+        self.store_clipboard_entry(format!("{CLIPBOARD_IMAGE_PREFIX}{path}"), None)
     }
 
     pub(crate) fn clipboard_retention(&self) -> usize {

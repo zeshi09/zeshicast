@@ -781,6 +781,8 @@ pub enum SecondaryActionKind {
     CopyValue,
     /// Copy, then send Ctrl+V to the window that regains focus (Q1.3).
     Paste,
+    /// Paste only the text of a rich clipboard entry (Q6.4).
+    PasteAsPlainText,
     /// Copy a compositor key binding that runs this command by id (Q1.6).
     CopyHotkeyBinding,
     TypeText,

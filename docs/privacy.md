@@ -56,16 +56,29 @@ which zeshicast reads once and never deletes; remove them by hand.
 
 ## Clipboard History
 
-The GTK daemon records clipboard text and, when enabled, image clipboard entries.
-Image entries store a sentinel row in SQLite plus a PNG file in
-`~/.cache/zeshicast/clipboard/`.
+The GTK daemon records every copy through `wl-paste --watch`, in the
+richest format it keeps: an image (`image/png`, cached as a PNG in
+`~/.cache/zeshicast/clipboard/`), copied files (`text/uri-list`, shown as
+their paths), rich text (`text/html` stored next to its plain text), or plain
+text. Pasting an entry puts it back in that format, offered together with
+its plain text so a terminal still gets text; "Paste as Plain Text" in the
+action panel pastes only the text.
+
+Never recorded:
+
+- a copy marked as a password (`x-kde-passwordManagerHint`, set by KeePassXC
+  and KDE apps);
+- a copy made while an app listed in `clipboard_ignore_apps` is focused. The
+  default lists password managers (KeePassXC, Bitwarden, 1Password, Enpass);
+  an entry matches an app id exactly or by its last part (`KeePassXC` covers
+  `org.keepassxc.KeePassXC`). Set it to an empty value to ignore no app.
 
 Privacy preferences:
 
 - `clipboard_history_enabled = "false"` disables installing clipboard watchers
   on startup.
-- `clipboard_private_mode = "true"` pauses recording new clipboard entries
-  without deleting existing history.
+- `clipboard_private_mode = "true"` pauses recording new clipboard entries,
+  in every format, without deleting existing history.
 - `clipboard_capture_images = "false"` keeps text capture enabled but skips
   image PNG caching.
 - `clipboard_retention = "100"` controls how many clipboard rows are kept.

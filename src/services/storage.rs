@@ -8,7 +8,7 @@ use rusqlite::{Connection, Result, params};
 
 use super::crypto::Cipher;
 
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 fn open(config_dir: &Path) -> Result<Connection> {
     if let Err(error) = std::fs::create_dir_all(config_dir) {
@@ -94,6 +94,10 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             4 => {
                 migrate_4_to_5(&transaction)?;
                 version = 5;
+            }
+            5 => {
+                migrate_5_to_6(&transaction)?;
+                version = 6;
             }
             _ => {
                 return Err(rusqlite::Error::InvalidParameterName(format!(
@@ -184,6 +188,16 @@ fn migrate_4_to_5(conn: &Connection) -> Result<()> {
         );
         ALTER TABLE clipboard ADD COLUMN text_hash BLOB;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_text_hash ON clipboard(text_hash);",
+    )
+}
+
+/// Q6.4: a clipboard entry keeps its original format next to the text it
+/// is searched and shown by: `text/html` for rich text, `text/uri-list` for
+/// copied files. `extra` is sealed like `text`.
+fn migrate_5_to_6(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "ALTER TABLE clipboard ADD COLUMN extra_mime TEXT;
+         ALTER TABLE clipboard ADD COLUMN extra BLOB;",
     )
 }
 
@@ -317,15 +331,36 @@ pub fn clipboard_load_with_limit(config_dir: &Path, limit: usize) -> Result<Vec<
         .collect()
 }
 
+#[cfg(test)]
 pub fn clipboard_insert_with_limit(config_dir: &Path, text: &str, limit: usize) -> Result<()> {
+    clipboard_insert_entry(config_dir, text, None, limit)
+}
+
+/// Insert (or move to the top) `text`, with its original format when it
+/// had one; a later copy of the same text replaces the format.
+pub fn clipboard_insert_entry(
+    config_dir: &Path,
+    text: &str,
+    extra: Option<(&str, &[u8])>,
+    limit: usize,
+) -> Result<()> {
     let (conn, cipher) = open_keyed(config_dir)?;
+    let extra_sealed = match extra {
+        Some((_, data)) => Some(cipher.seal(data).map_err(seal_error)?),
+        None => None,
+    };
     conn.execute(
-        "INSERT INTO clipboard (text, text_hash, added_at) VALUES (?1, ?2, ?3)
-         ON CONFLICT(text_hash) DO UPDATE SET text = excluded.text, added_at = excluded.added_at",
+        "INSERT INTO clipboard (text, text_hash, added_at, extra_mime, extra)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(text_hash) DO UPDATE SET text = excluded.text,
+             added_at = excluded.added_at, extra_mime = excluded.extra_mime,
+             extra = excluded.extra",
         params![
             cipher.seal(text.as_bytes()).map_err(seal_error)?,
             cipher.fingerprint(text.as_bytes()),
-            now()
+            now(),
+            extra.map(|(mime, _)| mime),
+            extra_sealed
         ],
     )?;
     // Keep the table bounded — only the newest entries are ever loaded (LIMIT
@@ -348,6 +383,24 @@ pub fn clipboard_prune(config_dir: &Path, limit: usize) -> Result<()> {
         params![limit as i64],
     )?;
     Ok(())
+}
+
+/// The original format stored with `text`: `(mime, bytes)`.
+pub fn clipboard_extra(config_dir: &Path, text: &str) -> Result<Option<(String, Vec<u8>)>> {
+    let (conn, cipher) = open_keyed(config_dir)?;
+    let row: Option<(Option<String>, Option<Vec<u8>>)> = conn
+        .query_row(
+            "SELECT extra_mime, extra FROM clipboard WHERE text_hash = ?1",
+            params![cipher.fingerprint(text.as_bytes())],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok();
+    match row {
+        Some((Some(mime), Some(sealed))) => {
+            Ok(Some((mime, cipher.open(&sealed).map_err(open_error)?)))
+        }
+        _ => Ok(None),
+    }
 }
 
 pub fn clipboard_delete(config_dir: &Path, text: &str) -> Result<()> {
@@ -883,6 +936,26 @@ mod tests {
                 "`{secret}` is readable in the file"
             );
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_clipboard_entry_keeps_its_original_format_sealed() {
+        let dir = test_dir("extra-format");
+        let html = "<b>QUARTERLYHTML</b>";
+        clipboard_insert_entry(&dir, "QUARTERLY", Some(("text/html", html.as_bytes())), 100)
+            .unwrap();
+        clipboard_insert_with_limit(&dir, "plain only", 100).unwrap();
+        assert_eq!(
+            clipboard_extra(&dir, "QUARTERLY").unwrap(),
+            Some(("text/html".to_string(), html.as_bytes().to_vec()))
+        );
+        assert_eq!(clipboard_extra(&dir, "plain only").unwrap(), None);
+        assert!(!contains(&raw_database(&dir), "QUARTERLYHTML"));
+
+        // Copied again as plain text: the old format does not stick.
+        clipboard_insert_with_limit(&dir, "QUARTERLY", 100).unwrap();
+        assert_eq!(clipboard_extra(&dir, "QUARTERLY").unwrap(), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -31,6 +31,13 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Clipboard history keeps the original format: rich text (HTML) and copied
+  files paste back as they were copied, together with their plain text;
+  "Paste as Plain Text" pastes only the text. Copies marked as passwords
+  (`x-kde-passwordManagerHint`) and copies from apps in
+  `clipboard_ignore_apps` (password managers by default) are never
+  recorded. One `wl-paste` watcher instead of two. The database moves to
+  schema 6.
 - Clipboard history and snippets are encrypted in `zeshicast.db`
   (ChaCha20-Poly1305). The key lives in the Secret Service keyring, or in
   `~/.config/zeshicast/db.key` (0600) without one. Existing rows are
