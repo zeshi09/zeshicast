@@ -1,4 +1,6 @@
-use crate::app::CommandSummary;
+use std::rc::Rc;
+
+use crate::app::{CommandSummary, ExtensionDetail, ExtensionSummary};
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Label, ListBox, Orientation};
 
@@ -6,11 +8,24 @@ use gtk::{Box as GtkBox, Label, ListBox, Orientation};
 pub struct ExtensionBrowserView {
     pub root: GtkBox,
     pub list: ListBox,
+    /// Extension id behind each list row (`None`: a header or a built-in
+    /// command), so Enter can open that extension's screen (Q5.5).
+    pub row_extensions: Rc<Vec<Option<String>>>,
 }
 
-pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserView {
+pub fn extension_browser_view(
+    commands: &[CommandSummary],
+    details: &[ExtensionDetail],
+) -> ExtensionBrowserView {
     let root = super::panel_root(8, 12);
     root.set_vexpand(true);
+
+    // Binaries have no command of their own; list them so a binary-only
+    // extension is visible too.
+    let mut commands = commands.to_vec();
+    commands.extend(details.iter().flat_map(binary_summaries));
+    crate::app::sort_command_summaries(&mut commands);
+    let commands = commands.as_slice();
 
     let active_count = commands.iter().filter(|c| c.enabled).count();
     let header_text = format!(
@@ -22,6 +37,7 @@ pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserVi
     root.append(&header);
 
     let list = super::results_list();
+    let mut row_extensions = Vec::new();
     let mut current_group = String::new();
     for command in commands {
         let group = command.extension_group();
@@ -31,9 +47,11 @@ pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserVi
                 &group,
                 &command.extension_detail(),
             ));
+            row_extensions.push(None);
         }
         let row = extension_row(command);
         list.append(&row);
+        row_extensions.push(command.extension.as_ref().map(|e| e.id.clone()));
     }
 
     if let Some(row) = list.row_at_index(0) {
@@ -55,7 +73,103 @@ pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserVi
     root.append(&audit_scroller);
     root.connect_map(move |_| fill_audit_list(&audit_list));
 
-    ExtensionBrowserView { root, list }
+    ExtensionBrowserView {
+        root,
+        list,
+        row_extensions: Rc::new(row_extensions),
+    }
+}
+
+fn binary_summaries(detail: &ExtensionDetail) -> Vec<CommandSummary> {
+    detail
+        .items
+        .iter()
+        .filter(|item| item.kind == "Binary")
+        .map(|item| CommandSummary {
+            kind: "Binary".to_string(),
+            name: item.name.clone(),
+            category: "Binary".to_string(),
+            description: item.blocked.clone().unwrap_or_default(),
+            keyword: None,
+            icon_name: "application-x-executable-symbolic".to_string(),
+            tags: Vec::new(),
+            permissions: item.granted.clone(),
+            capabilities: item.granted.clone(),
+            extension: Some(ExtensionSummary {
+                id: detail.id.clone(),
+                name: detail.name.clone(),
+                version: detail.version.clone(),
+                capabilities: detail.manifest.clone(),
+            }),
+            enabled: item.blocked.is_none(),
+        })
+        .collect()
+}
+
+/// The extension screen (Q5.5): the manifest ceiling, what each item asked
+/// for and was granted, why it is blocked, and its latest permission log.
+pub fn show_extension_detail_panel(parent: &gtk::ApplicationWindow, detail: &ExtensionDetail) {
+    let title = format!("{} {}", detail.name, detail.version);
+    let Some(panel) = super::action_panel(parent, &title, 620, 520) else {
+        return;
+    };
+    let root = super::panel_root(8, 14);
+    root.append(&super::panel_title(&title));
+
+    let manifest = if detail.manifest.is_empty() {
+        "nothing".to_string()
+    } else {
+        detail.manifest.join(", ")
+    };
+    let summary = Label::new(Some(&format!(
+        "{} · manifest allows: {manifest}",
+        detail.id
+    )));
+    summary.add_css_class("result-subtitle");
+    summary.set_xalign(0.0);
+    summary.set_wrap(true);
+    root.append(&summary);
+
+    let list = super::results_list();
+    list.set_selection_mode(gtk::SelectionMode::None);
+    for item in &detail.items {
+        let mut text = item.grant_line();
+        if let Some(reason) = &item.blocked {
+            text.push('\n');
+            text.push_str(reason);
+        }
+        list.append(&extension_section_header(
+            &format!("{} · {}", item.kind, item.name),
+            &text,
+        ));
+    }
+    list.append(&extension_section_header("Permission log", ""));
+    let rows = crate::audit::recent(Some(&detail.id), 20);
+    if rows.is_empty() {
+        list.append(&extension_section_header("No requests yet", ""));
+    }
+    for row in &rows {
+        let (title, subtitle) =
+            crate::audit::describe(row, &crate::config::format_time_ago(row.at));
+        list.append(&extension_section_header(&title, &subtitle));
+    }
+    root.append(&super::scrollable_list(&list));
+    panel.set_child(Some(&root));
+
+    let key_controller = gtk::EventControllerKey::new();
+    {
+        let panel = panel.clone();
+        key_controller.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                panel.close();
+                gtk::glib::Propagation::Stop
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+    }
+    panel.add_controller(key_controller);
+    panel.present();
 }
 
 /// Rows shown in the permission log; older ones stay in the database.

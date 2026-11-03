@@ -36,6 +36,9 @@ pub(crate) struct CommandEntry {
     pub(crate) permissions: Vec<String>,
     pub(crate) capabilities: Vec<Capability>,
     pub(crate) origin: Option<ExtensionOrigin>,
+    /// `permissions` as the command file wrote them, before the manifest
+    /// ceiling narrowed them; the extension screen shows both (Q5.5).
+    pub(crate) declared_permissions: Vec<String>,
 }
 
 impl CommandEntry {
@@ -198,6 +201,7 @@ pub(crate) fn parse_command_entry(input: &str) -> Option<CommandEntry> {
         tags,
         icon_name,
         description,
+        declared_permissions: permissions.clone(),
         permissions,
         capabilities,
         origin: None,
@@ -467,7 +471,7 @@ const BLOCKED_LACKS_SHELL: &str = "Blocked: command manifest lacks permissions =
 /// an extension is not a loophole and needs the manifest to grant
 /// `shell`/`exec` too. A hand-written argv command in the user's own config dir
 /// has no manifest behind it and is gated by the confirmation prompt instead.
-fn capability_denial(entry: &CommandEntry) -> Option<&'static str> {
+pub(crate) fn capability_denial(entry: &CommandEntry) -> Option<&'static str> {
     if has_capability(&entry.capabilities, Capability::Shell) {
         return None;
     }

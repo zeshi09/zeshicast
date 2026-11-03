@@ -20,6 +20,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Extension screen: Enter on an extension's row in the Extension Browser
+  shows what its manifest allows, what each command, script and binary asked
+  for and was granted, why a blocked one is blocked, and its latest
+  permission log entries. Binaries now appear in the browser too.
 - Extension permission log: every capability request from an extension is
   recorded as granted, confirmed, cancelled or denied (`extension_audit` in
   `zeshicast.db`, newest 1000 rows, kept in private mode too). The
@@ -40,6 +44,9 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Fixed
 
+- An extension whose `binaries` are refused for lack of `shell` now shows a
+  blocked row when you search for its name, like one refused for its
+  protocol, instead of vanishing silently.
 - `zeshicast-gtk --quit` (or a crash) no longer leaves the clipboard
   watchers (`wl-paste --watch`) and the niri event stream running: they now
   die with the daemon even when it was started outside systemd.

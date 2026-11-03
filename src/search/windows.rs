@@ -417,6 +417,11 @@ fn stale_window_snapshot() -> Option<WindowSnapshot> {
 }
 
 fn load_window_snapshot() -> Option<WindowSnapshot> {
+    // Unit tests must not see the windows open on the machine running them:
+    // a live window title once outranked the result a search test expected.
+    if cfg!(test) {
+        return None;
+    }
     for backend in window_backend_candidates() {
         if let Some(snapshot) = load_backend_snapshot(backend) {
             return Some(snapshot);

@@ -22,6 +22,8 @@ pub(crate) struct ExtensionManifest {
     /// Why the declared `binaries` were not loaded, when they were refused
     /// before any spawn (Q5.1: protocol version). Shown as a blocked result.
     pub(crate) binaries_blocked: Option<String>,
+    /// Every binary the manifest lists, loaded or not (Q5.5 shows them all).
+    pub(crate) declared_binaries: Vec<PathBuf>,
 }
 
 pub(crate) fn load_extension_manifests(config_dir: &Path) -> Vec<ExtensionManifest> {
@@ -59,22 +61,22 @@ pub(crate) fn parse_extension_manifest(root: &Path, input: &str) -> Option<Exten
         .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("toml"))
         .collect();
     let scripts = manifest_paths(root, &table, "scripts");
-    // Executing extension code requires the manifest to say so.
-    let mut binaries = if grants_shell_capability(&capabilities) {
-        manifest_paths(root, &table, "binaries")
-    } else {
-        Vec::new()
-    };
-    // A binary written for another protocol would misread our requests (or we
-    // its replies): refuse it here, so it is never spawned.
-    let binaries_blocked = if binaries.is_empty() {
+    let declared_binaries = manifest_paths(root, &table, "binaries");
+    // Executing extension code requires the manifest to say so, and a binary
+    // written for another protocol would misread our requests (or we its
+    // replies): refuse both here, so they are never spawned.
+    let binaries_blocked = if declared_binaries.is_empty() {
         None
+    } else if !grants_shell_capability(&capabilities) {
+        Some(BLOCKED_BINARIES_LACK_SHELL.to_string())
     } else {
         protocol_mismatch(table.get("protocol"))
     };
-    if binaries_blocked.is_some() {
-        binaries.clear();
-    }
+    let binaries = if binaries_blocked.is_some() {
+        Vec::new()
+    } else {
+        declared_binaries.clone()
+    };
 
     Some(ExtensionManifest {
         origin: ExtensionOrigin {
@@ -87,8 +89,12 @@ pub(crate) fn parse_extension_manifest(root: &Path, input: &str) -> Option<Exten
         scripts,
         binaries,
         binaries_blocked,
+        declared_binaries,
     })
 }
+
+const BLOCKED_BINARIES_LACK_SHELL: &str =
+    "Blocked: extension binaries need capabilities = [\"shell\"]";
 
 /// The reason a manifest's `protocol` rules its binaries out, if it does.
 fn protocol_mismatch(value: Option<&toml::Value>) -> Option<String> {
@@ -261,6 +267,18 @@ binaries = ["bin/tool"]
         )
         .unwrap();
         assert!(denied.binaries.is_empty());
+        assert_eq!(
+            denied.declared_binaries.len(),
+            1,
+            "still listed, for the extension screen"
+        );
+        assert!(
+            denied
+                .binaries_blocked
+                .as_deref()
+                .unwrap()
+                .contains("shell")
+        );
 
         let granted = parse_extension_manifest(
             &root,

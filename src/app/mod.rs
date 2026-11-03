@@ -27,7 +27,10 @@ use crate::services::storage;
 use crate::services::text_input::{is_wtype_available, paste_via_wtype, type_text_via_wtype};
 
 mod clipboard;
+mod extensions;
 mod launch;
+#[cfg(feature = "gui")]
+pub use self::extensions::ExtensionDetail;
 mod preferences;
 mod snippets;
 
@@ -194,6 +197,16 @@ impl CommandSummary {
             .map(|extension| format!("{}@{}", extension.id, extension.version))
             .unwrap_or_else(|| "legacy command directories".to_string())
     }
+}
+
+/// Extension Browser order: by extension, then kind, then name.
+pub fn sort_command_summaries(summaries: &mut [CommandSummary]) {
+    summaries.sort_by(|a, b| {
+        a.extension_group()
+            .cmp(&b.extension_group())
+            .then(a.kind.cmp(&b.kind))
+            .then(a.name.cmp(&b.name))
+    });
 }
 
 #[derive(Debug, Clone)]
@@ -431,12 +444,7 @@ impl Zeshicast {
             }
         }));
 
-        summaries.sort_by(|a, b| {
-            a.extension_group()
-                .cmp(&b.extension_group())
-                .then(a.kind.cmp(&b.kind))
-                .then(a.name.cmp(&b.name))
-        });
+        sort_command_summaries(&mut summaries);
         summaries
     }
 }
@@ -460,7 +468,7 @@ mod tests {
         format!("{CLIPBOARD_IMAGE_PREFIX}{}", path.display())
     }
 
-    fn test_app(config_dir: PathBuf, preferences: HashMap<String, String>) -> Zeshicast {
+    pub(super) fn test_app(config_dir: PathBuf, preferences: HashMap<String, String>) -> Zeshicast {
         Zeshicast {
             apps: Vec::new(),
             quicklinks: Vec::new(),

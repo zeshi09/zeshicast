@@ -22,6 +22,9 @@ pub(crate) struct ScriptArgument {
     pub(crate) default: String,
 }
 
+pub(crate) const BLOCKED_SCRIPT_LACKS_SHELL: &str =
+    "Blocked: script extension manifest lacks capabilities = [\"shell\"]";
+
 #[derive(Debug, Clone)]
 pub(crate) struct ScriptEntry {
     pub(crate) title: String,
@@ -47,7 +50,7 @@ impl ScriptEntry {
         self
     }
 
-    fn has_shell_capability(&self) -> bool {
+    pub(crate) fn has_shell_capability(&self) -> bool {
         self.capabilities.contains(&Capability::Shell)
     }
 
@@ -383,8 +386,7 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
             // and stay available.
             let blocked = entry.origin.is_some() && !entry.has_shell_capability();
             let (kind, icon_name) = if blocked {
-                subtitle = "Blocked: script extension manifest lacks capabilities = [\"shell\"]"
-                    .to_string();
+                subtitle = BLOCKED_SCRIPT_LACKS_SHELL.to_string();
                 (ActionKind::None, "dialog-warning-symbolic")
             } else if entry.arguments.is_empty() {
                 // Run the script file directly (argv, no `sh -c`): a path with
@@ -508,6 +510,7 @@ mod tests {
             scripts: scripts.iter().map(|name| root.join(name)).collect(),
             binaries: Vec::new(),
             binaries_blocked: None,
+            declared_binaries: Vec::new(),
         }
     }
 

@@ -99,7 +99,10 @@ pub(crate) fn build_ui(
     let results_scroller = crate::ui::scrollable_list(&list);
     search_page.append(&results_scroller);
 
-    let extension_view = crate::ui::extension_browser_view(&launcher.borrow().list_commands());
+    let extension_view = {
+        let launcher = launcher.borrow();
+        crate::ui::extension_browser_view(&launcher.list_commands(), &launcher.extension_details())
+    };
     let action_panel_view = crate::ui::action_panel_view();
     let ai_chat_view = crate::ui::ai_chat_view();
     let audio_view = crate::ui::audio_view(&crate::services::audio::AudioSnapshot::default());
@@ -1063,8 +1066,18 @@ pub(crate) fn build_ui(
         let entry = entry.clone();
         let action_bar = action_bar.clone();
         let navigation = navigation.clone();
-        extension_view.list.connect_row_activated(move |_, _| {
-            show_root_view(&navigation, &entry, &action_bar);
+        let window = window.clone();
+        let launcher = Rc::clone(&launcher);
+        let row_extensions = Rc::clone(&extension_view.row_extensions);
+        extension_view.list.connect_row_activated(move |_, row| {
+            // Q5.5: Enter on an extension's row explains its permissions.
+            let id = usize::try_from(row.index())
+                .ok()
+                .and_then(|index| row_extensions.get(index).cloned().flatten());
+            match id.and_then(|id| launcher.borrow().extension_detail(&id)) {
+                Some(detail) => crate::ui::show_extension_detail_panel(&window, &detail),
+                None => show_root_view(&navigation, &entry, &action_bar),
+            }
         });
     }
 

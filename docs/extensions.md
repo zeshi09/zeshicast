@@ -72,7 +72,8 @@ runs:
   script says `@raycast.needsConfirmation false`;
   <!-- test: extension_script_without_shell_capability_is_blocked -->
   <!-- test: extension_script_ignores_needs_confirmation_false -->
-- `binaries` are not loaded at all without `shell`.
+- `binaries` are not loaded at all without `shell`; searching for the
+  extension's name shows a blocked row saying so.
   <!-- test: manifest_binaries_require_shell -->
 
 A result that asks for a capability the extension lacks is not dropped. It
@@ -80,6 +81,12 @@ is shown with a `Blocked: … requires …` subtitle and does nothing, so the
 missing permission is visible.
 
 ### What the user sees
+
+In the Extension Browser (Ctrl+B), Enter on a row of your extension opens its
+screen: what the manifest allows, and for each command, script and binary
+what it asked for, what it was granted (`asked ∩ manifest`), what was not
+granted, and why it is blocked, if it is.
+<!-- test: the_extension_screen_explains_each_grant_and_block -->
 
 Every time something your extension produced asks for a capability, the
 decision goes to a permission log the user can read in the Extension Browser
