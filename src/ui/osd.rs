@@ -163,6 +163,9 @@ impl Level {
     pub(crate) fn text(&self) -> String {
         if self.muted {
             "Muted".to_string()
+        } else if self.kind == LevelKind::Microphone && self.percent == 0 {
+            // A mute toggle reported without a level.
+            "On".to_string()
         } else {
             format!("{}%", self.percent)
         }
@@ -194,6 +197,7 @@ thread_local! {
 /// [`LEVEL_VISIBLE_MS`] after the last one. Shown under Do Not Disturb too:
 /// it answers a key press, it is not a notification.
 pub fn show_level_osd(app: Option<&Application>, level: Level) {
+    LAST_LEVEL.with(|last| last.set(Some((level, std::time::Instant::now()))));
     let Some(app) = app
         .cloned()
         .or_else(|| gio::Application::default().and_then(|a| a.downcast::<Application>().ok()))
@@ -249,6 +253,65 @@ pub fn show_level_osd(app: Option<&Application>, level: Level) {
             });
         });
     });
+}
+
+thread_local! {
+    /// The last level shown and when, so a change this process just made
+    /// is not shown again when the PipeWire watcher reports it (O3).
+    static LAST_LEVEL: std::cell::Cell<Option<(Level, std::time::Instant)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Whether a level reported by the watcher is new to the user: not the one
+/// a volume key showed a moment ago.
+pub(crate) fn is_new_level(last: Option<(Level, std::time::Instant)>, level: Level) -> bool {
+    !matches!(last, Some((shown, at)) if shown == level && at.elapsed() < Duration::from_millis(1500))
+}
+
+/// A level that changed outside zeshicast (pavucontrol, a headset button,
+/// the default device). Not shown while the palette is open: it shows the
+/// level itself.
+pub fn show_external_level(level: Level) {
+    if !super::hidden() {
+        return;
+    }
+    if is_new_level(LAST_LEVEL.with(std::cell::Cell::get), level) {
+        show_level_osd(None, level);
+    }
+}
+
+/// Watch PipeWire on a thread for the daemon's lifetime (L3, O3): levels go
+/// to the poll cache, changes made elsewhere to the level OSD.
+pub fn install_audio_watcher() {
+    std::thread::Builder::new()
+        .name("audio-events".to_string())
+        .spawn(|| {
+            let mut previous = crate::services::audio_events::AudioLevels::default();
+            crate::services::audio_events::watch(move |levels| {
+                crate::services::poll_cache::set_audio_levels(&levels);
+                let changes = crate::services::audio_events::level_changes(&previous, &levels);
+                previous = levels;
+                for change in changes {
+                    let level = match change {
+                        crate::services::audio_events::LevelChange::Output { percent, muted } => {
+                            Level {
+                                kind: LevelKind::Volume,
+                                percent: u16::from(percent),
+                                muted,
+                            }
+                        }
+                        crate::services::audio_events::LevelChange::InputMute { muted } => Level {
+                            kind: LevelKind::Microphone,
+                            percent: 0,
+                            muted,
+                        },
+                    };
+                    glib::idle_add_once(move || show_external_level(level));
+                }
+                true
+            });
+        })
+        .ok();
 }
 
 /// `--volume …` / `--mic-mute` (O2): change the level with `wpctl` and show
@@ -891,6 +954,26 @@ mod tests {
             percent,
             muted,
         }
+    }
+
+    #[test]
+    fn a_level_a_key_just_showed_is_not_shown_again() {
+        let level = volume(45, false);
+        let now = std::time::Instant::now();
+        assert!(is_new_level(None, level));
+        assert!(
+            !is_new_level(Some((level, now)), level),
+            "the echo of our own change"
+        );
+        assert!(
+            is_new_level(Some((level, now)), volume(50, false)),
+            "a different level"
+        );
+        let long_ago = now - Duration::from_secs(5);
+        assert!(
+            is_new_level(Some((level, long_ago)), level),
+            "the same level later is news"
+        );
     }
 
     #[test]

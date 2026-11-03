@@ -200,6 +200,28 @@ pub fn start() {
     });
 }
 
+/// New default levels from the PipeWire watcher (L3): the strip and views
+/// show them on their next check, without waiting for a poll.
+pub fn set_audio_levels(levels: &crate::services::audio_events::AudioLevels) {
+    publish(&cache(), |cache| {
+        let apply =
+            |slot: &mut Option<crate::services::audio::AudioDeviceSnapshot>,
+             level: &Option<crate::services::audio::AudioDeviceSnapshot>| {
+                if let Some(level) = level {
+                    match slot {
+                        Some(current) => {
+                            current.volume_percent = level.volume_percent;
+                            current.muted = level.muted;
+                        }
+                        None => *slot = Some(level.clone()),
+                    }
+                }
+            };
+        apply(&mut cache.audio.output, &levels.output);
+        apply(&mut cache.audio.input, &levels.input);
+    });
+}
+
 /// Run a tick now (a volume key changed what the strip shows).
 pub fn refresh_now() {
     let (lock, condvar) = wake();

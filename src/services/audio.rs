@@ -194,6 +194,11 @@ pub fn apply_volume_request(request: VolumeRequest, max: u8) -> Option<AudioDevi
     read_wpctl_volume(request.target())
 }
 
+/// The level of `@DEFAULT_AUDIO_SINK@` / `@DEFAULT_AUDIO_SOURCE@`.
+pub(crate) fn read_default_volume(target: &str) -> Option<AudioDeviceSnapshot> {
+    read_wpctl_volume(target)
+}
+
 fn read_wpctl_volume(target: &str) -> Option<AudioDeviceSnapshot> {
     let output = Command::new("wpctl")
         .args(["get-volume", target])

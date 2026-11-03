@@ -4,6 +4,8 @@
 // set instead.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod audio;
+#[cfg(feature = "gui")]
+pub mod audio_events;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod battery;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
