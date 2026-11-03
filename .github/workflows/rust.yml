@@ -83,6 +83,16 @@ jobs:
             experimental-features = nix-command flakes
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@908b263ff629f4cc17666315b7fd3ec127c6244d # v14
+      # Q4.3: every leg pulls from zeshicast.cachix.org; only the package build
+      # on a push to main pushes, so users of the flake get a prebuilt package
+      # and PRs (which have no secrets) never try to write.
+      - name: Binary cache
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: zeshicast
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ matrix.name != 'package-build' || github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+          pushFilter: "-source$"
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.command }}
 

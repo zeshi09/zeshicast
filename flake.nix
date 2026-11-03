@@ -3,6 +3,17 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+  # Prebuilt x86_64-linux packages from CI (Q4.3). Applies to `nix build` /
+  # `nix run` on this flake (Nix asks once, or set accept-flake-config); a
+  # system that uses the flake as an input adds the same two lines to
+  # `nix.settings` instead — see the README.
+  nixConfig = {
+    extra-substituters = [ "https://zeshicast.cachix.org" ];
+    extra-trusted-public-keys = [
+      "zeshicast.cachix.org-1:9k2D8swRlc37eU3btozmayHyiGWZCsW1onatwBkkl9I="
+    ];
+  };
+
   outputs = { self, nixpkgs, ... }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];

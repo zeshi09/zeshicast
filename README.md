@@ -94,6 +94,25 @@ systemd **user** service.
 }
 ```
 
+**Binary cache.** CI pushes the x86_64-linux package to
+[zeshicast.cachix.org](https://zeshicast.cachix.org), so you do not compile
+the Rust and GTK stack yourself. A flake used as an input does not pass its
+`nixConfig` on, so add the cache to your system:
+
+```nix
+nix.settings = {
+  extra-substituters = [ "https://zeshicast.cachix.org" ];
+  extra-trusted-public-keys = [
+    "zeshicast.cachix.org-1:9k2D8swRlc37eU3btozmayHyiGWZCsW1onatwBkkl9I="
+  ];
+};
+```
+
+The cached build is the one pinned by this repository's `flake.lock`: with
+`inputs.zeshicast.inputs.nixpkgs.follows = "nixpkgs"` the package is built
+against your nixpkgs instead and nothing comes from the cache. Only `main`
+is pushed; a tag is cached once main has reached it.
+
 `nixos-rebuild switch`, then:
 
 ```bash

@@ -20,6 +20,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Binary cache: CI pushes the x86_64-linux package to
+  `zeshicast.cachix.org`; `nix build`/`nix run` on the flake offer it via
+  `nixConfig`, and the README shows the two `nix.settings` lines for a system
+  that uses the flake as an input.
 - `docs/extensions.md`: the guide for extension authors (manifest,
   capabilities, JSON-RPC protocol and limits), a JSON Schema for
   `extension.toml` (`resources/extension.schema.json`) and a template
