@@ -98,7 +98,7 @@ Q3–Q4 — декабрь, первый публичный релиз `v0.2.0` 
 | Q4.2 ✅ (CLI + исходники; GTK — через Nix) | `.github/workflows/release.yml`: по тегу — сборка `nix build`, статически слинкованный CLI (`x86_64-unknown-linux-musl`), архив с бинарями, `.desktop`, unit-файлом и `sha256`; GitHub Release с выдержкой из CHANGELOG; экшены на SHA | Прогон на тестовом теге в форке/ветке | Релиз собирается одной командой `git tag` | S | Q4.1 |
 | Q4.3 | Бинарный кэш для flake (cachix или GitHub-backed `nix-community/cache-nix-action`), `nixConfig.extra-substituters` в `flake.nix` | `nix build` на чистой машине не компилирует проект | Установка на NixOS — минуты, а не сборка GTK-стека | S | Q4.2 |
 | Q4.4 | `packaging/arch/PKGBUILD` (`zeshicast-git` и `zeshicast-bin`), публикация в AUR; список runtime-зависимостей (`gtk4`, `gtk4-layer-shell`, `wl-clipboard`, опционально `wtype`, `brightnessctl`) | `makepkg` в чистом контейнере Arch в CI | Пакет ставится на Arch одной командой | S | Q4.2 |
-| Q4.5 | README: блок «Почему zeshicast» (командный центр + безопасные расширения + ноль телеметрии), GIF 15–20 с (хоткей → поиск → вставка → дашборд), раздел «Сравнение» со ссылкой на ревью, «Non-goals»; объявление в r/NixOS, r/niri, r/unixporn после `v0.2.0` | — | Новый посетитель за 30 секунд понимает, чем мы отличаемся от Vicinae | S | Q4.1 |
+| Q4.5 ◐ (текст готов; GIF и объявления — за владельцем) | README: блок «Почему zeshicast» (командный центр + безопасные расширения + ноль телеметрии), GIF 15–20 с (хоткей → поиск → вставка → дашборд), раздел «Сравнение» со ссылкой на ревью, «Non-goals»; объявление в r/NixOS, r/niri, r/unixporn после `v0.2.0` | — | Новый посетитель за 30 секунд понимает, чем мы отличаемся от Vicinae | S | Q4.1 |
 
 ## Фаза Q5. SDK расширений как публичный актив
 

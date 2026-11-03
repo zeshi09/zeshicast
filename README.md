@@ -11,6 +11,54 @@ they share with the CLI (MPRIS, NetworkManager) behind `desktop`.
 See [docs/README.md](docs/README.md) for the complete documentation sitemap and [docs/vicinae-parity-roadmap.md](docs/vicinae-parity-roadmap.md) for the roadmap. For threat model and local data handling, read [docs/security.md](docs/security.md) and [docs/privacy.md](docs/privacy.md).
 For contributor workflows, read [docs/development.md](docs/development.md).
 
+## Why zeshicast
+
+- **A command center, not just a launcher.** One resident daemon is your
+  notification server, clipboard history (text and images), media controls,
+  audio and network panel, system monitor and window grid. On a bare niri or
+  Hyprland session it replaces mako/swaync, cliphist, playerctl and a btop
+  window, and the palette opens on any of them: `--view media`.
+- **Extensions you can read before you trust them.** Commands, scripts and
+  extensions declare capabilities (`shell`, `network`, `filesystem`, `clipboard_read`, …); the
+  manifest sets a ceiling no command can exceed, destructive actions ask
+  first, and every process goes through one execution gate. No Node runtime,
+  no store server, no auto-update.
+- **Nothing leaves the machine unless you ask.** No telemetry, no update
+  checks. The network is used only by features you invoke: AI (local Ollama by
+  default), translation, an extension that declares `network`, and album art
+  your media player points to. Timing marks (`ZESHICAST_TRACE=1`) stay in your
+  journal.
+- **Wayland-native and Nix-first.** layer-shell palette, `--toggle` on one
+  hotkey, Enter pastes into the window you came from, `--dmenu` for scripts,
+  `zeshicast://` links; a flake with NixOS and Home Manager modules.
+
+### How it compares
+
+[Vicinae](https://github.com/vicinae/vicinae) is the closest project and the
+better pick if you want breadth today: Raycast-compatible React extensions
+and both stores, a browser tab switcher, snippet expansion, emoji and font
+pickers, more polish. zeshicast trades that breadth for a built-in service
+layer and a smaller, auditable extension model. Raycast itself does not run on
+Linux. The full comparison, including where zeshicast is behind, is in
+[docs/product-review-2026-11-02.md](docs/product-review-2026-11-02.md)
+(Russian).
+
+| | zeshicast | Vicinae |
+| --- | --- | --- |
+| Language / toolkit | Rust, GTK4 | C++, Qt |
+| Extensions | TOML commands, scripts, JSON-RPC executables under a capability ceiling | React/TypeScript (Raycast API), script commands |
+| Notification server | built in | — |
+| Clipboard history | text + images | yes |
+| Media, audio, network, system monitor | built-in views | volume control |
+| dmenu mode | `--dmenu` | yes |
+
+### Non-goals
+
+- A Node/React runtime or the Raycast extension API.
+- A hosted extension store (a git/Nix registry is planned instead).
+- X11, macOS or Windows.
+- Telemetry of any kind; measurements stay local.
+
 ## Screenshots
 
 ![Dashboard](docs/img/dashboard.png)
