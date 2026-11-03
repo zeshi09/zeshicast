@@ -57,6 +57,14 @@ Off by default and free when off. For the daemon:
 `systemctl --user stop zeshicast && ZESHICAST_TRACE=1 zeshicast-gtk --daemon`,
 then `zeshicast-gtk --quit` prints the summary. `scripts/measure.sh` automates it.
 
+`scripts/measure.sh --gui` types into the live session with `wtype` (a few
+hundred short-lived Wayland clients). It refuses to start when 5 or more
+clients have stopped reading their sockets — hung screen lockers, for
+example — because their in-flight fds plus the keymaps wtype sends can hit
+the per-user limit, after which every new Wayland client fails with
+`ETOOMANYREFS` until the stuck ones are killed. It also asks before typing
+(`--yes` skips the question, `--force` skips the check).
+
 ## Measured Performance
 
 `scripts/measure.sh --gui`, release build, 2026-11-02, AMD Ryzen 7 5700X,
