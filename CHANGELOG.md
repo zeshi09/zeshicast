@@ -9,6 +9,11 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- The first palette show after the daemon starts takes ~115 ms instead of
+  ~190 ms: fonts and styles are prepared while the daemon is idle.
+
 ### Fixed
 
 - `zeshicast-gtk --quit` (or a crash) no longer leaves the clipboard

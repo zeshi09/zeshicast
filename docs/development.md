@@ -82,8 +82,19 @@ kernel 6.18.52, niri, 10 runs, typing at 120 ms per key:
 
 "Before" keystroke latency was almost entirely the fixed 80 ms debounce plus
 the 25 ms result poll; Q2.4 made the debounce leading-edge (50 ms only inside
-a burst) and the poll 5 ms. The cold first show is still well above target
-and is the next thing to profile.
+a burst) and the poll 5 ms.
+
+**Cold first show** (2026-11-03, three daemon starts, `--toggle` only, no
+typing): 190 ms → 111–121 ms; later shows stay at ~15 ms. The main thread
+was busy for the whole gap between map and the first frame, opening ~130
+font files: fontconfig set-up and fallback-font selection on the first text
+layout, plus the first CSS pass. The daemon now fills, realizes and measures
+the hidden palette once while idle ("warm up", ~110 ms, logged with
+`ZESHICAST_TRACE=1`). What is left is font face set-up and glyph
+rasterisation on the first paint (freetype autohinter, fontconfig sort,
+harfbuzz in a flat profile); drawing every label once into an offscreen
+texture with the window's renderer did not move it, so that was not kept.
+`show: results` and `show: present` split the show mark further.
 
 ## Feature Flags
 

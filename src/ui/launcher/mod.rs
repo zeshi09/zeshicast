@@ -86,11 +86,41 @@ pub fn ensure_ui(
         let gui = build_ui(app, hold, configure_window);
         if daemon {
             gui.window.hide();
+            warm_up_when_idle(&gui);
         } else {
             present_launcher(&gui);
         }
         *state.borrow_mut() = Some(gui);
     }
+}
+
+/// The daemon's first show used to take ~190 ms against ~15 ms for every
+/// later one: the first text layout initialises fontconfig and loads the
+/// fallback fonts (130-odd font files on a typical NixOS setup), and the
+/// first style pass resolves all the CSS — all on the main thread between
+/// map and the first frame. Fill the hidden palette and measure it once
+/// while the daemon is idle, so that work is done before anyone is waiting
+/// (first show ~110 ms after this; the rest is spread over font face setup
+/// and glyph rasterisation at the first paint, which drawing the labels into
+/// an offscreen texture did not move).
+fn warm_up_when_idle(state: &GuiState) {
+    let launcher = Rc::clone(&state.launcher);
+    let results = state.results.clone();
+    let list = state.list.clone();
+    let window = state.window.clone();
+    glib::idle_add_local_once(move || {
+        crate::trace::timed("warm up", || {
+            update_results(&launcher.borrow(), &results, &list, "", None);
+            // Realized, the pango context carries the display's font options
+            // and scale; measured without them, the fonts are chosen again
+            // at the first paint. A hidden palette is realized anyway after
+            // its first show; realize alone gives the surface no role yet.
+            WidgetExt::realize(&window);
+            for orientation in [gtk::Orientation::Horizontal, gtk::Orientation::Vertical] {
+                let _ = window.measure(orientation, -1);
+            }
+        });
+    });
 }
 
 pub fn present_launcher(state: &GuiState) {
@@ -103,13 +133,15 @@ pub fn present_launcher(state: &GuiState) {
 pub fn present_launcher_view(state: &GuiState, view: Option<&str>) -> bool {
     state.entry.set_text("");
     show_root_view(&state.navigation, &state.entry, &state.action_bar);
-    update_results(
-        &state.launcher.borrow(),
-        &state.results,
-        &state.list,
-        state.entry.text().as_str(),
-        None,
-    );
+    crate::trace::timed("show: results", || {
+        update_results(
+            &state.launcher.borrow(),
+            &state.results,
+            &state.list,
+            state.entry.text().as_str(),
+            None,
+        )
+    });
     let opened = view.map(|name| (state.open_view)(name)).unwrap_or(false);
     if !opened {
         state.entry.grab_focus();
@@ -118,7 +150,7 @@ pub fn present_launcher_view(state: &GuiState, view: Option<&str>) -> bool {
         state.hint_label.set_text(hint.unwrap_or_default());
         state.hint_label.set_visible(hint.is_some());
     }
-    state.window.present();
+    crate::trace::timed("show: present", || state.window.present());
     opened
 }
 
