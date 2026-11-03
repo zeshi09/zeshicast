@@ -14,6 +14,7 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("dashboard_poll_interval_ms", "1000"),
     ("network_enabled", "true"),
     ("media_enabled", "true"),
+    ("bluetooth_enabled", "true"),
     ("notifications_enabled", "true"),
     ("notifications_history_enabled", "true"),
     ("clipboard_history_enabled", "true"),
@@ -77,6 +78,7 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
         keys: &[
             ("network_enabled", "Network features"),
             ("media_enabled", "Media features"),
+            ("bluetooth_enabled", "Bluetooth features"),
             ("notifications_enabled", "Notification features"),
             ("ai_enabled", "AI features"),
             ("ai_provider", "AI provider"),

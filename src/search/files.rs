@@ -37,8 +37,18 @@ impl FileEntry {
 pub(crate) fn is_dedicated_query(query: &str) -> bool {
     let lower = query.trim().to_lowercase();
     [
-        "calc ", "shell ", "notify ", "media ", "audio ", "network ", "system ", "ws ", "ai ",
+        "calc ",
+        "shell ",
+        "notify ",
+        "media ",
+        "audio ",
+        "network ",
+        "system ",
+        "ws ",
+        "ai ",
         "chat ",
+        "bt ",
+        "bluetooth ",
     ]
     .iter()
     .any(|prefix| lower.starts_with(prefix))

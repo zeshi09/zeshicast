@@ -398,6 +398,7 @@ Queries:
   media next                MPRIS playback controls over D-Bus
   notify dnd                Notification history and DND (built-in D-Bus server)
   net wifi                  Network actions: toggle wifi, network settings
+  bt headphones             Bluetooth: adapter power, connect/disconnect paired devices (BlueZ)
   niri screenshot           Niri compositor actions: screenshot, workspaces, windows
   hypr fullscreen           Hyprland compositor actions: screenshot, workspaces, windows
   sway reload               Sway compositor actions: screenshot, workspaces, windows

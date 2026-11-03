@@ -227,6 +227,7 @@ audio brightness          Brightness up/down
 media next                MPRIS playback controls over D-Bus
 notify dnd                Notification history and DND (built-in D-Bus server)
 net wifi                  Toggle Wi-Fi, open network settings
+bt headphones             Bluetooth: power, connect/disconnect paired devices
 niri screenshot           Interactive screenshot (region)
 niri workspace            Focus next/previous workspace, move window
 hypr fullscreen           Hyprland: fullscreen, float, close, workspaces

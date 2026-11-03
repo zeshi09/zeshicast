@@ -1,4 +1,5 @@
 pub(crate) mod apps;
+pub(crate) mod bluetooth;
 pub(crate) mod browser_tabs;
 pub(crate) mod calculator;
 pub(crate) mod clipboard;
@@ -100,6 +101,14 @@ pub(crate) struct AudioProvider;
 impl SearchProvider for AudioProvider {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         search_audio_actions(context.query)
+    }
+}
+
+pub(crate) struct BluetoothProvider;
+
+impl SearchProvider for BluetoothProvider {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        bluetooth::search_bluetooth(context.query, crate::services::bluetooth::bluetooth_state)
     }
 }
 

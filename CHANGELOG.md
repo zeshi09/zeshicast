@@ -31,6 +31,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Bluetooth (`bt …`, or a device's name in the main search): turn the
+  adapter on or off, connect and disconnect paired devices, with their
+  battery level. Read from BlueZ over D-Bus; without BlueZ, `bt` says why.
+  `bluetooth_enabled = false` turns it off.
 - Notification history survives a daemon restart: the newest 100 are saved
   in `zeshicast.db`, encrypted; private mode saves them without a body. The
   database moves to schema 7.

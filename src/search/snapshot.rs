@@ -29,11 +29,11 @@ use crate::search::notifications::search_notification_actions;
 use crate::search::scripts::ScriptEntry;
 use crate::search::system::{search_audio_actions, search_network_actions, search_system_actions};
 use crate::search::{
-    AppsProvider, AudioProvider, BrowserTabsProvider, ClipboardProvider, CommandsProvider,
-    EmojiProvider, ExtensionsProvider, FilesProvider, HyprlandProvider, MAX_RESULTS, MediaProvider,
-    NamedValuesProvider, NetworkProvider, NiriProvider, NotificationsProvider, ProcessesProvider,
-    ScriptsProvider, SearchContext, SearchProvider, SwayProvider, SystemProvider, WebProvider,
-    WindowsProvider, fuzzy_score,
+    AppsProvider, AudioProvider, BluetoothProvider, BrowserTabsProvider, ClipboardProvider,
+    CommandsProvider, EmojiProvider, ExtensionsProvider, FilesProvider, HyprlandProvider,
+    MAX_RESULTS, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
+    NotificationsProvider, ProcessesProvider, ScriptsProvider, SearchContext, SearchProvider,
+    SwayProvider, SystemProvider, WebProvider, WindowsProvider, fuzzy_score,
 };
 
 /// Score handicap for results found by reading a Cyrillic query as QWERTY.
@@ -171,6 +171,9 @@ impl SearchData {
 
         if self.preference_enabled("network_enabled", true) {
             providers.push(Box::new(NetworkProvider));
+        }
+        if self.preference_enabled("bluetooth_enabled", true) {
+            providers.push(Box::new(BluetoothProvider));
         }
         if self.preference_enabled("media_enabled", true) {
             providers.push(Box::new(MediaProvider));
