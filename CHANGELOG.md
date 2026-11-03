@@ -31,6 +31,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- System Monitor: pressure stall (PSI) for CPU, memory and I/O, read/write
+  rate and busy time per disk, and GPU load and VRAM for amdgpu (clock for
+  i915); NVIDIA through `nvidia-smi` only with `gpu_nvidia_smi = true`.
+  Parts the system does not report are left out.
 - Power: `profile …` switches the power profile through
   power-profiles-daemon (and says so when it is not running); the battery
   comes from UPower when it runs, with the time left or to full on the

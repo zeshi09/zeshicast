@@ -61,6 +61,13 @@ pub(crate) fn build_ui(
         );
     }
     install_clipboard_background_watcher(&launcher);
+    crate::services::poll_cache::set_nvidia_smi(
+        launcher
+            .borrow()
+            .get_preferences()
+            .get("gpu_nvidia_smi")
+            .is_some_and(|value| value == "true"),
+    );
     if launcher.borrow().notifications_history_enabled() {
         // Q6.5: restore the history an earlier run saved, and keep saving.
         let launcher = launcher.borrow();

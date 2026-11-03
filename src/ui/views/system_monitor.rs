@@ -74,6 +74,8 @@ pub struct SystemMonitorView {
     pub disk_graph: MetricGraph,
     pub net_rx: Label,
     pub net_tx: Label,
+    /// PSI, disk and GPU lines (Q7.3), rebuilt on each refresh.
+    pub metrics: GtkBox,
     pub list: ListBox,
     pub kill: Button,
     pub sort: Button,
@@ -284,6 +286,9 @@ pub fn system_monitor_view(
     net_row.append(&tx_chip);
     overview.append(&net_row);
 
+    let metrics = GtkBox::new(Orientation::Vertical, 4);
+    overview.append(&metrics);
+
     let sep_line = gtk::Separator::new(Orientation::Horizontal);
     sep_line.set_margin_top(4);
     overview.append(&sep_line);
@@ -348,6 +353,7 @@ pub fn system_monitor_view(
         disk_graph,
         net_rx,
         net_tx,
+        metrics,
         list,
         displayed_processes: Rc::new(RefCell::new(Vec::new())),
         kill,
@@ -451,6 +457,10 @@ pub fn set_system_monitor_snapshot(
     };
     view.net_rx.set_text(&fmt_speed(rx_mbps));
     view.net_tx.set_text(&fmt_speed(tx_mbps));
+    set_metric_lines(
+        &view.metrics,
+        &crate::services::poll_cache::cached_metrics(),
+    );
     view.disk.set_text(
         &snapshot
             .disk_used_percent()
@@ -481,6 +491,32 @@ pub fn set_system_monitor_snapshot(
         &view.displayed_processes,
         &view.on_kill_row,
     );
+}
+
+/// One row per PSI/disk/GPU line; a part without data has no row (Q7.3).
+fn set_metric_lines(
+    container: &GtkBox,
+    metrics: &crate::services::system_metrics::MetricsSnapshot,
+) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
+    for (label, text) in crate::services::system_metrics::metric_lines(metrics) {
+        let row = GtkBox::new(Orientation::Horizontal, 10);
+        let name = Label::new(Some(label));
+        name.add_css_class("metric-label");
+        name.set_width_chars(4);
+        name.set_xalign(0.0);
+        let value = Label::new(Some(&text));
+        value.add_css_class("result-subtitle");
+        value.add_css_class("mono");
+        value.set_xalign(0.0);
+        value.set_hexpand(true);
+        value.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        row.append(&name);
+        row.append(&value);
+        container.append(&row);
+    }
 }
 
 pub fn set_system_monitor_thermal_snapshot(view: &SystemMonitorView, snapshot: &ThermalSnapshot) {

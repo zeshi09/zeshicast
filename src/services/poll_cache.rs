@@ -36,12 +36,46 @@ struct Cache {
     workspace: WorkspaceSnapshot,
     thermal: ThermalSnapshot,
     battery: BatterySnapshot,
+    metrics: crate::services::system_metrics::MetricsSnapshot,
 }
 
 static CACHE: OnceLock<Arc<Mutex<Cache>>> = OnceLock::new();
 /// Cleared while the palette is hidden (P3.3): a hidden palette must not fork.
 static ACTIVE: AtomicBool = AtomicBool::new(true);
 static STARTED: OnceLock<()> = OnceLock::new();
+/// `gpu_nvidia_smi`: run `nvidia-smi` for GPU load (Q7.3). Off by default:
+/// it is slow to start and wakes a sleeping discrete GPU.
+static NVIDIA_SMI: AtomicBool = AtomicBool::new(false);
+
+pub fn set_nvidia_smi(enabled: bool) {
+    NVIDIA_SMI.store(enabled, Ordering::Relaxed);
+}
+
+/// PSI, disk rates and GPUs; `previous` holds the last disk counters.
+fn metrics_snapshot(
+    previous: &mut Option<(
+        std::time::Instant,
+        Vec<crate::services::system_metrics::DiskCounters>,
+    )>,
+) -> crate::services::system_metrics::MetricsSnapshot {
+    use crate::services::system_metrics as metrics;
+    let now = std::time::Instant::now();
+    let counters = metrics::read_diskstats(std::path::Path::new("/proc/diskstats"));
+    let disks = previous
+        .as_ref()
+        .map(|(at, before)| metrics::disk_rates(before, &counters, now - *at))
+        .unwrap_or_default();
+    *previous = Some((now, counters));
+    let mut gpus = metrics::read_gpus(std::path::Path::new("/sys/class/drm"));
+    if NVIDIA_SMI.load(Ordering::Relaxed) {
+        gpus.extend(metrics::nvidia_smi_gpus());
+    }
+    metrics::MetricsSnapshot {
+        pressure: metrics::read_pressure(std::path::Path::new("/proc/pressure")),
+        disks,
+        gpus,
+    }
+}
 
 /// Start the background poller. Idempotent — subsequent calls are no-ops.
 pub fn start() {
@@ -52,6 +86,7 @@ pub fn start() {
     std::thread::spawn(move || {
         let mut tick: u64 = 0;
         let target_interval = Duration::from_secs(1);
+        let mut disk_counters = None;
         loop {
             if !is_active() {
                 // Hidden palette: keep the thread, do no work. The cached values
@@ -78,6 +113,9 @@ pub fn start() {
             let workspace = tick.is_multiple_of(3).then(workspace_snapshot);
             let thermal = tick.is_multiple_of(3).then(thermal_snapshot);
             let battery = tick.is_multiple_of(3).then(battery_snapshot);
+            let metrics = tick
+                .is_multiple_of(2)
+                .then(|| metrics_snapshot(&mut disk_counters));
             if let Ok(mut cache) = cache.lock() {
                 cache.audio = audio;
                 cache.keyboard_layout = layout;
@@ -99,6 +137,9 @@ pub fn start() {
                 }
                 if let Some(battery) = battery {
                     cache.battery = battery;
+                }
+                if let Some(metrics) = metrics {
+                    cache.metrics = metrics;
                 }
             }
             tick = tick.wrapping_add(1);
@@ -124,6 +165,14 @@ fn cache() -> Arc<Mutex<Cache>> {
     CACHE
         .get_or_init(|| Arc::new(Mutex::new(Cache::default())))
         .clone()
+}
+
+/// Latest PSI, disk and GPU metrics (Q7.3).
+pub fn cached_metrics() -> crate::services::system_metrics::MetricsSnapshot {
+    cache()
+        .lock()
+        .map(|cache| cache.metrics.clone())
+        .unwrap_or_default()
 }
 
 /// Latest cached network snapshot (never blocks on a subprocess).

@@ -29,6 +29,8 @@ pub mod poll_cache;
 pub mod power;
 pub mod storage;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub mod system_metrics;
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod system_stats;
 pub mod terminal;
 pub mod text_input;
