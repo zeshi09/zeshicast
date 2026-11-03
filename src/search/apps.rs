@@ -295,7 +295,10 @@ pub(crate) fn search_apps(apps: &[AppEntry], query: &str) -> Vec<Action> {
                 }
                 h
             };
-            let score = fuzzy_score(&haystack, query)?;
+            // The name alone, too: the exec name and comment appended to it
+            // turned an exact name into a mere prefix (361 instead of 500),
+            // so a file with the same name outranked the app (Q6.2).
+            let score = fuzzy_score(&haystack, query).max(fuzzy_score(&app.name, query))?;
             Some(app_action(app, score + 100))
         })
         .collect()

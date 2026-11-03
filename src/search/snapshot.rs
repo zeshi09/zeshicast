@@ -117,7 +117,11 @@ impl SearchData {
                 query: trimmed,
                 placeholders: &context,
             };
-            let files = FilesProvider { files: &self.files }.search(&search_context);
+            let files = FilesProvider {
+                files: &self.files,
+                in_root: true,
+            }
+            .search(&search_context);
             return self.rank(files, trimmed);
         }
 
@@ -194,7 +198,10 @@ impl SearchData {
         // M-6: the file index is the most expensive provider, so skip it for a
         // query another provider already owns.
         if !files::is_dedicated_query(trimmed) {
-            providers.push(Box::new(FilesProvider { files: &self.files }));
+            providers.push(Box::new(FilesProvider {
+                files: &self.files,
+                in_root: self.preference_enabled("files_in_root", true),
+            }));
         }
         providers.push(Box::new(ProcessesProvider));
         providers.push(Box::new(BrowserTabsProvider));
@@ -520,6 +527,74 @@ mod tests {
                 "{category} in {categories:?}"
             );
         }
+    }
+
+    fn titles(data: &SearchData, query: &str) -> Vec<(String, String)> {
+        data.search(query)
+            .into_iter()
+            .map(|action| (action.category, action.title))
+            .collect()
+    }
+
+    #[test]
+    fn an_app_ranks_above_a_file_with_the_same_name() {
+        let mut data = data_matching_everywhere();
+        data.files = std::sync::Arc::new(vec![FileEntry::new(
+            "Invoice Maker",
+            PathBuf::from("/home/user/Downloads/Invoice Maker"),
+            false,
+        )]);
+        let results = titles(&data, "invoice maker");
+        let app = results.iter().position(|(category, _)| category == "App");
+        let file = results.iter().position(|(category, _)| category == "File");
+        assert!(
+            app.unwrap() < file.expect("the file is shown too"),
+            "{results:?}"
+        );
+    }
+
+    #[test]
+    fn weak_file_matches_stay_out_of_root_search() {
+        let mut data = data_matching_everywhere();
+        data.files = std::sync::Arc::new(vec![
+            FileEntry::new("invoice.pdf", PathBuf::from("/h/invoice.pdf"), false),
+            // `inv` as a scattered subsequence and as an acronym only.
+            FileEntry::new(
+                "ink-and-vellum.txt",
+                PathBuf::from("/h/ink-and-vellum.txt"),
+                false,
+            ),
+            FileEntry::new(
+                "in_new_version.md",
+                PathBuf::from("/h/in_new_version.md"),
+                false,
+            ),
+        ]);
+        let root: Vec<_> = titles(&data, "inv")
+            .into_iter()
+            .filter(|(category, _)| category == "File")
+            .map(|(_, title)| title)
+            .collect();
+        assert_eq!(root, vec!["invoice.pdf"]);
+        // Asked for files: the weak matches are there.
+        let explicit = titles(&data, "file inv");
+        assert!(explicit.len() >= 2, "{explicit:?}");
+    }
+
+    #[test]
+    fn files_in_root_can_be_turned_off() {
+        let mut data = data_matching_everywhere();
+        data.preferences
+            .insert("files_in_root".to_string(), "false".to_string());
+        assert!(
+            !titles(&data, "invoice")
+                .iter()
+                .any(|(category, _)| category == "File")
+        );
+        assert!(
+            !titles(&data, "file invoice").is_empty(),
+            "file … still works"
+        );
     }
 }
 

@@ -11,6 +11,11 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Changed
 
+- Root search shows a file only when the query is part of its name (scattered
+  matches stay under `file …`), and an app always ranks above a file with
+  the same name: an app's own name now counts on its own, not only joined
+  with its command and comment. `files_in_root = false` keeps files out of
+  root search entirely.
 - The file index is stored in `zeshicast.db` and kept live with inotify:
   search over files works as soon as the daemon starts (no `$HOME` walk),
   files saved while it runs are found within a second, and files saved

@@ -61,6 +61,12 @@ pub(crate) fn search_files(files: &[FileEntry], query: &str, explicit: bool) -> 
     let mut matches: Vec<Action> = files
         .iter()
         .filter_map(|file| {
+            // Root search (Q6.2) shows a file only when the query is part of
+            // its name; scattered subsequences and acronyms are left to
+            // `file …`, where the user asked for files.
+            if !explicit && !file.name_lower.contains(&query) {
+                return None;
+            }
             let score = fuzzy_score_lower(&file.name_lower, &query)?;
             let category = if file.is_dir { "Folder" } else { "File" };
             let subtitle = file

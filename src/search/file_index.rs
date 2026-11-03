@@ -922,7 +922,11 @@ mod tests {
         let (sender, receiver) = std::sync::mpsc::channel();
         let config_dir = config.path().to_path_buf();
         std::thread::spawn(move || {
-            watch_forever(&config_dir, index, Box::new(move |files| sender.send(files).is_ok()))
+            watch_forever(
+                &config_dir,
+                index,
+                Box::new(move |files| sender.send(files).is_ok()),
+            )
         });
         // Let the watches be set up before the file appears.
         std::thread::sleep(Duration::from_millis(200));

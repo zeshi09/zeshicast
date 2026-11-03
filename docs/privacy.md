@@ -64,7 +64,8 @@ Hidden entries (`.name`), `target`, `node_modules` and similar build or cache
 folders are never indexed. `files_exclude` keeps more out: a comma separated
 list of names (`Videos, vm`) and paths (`~/Private`, `/home/me/secret`);
 everything below an excluded folder is left out too, and rows already stored
-for it are dropped on the next start.
+for it are dropped on the next start. `files_in_root = "false"` keeps
+files out of the main search; `file …` still searches them.
 
 ## Notification History
 

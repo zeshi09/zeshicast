@@ -200,6 +200,8 @@ const MIN_FUZZY_FILE_QUERY: usize = 3;
 
 pub(crate) struct FilesProvider<'a> {
     pub(crate) files: &'a [FileEntry],
+    /// Files in root search, without `file ` (`files_in_root`, Q6.2).
+    pub(crate) in_root: bool,
 }
 
 impl SearchProvider for FilesProvider<'_> {
@@ -212,7 +214,7 @@ impl SearchProvider for FilesProvider<'_> {
                 .map(|(_, value)| value.trim())
                 .unwrap_or_default();
             search_files(self.files, needle, true)
-        } else if query.trim().len() >= MIN_FUZZY_FILE_QUERY {
+        } else if self.in_root && query.trim().len() >= MIN_FUZZY_FILE_QUERY {
             search_files(self.files, query, false)
         } else {
             Vec::new()
