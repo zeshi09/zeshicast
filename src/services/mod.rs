@@ -32,6 +32,8 @@ pub mod storage;
 pub mod system_metrics;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod system_stats;
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub mod systemd_units;
 pub mod terminal;
 pub mod text_input;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]

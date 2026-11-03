@@ -18,6 +18,7 @@ pub(crate) mod processes;
 pub(crate) mod scripts;
 pub(crate) mod snapshot;
 pub(crate) mod system;
+pub(crate) mod units;
 pub(crate) mod web;
 pub(crate) mod windows;
 
@@ -118,6 +119,14 @@ pub(crate) struct PowerProfilesProvider;
 impl SearchProvider for PowerProfilesProvider {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         power::search_power_profiles(context.query, crate::services::power::power_profiles)
+    }
+}
+
+pub(crate) struct UnitsProvider;
+
+impl SearchProvider for UnitsProvider {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        units::search_units(context.query, crate::services::systemd_units::user_units)
     }
 }
 

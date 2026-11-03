@@ -400,6 +400,7 @@ Queries:
   net wifi                  Network actions: toggle wifi, network settings
   bt headphones             Bluetooth: adapter power, connect/disconnect paired devices (BlueZ)
   profile performance       Switch the power profile (power-profiles-daemon)
+  unit syncthing            systemd user units: restart/start/stop, journal
   niri screenshot           Niri compositor actions: screenshot, workspaces, windows
   hypr fullscreen           Hyprland compositor actions: screenshot, workspaces, windows
   sway reload               Sway compositor actions: screenshot, workspaces, windows

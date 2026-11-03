@@ -31,6 +31,9 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- systemd user units (`unit …`): failed units first, restart or start in
+  one step (restart and stop ask first), and the journal of a unit in the
+  output view (`unit <name>` → "Logs").
 - System Monitor: pressure stall (PSI) for CPU, memory and I/O, read/write
   rate and busy time per disk, and GPU load and VRAM for amdgpu (clock for
   i915); NVIDIA through `nvidia-smi` only with `gpu_nvidia_smi = true`.

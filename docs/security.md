@@ -268,6 +268,14 @@ Extension items are executed over the extension's JSON-RPC `execute` method
 (P1.5c). A failure there is reported to the user instead of being invisible on a
 shell's stderr, and the item's `output`/`notify` are shown as a notification.
 
+## systemd User Units
+
+`unit …` restarts, starts and stops the user's own services through
+`systemctl --user`; restart and stop are Destructive and ask first. Only a
+name ending in `.service` that does not start with `-` reaches `systemctl`.
+<!-- test: restart_and_stop_ask_first_start_and_logs_do_not -->
+<!-- test: only_service_names_reach_systemctl -->
+
 ## Encryption At Rest
 
 Clipboard history and snippets are sealed per value (ChaCha20-Poly1305,

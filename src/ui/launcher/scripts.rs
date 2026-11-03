@@ -48,6 +48,21 @@ pub(crate) fn run_script_capture(action: &Action) -> ScriptCaptureOutcome {
 }
 
 fn run_script_capture_with_args(action: &Action, args: &[String]) -> ScriptCaptureOutcome {
+    // A program with its own arguments (a unit's journal, Q7.4): run it from
+    // PATH as given instead of treating it as a script file.
+    if let ActionKind::Command(cmd) = &action.kind
+        && !cmd.args.is_empty()
+    {
+        let mut all = cmd.args.clone();
+        all.extend_from_slice(args);
+        return match crate::search::scripts::run_script_stdout_with_args(
+            std::path::Path::new(&cmd.program),
+            &all,
+        ) {
+            Ok(stdout) if !stdout.trim().is_empty() => ScriptCaptureOutcome::Output(stdout),
+            _ => ScriptCaptureOutcome::RanWithoutOutput,
+        };
+    }
     let path_str = match &action.kind {
         ActionKind::Shell(cmd) => &cmd.command,
         ActionKind::Form(form) => match &form.command {

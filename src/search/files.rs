@@ -50,6 +50,8 @@ pub(crate) fn is_dedicated_query(query: &str) -> bool {
         "bt ",
         "bluetooth ",
         "profile ",
+        "unit ",
+        "systemd ",
     ]
     .iter()
     .any(|prefix| lower.starts_with(prefix))
