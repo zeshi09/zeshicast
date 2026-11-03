@@ -200,6 +200,15 @@ pub fn start() {
     });
 }
 
+/// Run a tick now (a volume key changed what the strip shows).
+pub fn refresh_now() {
+    let (lock, condvar) = wake();
+    if let Ok(mut woken) = lock.lock() {
+        *woken = true;
+        condvar.notify_one();
+    }
+}
+
 /// Pause or resume the poller (P3.3). Idempotent; resuming wakes it now.
 pub fn set_active(active: bool) {
     let was = ACTIVE.swap(active, Ordering::Relaxed);

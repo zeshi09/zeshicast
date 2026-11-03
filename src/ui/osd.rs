@@ -1,6 +1,6 @@
 //! Lightweight on-screen-display popups rendered as their own focus-less
 //! layer-shell surface, independent of the launcher window. Used for
-//! the keyboard-layout pill and notification toasts.
+//! the keyboard-layout pill, volume/brightness levels and notification toasts.
 
 use std::cell::RefCell;
 use std::time::Duration;
@@ -107,6 +107,290 @@ fn build_osd(app: &Application) -> Osd {
         window,
         label,
         revealer,
+        generation: 0,
+    }
+}
+
+// ── Level OSD (volume, microphone, brightness) ───────────────────────────────
+
+/// What a level OSD shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LevelKind {
+    Volume,
+    Microphone,
+    Brightness,
+}
+
+/// One level to show: `percent` may exceed 100 (PipeWire allows boost).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Level {
+    pub kind: LevelKind,
+    pub percent: u16,
+    pub muted: bool,
+}
+
+impl Level {
+    /// The symbolic icon for this level, as the GNOME OSD picks them.
+    pub(crate) fn icon_name(&self) -> &'static str {
+        match self.kind {
+            LevelKind::Volume => match (self.muted, self.percent) {
+                (true, _) | (_, 0) => "audio-volume-muted-symbolic",
+                (_, 1..=33) => "audio-volume-low-symbolic",
+                (_, 34..=66) => "audio-volume-medium-symbolic",
+                (_, 67..=100) => "audio-volume-high-symbolic",
+                _ => "audio-volume-overamplified-symbolic",
+            },
+            LevelKind::Microphone => {
+                if self.muted {
+                    "microphone-sensitivity-muted-symbolic"
+                } else {
+                    "audio-input-microphone-symbolic"
+                }
+            }
+            LevelKind::Brightness => "display-brightness-symbolic",
+        }
+    }
+
+    /// The bar's fill, 0.0–1.0; a muted level shows empty.
+    pub(crate) fn fraction(&self) -> f64 {
+        if self.muted {
+            0.0
+        } else {
+            (f64::from(self.percent) / 100.0).clamp(0.0, 1.0)
+        }
+    }
+
+    pub(crate) fn text(&self) -> String {
+        if self.muted {
+            "Muted".to_string()
+        } else {
+            format!("{}%", self.percent)
+        }
+    }
+}
+
+/// How long a level stays after its last change.
+const LEVEL_VISIBLE_MS: u64 = 1200;
+/// How long the bar takes to glide to a new value.
+const LEVEL_GLIDE_MS: f64 = 140.0;
+
+struct LevelOsd {
+    window: Window,
+    pill: GtkBox,
+    icon: gtk::Image,
+    value: Label,
+    /// (shown, target) fraction; the tick callback eases shown → target.
+    bar: std::rc::Rc<std::cell::Cell<(f64, f64)>>,
+    area: gtk::DrawingArea,
+    generation: u64,
+}
+
+thread_local! {
+    static LEVEL_OSD: RefCell<Option<LevelOsd>> = const { RefCell::new(None) };
+}
+
+/// Show (or update) the level OSD at the bottom center. A burst of changes
+/// moves one OSD's bar instead of stacking windows; it hides
+/// [`LEVEL_VISIBLE_MS`] after the last one. Shown under Do Not Disturb too:
+/// it answers a key press, it is not a notification.
+pub fn show_level_osd(app: Option<&Application>, level: Level) {
+    let Some(app) = app
+        .cloned()
+        .or_else(|| gio::Application::default().and_then(|a| a.downcast::<Application>().ok()))
+    else {
+        return;
+    };
+    let generation = LEVEL_OSD.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let osd = slot.get_or_insert_with(|| build_level_osd(&app));
+        osd.generation = osd.generation.wrapping_add(1);
+        osd.icon.set_icon_name(Some(level.icon_name()));
+        osd.value.set_text(&level.text());
+        let (shown, _) = osd.bar.get();
+        let first_show = !osd.window.is_visible();
+        // A fresh OSD starts at its value; a visible one glides there.
+        osd.bar.set((
+            if first_show { level.fraction() } else { shown },
+            level.fraction(),
+        ));
+        osd.area.queue_draw();
+        if level.muted {
+            osd.pill.add_css_class("muted");
+        } else {
+            osd.pill.remove_css_class("muted");
+        }
+        osd.window.set_visible(true);
+        // Next frame, so the CSS transition runs from the hidden state.
+        let pill = osd.pill.clone();
+        glib::idle_add_local_once(move || pill.add_css_class("shown"));
+        osd.generation
+    });
+
+    glib::timeout_add_local_once(Duration::from_millis(LEVEL_VISIBLE_MS), move || {
+        let still_current = LEVEL_OSD.with(|cell| {
+            if let Some(osd) = cell.borrow().as_ref()
+                && osd.generation == generation
+            {
+                osd.pill.remove_css_class("shown");
+                return true;
+            }
+            false
+        });
+        if !still_current {
+            return;
+        }
+        glib::timeout_add_local_once(Duration::from_millis(FADE_MS as u64 + 60), move || {
+            LEVEL_OSD.with(|cell| {
+                if let Some(osd) = cell.borrow().as_ref()
+                    && osd.generation == generation
+                {
+                    osd.window.set_visible(false);
+                }
+            });
+        });
+    });
+}
+
+/// `--volume …` / `--mic-mute` (O2): change the level with `wpctl` and show
+/// the result at once, without waiting for the poller.
+pub fn change_volume(app: &Application, request: crate::services::audio::VolumeRequest) {
+    use crate::services::audio::{DEFAULT_VOLUME_MAX, VolumeRequest, apply_volume_request};
+    let max = crate::config::load_global_preferences(
+        &crate::config::home_dir().join(".config/zeshicast"),
+    )
+    .get("volume_max")
+    .and_then(|value| value.trim().parse::<u8>().ok())
+    .unwrap_or(DEFAULT_VOLUME_MAX);
+    let Some(device) = apply_volume_request(request, max) else {
+        log::warn!("wpctl could not apply {request:?}");
+        return;
+    };
+    let kind = match request {
+        VolumeRequest::ToggleMicMute => LevelKind::Microphone,
+        _ => LevelKind::Volume,
+    };
+    show_level_osd(
+        Some(app),
+        Level {
+            kind,
+            percent: u16::from(device.volume_percent),
+            muted: device.muted,
+        },
+    );
+    crate::services::poll_cache::refresh_now();
+}
+
+fn build_level_osd(app: &Application) -> LevelOsd {
+    let window = Window::builder()
+        .application(app)
+        .decorated(false)
+        .resizable(false)
+        .build();
+    window.add_css_class("osd-window");
+    super::layer_shell::configure_level_osd(&window);
+
+    let icon = gtk::Image::from_icon_name("audio-volume-medium-symbolic");
+    icon.set_pixel_size(22);
+    icon.add_css_class("osd-level-icon");
+
+    let bar = std::rc::Rc::new(std::cell::Cell::new((0.0_f64, 0.0_f64)));
+    let area = gtk::DrawingArea::new();
+    area.set_content_width(220);
+    area.set_content_height(8);
+    area.set_valign(Align::Center);
+    area.add_css_class("osd-level-bar");
+    {
+        let bar = std::rc::Rc::clone(&bar);
+        area.set_draw_func(move |area, cr, width, height| {
+            let (shown, _) = bar.get();
+            let (w, h) = (f64::from(width), f64::from(height));
+            let radius = h / 2.0;
+            let rounded = |cr: &gtk::cairo::Context, width: f64| {
+                cr.new_sub_path();
+                cr.arc(
+                    width - radius,
+                    radius,
+                    radius,
+                    -std::f64::consts::FRAC_PI_2,
+                    std::f64::consts::FRAC_PI_2,
+                );
+                cr.arc(
+                    radius,
+                    radius,
+                    radius,
+                    std::f64::consts::FRAC_PI_2,
+                    3.0 * std::f64::consts::FRAC_PI_2,
+                );
+                cr.close_path();
+            };
+            // `WidgetExt::color` needs GTK 4.10; the style context gives the
+            // same CSS colour (accent, dimmed when muted) on 4.6.
+            #[allow(deprecated)]
+            let color = area.style_context().color();
+            cr.set_source_rgba(
+                f64::from(color.red()),
+                f64::from(color.green()),
+                f64::from(color.blue()),
+                0.18,
+            );
+            rounded(cr, w);
+            let _ = cr.fill();
+            if shown > 0.0 {
+                cr.set_source_rgba(
+                    f64::from(color.red()),
+                    f64::from(color.green()),
+                    f64::from(color.blue()),
+                    0.92,
+                );
+                rounded(cr, (w * shown).max(h));
+                let _ = cr.fill();
+            }
+        });
+    }
+    {
+        // Ease the shown fraction toward the target, one frame at a time.
+        let bar = std::rc::Rc::clone(&bar);
+        let last = std::cell::Cell::new(None::<i64>);
+        area.add_tick_callback(move |area, clock| {
+            let now = clock.frame_time();
+            let elapsed_ms = last
+                .replace(Some(now))
+                .map_or(16.0, |before| (now - before) as f64 / 1000.0);
+            let (shown, target) = bar.get();
+            if (target - shown).abs() > 0.001 {
+                let step = (elapsed_ms / LEVEL_GLIDE_MS).clamp(0.0, 1.0);
+                bar.set((shown + (target - shown) * step.max(0.18), target));
+                area.queue_draw();
+            } else if shown != target {
+                bar.set((target, target));
+                area.queue_draw();
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    let value = Label::new(None);
+    value.add_css_class("osd-level-value");
+    value.set_width_chars(5);
+    value.set_xalign(1.0);
+
+    let pill = GtkBox::new(Orientation::Horizontal, 14);
+    pill.add_css_class("osd-level");
+    pill.set_halign(Align::Center);
+    pill.set_valign(Align::End);
+    pill.append(&icon);
+    pill.append(&area);
+    pill.append(&value);
+
+    window.set_child(Some(&pill));
+
+    LevelOsd {
+        window,
+        pill,
+        icon,
+        value,
+        bar,
+        area,
         generation: 0,
     }
 }
@@ -600,6 +884,50 @@ fn build_notification_osd(app: Option<&Application>) -> NotificationOsd {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn volume(percent: u16, muted: bool) -> Level {
+        Level {
+            kind: LevelKind::Volume,
+            percent,
+            muted,
+        }
+    }
+
+    #[test]
+    fn a_level_picks_its_icon_fill_and_text() {
+        assert_eq!(volume(0, false).icon_name(), "audio-volume-muted-symbolic");
+        assert_eq!(volume(20, false).icon_name(), "audio-volume-low-symbolic");
+        assert_eq!(
+            volume(50, false).icon_name(),
+            "audio-volume-medium-symbolic"
+        );
+        assert_eq!(volume(100, false).icon_name(), "audio-volume-high-symbolic");
+        assert_eq!(
+            volume(130, false).icon_name(),
+            "audio-volume-overamplified-symbolic"
+        );
+        assert_eq!(volume(70, true).icon_name(), "audio-volume-muted-symbolic");
+        assert_eq!(
+            volume(130, false).fraction(),
+            1.0,
+            "boost fills the bar, no more"
+        );
+        assert_eq!(volume(70, true).fraction(), 0.0);
+        assert_eq!(volume(70, true).text(), "Muted");
+        assert_eq!(volume(45, false).text(), "45%");
+        let mic = Level {
+            kind: LevelKind::Microphone,
+            percent: 80,
+            muted: true,
+        };
+        assert_eq!(mic.icon_name(), "microphone-sensitivity-muted-symbolic");
+        let light = Level {
+            kind: LevelKind::Brightness,
+            percent: 30,
+            muted: false,
+        };
+        assert_eq!(light.icon_name(), "display-brightness-symbolic");
+    }
 
     fn icon_fixture_dir(name: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()

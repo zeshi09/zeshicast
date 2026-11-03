@@ -9,6 +9,13 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Added
+
+- Volume OSD: `zeshicast-gtk --volume +5|-5|40|mute` and `--mic-mute`
+  change the level with `wpctl` and show it at the bottom of the screen with
+  a gliding bar; a burst of key presses updates one OSD. Bind the volume
+  keys to it (README, "Volume keys"). Shown under Do Not Disturb too.
+
 ### Fixed
 
 - The palette shows current data as soon as it opens: the clock redraws on

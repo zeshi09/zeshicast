@@ -22,6 +22,7 @@ enum KeyboardMode {
 enum Edge {
     Right = 1,
     Top = 2,
+    Bottom = 3,
 }
 
 /// How one window sits on the overlay layer.
@@ -53,6 +54,15 @@ const OSD: Surface = Surface {
     margin: 0,
 };
 
+/// Volume and brightness levels: bottom center (anchored to the bottom edge
+/// only, so the compositor centers it horizontally), never take the keyboard.
+const LEVEL_OSD: Surface = Surface {
+    namespace: Some(c"zeshicast-level-osd"),
+    keyboard: KeyboardMode::None,
+    anchors: &[Edge::Bottom],
+    margin: 48,
+};
+
 /// Notification toasts: top-right corner, never take the keyboard.
 const NOTIFICATION: Surface = Surface {
     namespace: Some(c"zeshicast-notification"),
@@ -68,6 +78,10 @@ pub fn configure_launcher(window: &ApplicationWindow) {
 
 pub(crate) fn configure_osd(window: &gtk::Window) {
     apply(window, &OSD);
+}
+
+pub(crate) fn configure_level_osd(window: &gtk::Window) {
+    apply(window, &LEVEL_OSD);
 }
 
 pub(crate) fn configure_notification(window: &gtk::Window) {

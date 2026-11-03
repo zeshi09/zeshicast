@@ -98,6 +98,102 @@ fn read_wpctl_status() -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// A volume key or command (O2): `zeshicast-gtk --volume +5|-5|40|mute`,
+/// `--mic-mute`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VolumeRequest {
+    Up(u8),
+    Down(u8),
+    Set(u8),
+    ToggleMute,
+    ToggleMicMute,
+}
+
+/// Highest volume a request can reach, in percent; `volume_max` may allow
+/// PipeWire's boost up to 150.
+pub const DEFAULT_VOLUME_MAX: u8 = 100;
+
+impl VolumeRequest {
+    /// `--volume <value>` / `--mic-mute` from a command line.
+    pub fn from_args(args: &[String]) -> Option<Result<Self, String>> {
+        if args.iter().any(|arg| arg == "--mic-mute") {
+            return Some(Ok(Self::ToggleMicMute));
+        }
+        let position = args.iter().position(|arg| arg == "--volume")?;
+        let usage = "usage: --volume +N | -N | N | mute (N in percent, 1-150)";
+        let Some(value) = args.get(position + 1) else {
+            return Some(Err(usage.to_string()));
+        };
+        if value == "mute" {
+            return Some(Ok(Self::ToggleMute));
+        }
+        let (sign, digits) = match value.as_bytes().first() {
+            Some(b'+') => (Some(true), &value[1..]),
+            Some(b'-') => (Some(false), &value[1..]),
+            _ => (None, value.as_str()),
+        };
+        let Ok(amount) = digits.trim_end_matches('%').parse::<u8>() else {
+            return Some(Err(usage.to_string()));
+        };
+        if amount > 150 || (sign.is_some() && amount == 0) {
+            return Some(Err(usage.to_string()));
+        }
+        Some(Ok(match sign {
+            Some(true) => Self::Up(amount),
+            Some(false) => Self::Down(amount),
+            None => Self::Set(amount),
+        }))
+    }
+
+    /// The `wpctl` calls that carry it out, in order. Raising the volume
+    /// unmutes first, as GNOME does; `max` caps it (`wpctl -l`).
+    pub fn wpctl_calls(&self, max: u8) -> Vec<Vec<String>> {
+        let sink = "@DEFAULT_AUDIO_SINK@".to_string();
+        let limit = format!("{:.2}", f64::from(max.clamp(1, 150)) / 100.0);
+        let set = |value: String| {
+            vec![
+                "set-volume".to_string(),
+                "-l".to_string(),
+                limit.clone(),
+                sink.clone(),
+                value,
+            ]
+        };
+        let unmute = vec!["set-mute".to_string(), sink.clone(), "0".to_string()];
+        match *self {
+            Self::Up(step) => vec![unmute, set(format!("{step}%+"))],
+            Self::Down(step) => vec![set(format!("{step}%-"))],
+            Self::Set(value) => vec![unmute, set(format!("{}%", value.min(max)))],
+            Self::ToggleMute => vec![vec!["set-mute".to_string(), sink, "toggle".to_string()]],
+            Self::ToggleMicMute => vec![vec![
+                "set-mute".to_string(),
+                "@DEFAULT_AUDIO_SOURCE@".to_string(),
+                "toggle".to_string(),
+            ]],
+        }
+    }
+
+    /// Whose level to show afterwards.
+    pub fn target(&self) -> &'static str {
+        match self {
+            Self::ToggleMicMute => "@DEFAULT_AUDIO_SOURCE@",
+            _ => "@DEFAULT_AUDIO_SINK@",
+        }
+    }
+}
+
+/// Carry out `request` and read the resulting level back; `None` when
+/// `wpctl` failed.
+pub fn apply_volume_request(request: VolumeRequest, max: u8) -> Option<AudioDeviceSnapshot> {
+    for call in request.wpctl_calls(max) {
+        let status = Command::new("wpctl").args(&call).status().ok()?;
+        if !status.success() {
+            return None;
+        }
+    }
+    read_wpctl_volume(request.target())
+}
+
 fn read_wpctl_volume(target: &str) -> Option<AudioDeviceSnapshot> {
     let output = Command::new("wpctl")
         .args(["get-volume", target])
@@ -208,6 +304,79 @@ fn clean_wpctl_tree_prefix(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|arg| arg.to_string()).collect()
+    }
+
+    #[test]
+    fn volume_requests_parse_from_the_command_line() {
+        let parse = |list: &[&str]| VolumeRequest::from_args(&args(list));
+        assert_eq!(
+            parse(&["z", "--volume", "+5"]),
+            Some(Ok(VolumeRequest::Up(5)))
+        );
+        assert_eq!(
+            parse(&["z", "--volume", "-10%"]),
+            Some(Ok(VolumeRequest::Down(10)))
+        );
+        assert_eq!(
+            parse(&["z", "--volume", "40"]),
+            Some(Ok(VolumeRequest::Set(40)))
+        );
+        assert_eq!(
+            parse(&["z", "--volume", "mute"]),
+            Some(Ok(VolumeRequest::ToggleMute))
+        );
+        assert_eq!(
+            parse(&["z", "--mic-mute"]),
+            Some(Ok(VolumeRequest::ToggleMicMute))
+        );
+        for bad in [
+            &["z", "--volume"][..],
+            &["z", "--volume", "loud"],
+            &["z", "--volume", "+0"],
+            &["z", "--volume", "200"],
+        ] {
+            assert!(matches!(parse(bad), Some(Err(_))), "{bad:?}");
+        }
+        assert_eq!(parse(&["z", "--toggle"]), None);
+    }
+
+    #[test]
+    fn volume_requests_become_capped_wpctl_calls() {
+        let joined = |request: VolumeRequest, max: u8| {
+            request
+                .wpctl_calls(max)
+                .into_iter()
+                .map(|call| call.join(" "))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            joined(VolumeRequest::Up(5), 100),
+            vec![
+                "set-mute @DEFAULT_AUDIO_SINK@ 0",
+                "set-volume -l 1.00 @DEFAULT_AUDIO_SINK@ 5%+"
+            ]
+        );
+        assert_eq!(
+            joined(VolumeRequest::Down(5), 150),
+            vec!["set-volume -l 1.50 @DEFAULT_AUDIO_SINK@ 5%-"]
+        );
+        assert_eq!(
+            joined(VolumeRequest::Set(120), 100)[1],
+            "set-volume -l 1.00 @DEFAULT_AUDIO_SINK@ 100%",
+            "a set above the cap is the cap"
+        );
+        assert_eq!(
+            joined(VolumeRequest::ToggleMicMute, 100),
+            vec!["set-mute @DEFAULT_AUDIO_SOURCE@ toggle"]
+        );
+        assert_eq!(
+            VolumeRequest::ToggleMicMute.target(),
+            "@DEFAULT_AUDIO_SOURCE@"
+        );
+    }
 
     #[test]
     fn wpctl_parser_extracts_volume() {

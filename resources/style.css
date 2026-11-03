@@ -1370,6 +1370,32 @@ window.osd-window,
   color: @ac_green;
 }
 
+/* ── Level OSD (volume, brightness): bottom center ── */
+.osd-level {
+  margin: 24px;
+  background-color: @window_bg_color;
+  border: 1px solid alpha(@window_fg_color, 0.12);
+  border-radius: 999px;
+  padding: 12px 22px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.40);
+  color: @accent_color;
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+.osd-level.shown {
+  opacity: 1;
+  transform: none;
+}
+.osd-level.muted { color: alpha(@window_fg_color, 0.45); }
+.osd-level-icon { color: @window_fg_color; }
+.osd-level-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-feature-settings: "tnum";
+  color: alpha(@window_fg_color, 0.90);
+}
+
 /* ── Notification Toast OSD (top-right corner) ── */
 .osd-notification {
   margin: 20px;

@@ -470,6 +470,34 @@ bindsym $mod+space exec ~/.local/bin/zeshicast-gtk
 For GNOME/KDE, add the command through the desktop environment keyboard shortcuts
 settings.
 
+### Volume keys with an on-screen level
+
+Bind the volume keys to `zeshicast-gtk --volume …` instead of `wpctl`: the
+daemon changes the volume (raising it unmutes, as GNOME does) and shows a
+level at the bottom of the screen at once, also under Do Not Disturb. The
+palette does not open. `volume_max = "150"` allows PipeWire's boost above
+100 %.
+
+```kdl
+// niri, config.kdl
+XF86AudioRaiseVolume allow-when-locked=true { spawn "zeshicast-gtk" "--volume" "+5"; }
+XF86AudioLowerVolume allow-when-locked=true { spawn "zeshicast-gtk" "--volume" "-5"; }
+XF86AudioMute        allow-when-locked=true { spawn "zeshicast-gtk" "--volume" "mute"; }
+XF86AudioMicMute     allow-when-locked=true { spawn "zeshicast-gtk" "--mic-mute"; }
+```
+
+```ini
+# Hyprland
+bindel = , XF86AudioRaiseVolume, exec, zeshicast-gtk --volume +5
+bindel = , XF86AudioLowerVolume, exec, zeshicast-gtk --volume -5
+bindl  = , XF86AudioMute, exec, zeshicast-gtk --volume mute
+
+# sway
+bindsym XF86AudioRaiseVolume exec zeshicast-gtk --volume +5
+bindsym XF86AudioLowerVolume exec zeshicast-gtk --volume -5
+bindsym XF86AudioMute exec zeshicast-gtk --volume mute
+```
+
 ## Config
 
 ```text
