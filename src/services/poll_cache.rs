@@ -85,6 +85,7 @@ pub(crate) struct TickPlan {
     pub(crate) network: bool,
     pub(crate) system: bool,
     pub(crate) slow: bool,
+    pub(crate) battery: bool,
 }
 
 pub(crate) fn tick_plan(tick: u64, just_shown: bool) -> TickPlan {
@@ -92,7 +93,92 @@ pub(crate) fn tick_plan(tick: u64, just_shown: bool) -> TickPlan {
         network: just_shown || tick.is_multiple_of(3),
         system: just_shown || tick.is_multiple_of(2),
         slow: just_shown || tick.is_multiple_of(3),
+        battery: just_shown || tick.is_multiple_of(3),
     }
+}
+
+/// A source a D-Bus signal said changed (L4): its next tick reads it even
+/// when its turn has not come.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dirty {
+    Network,
+    Battery,
+}
+
+static DIRTY_NETWORK: AtomicBool = AtomicBool::new(false);
+static DIRTY_BATTERY: AtomicBool = AtomicBool::new(false);
+
+/// Mark `source` changed and run a tick now. While the palette is hidden
+/// the tick does nothing; showing it refreshes everything anyway (L2).
+pub fn mark_dirty(source: Dirty) {
+    match source {
+        Dirty::Network => DIRTY_NETWORK.store(true, Ordering::Relaxed),
+        Dirty::Battery => DIRTY_BATTERY.store(true, Ordering::Relaxed),
+    }
+    refresh_now();
+}
+
+/// NetworkManager signals worth a refresh: anything but access points,
+/// which report signal strength every few seconds while scanning.
+pub(crate) fn network_signal_matters(object_path: &str) -> bool {
+    !object_path.starts_with("/org/freedesktop/NetworkManager/AccessPoint")
+}
+
+/// Subscribe to the D-Bus signals that say the strip is stale (L4):
+/// NetworkManager and UPower on the system bus, MPRIS players on the
+/// session bus. The connections live as long as the daemon.
+pub fn subscribe_dbus_changes() {
+    use gio::DBusSignalFlags;
+    thread_local! {
+        /// Dropping a subscription unsubscribes: keep them for the daemon's life.
+        static SUBSCRIPTIONS: std::cell::RefCell<Vec<gio::SignalSubscription>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let mut subscriptions = Vec::new();
+    if let Ok(system) = gio::bus_get_sync(gio::BusType::System, gio::Cancellable::NONE) {
+        subscriptions.push(system.subscribe_to_signal(
+            Some("org.freedesktop.NetworkManager"),
+            None,
+            None,
+            None,
+            None,
+            DBusSignalFlags::NONE,
+            |signal| {
+                if network_signal_matters(signal.object_path) {
+                    mark_dirty(Dirty::Network);
+                }
+            },
+        ));
+        subscriptions.push(system.subscribe_to_signal(
+            Some("org.freedesktop.UPower"),
+            None,
+            None,
+            None,
+            None,
+            DBusSignalFlags::NONE,
+            |_| mark_dirty(Dirty::Battery),
+        ));
+    }
+    if let Ok(session) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) {
+        // Media is read every tick; a player's change only needs the tick now.
+        subscriptions.push(session.subscribe_to_signal(
+            None,
+            Some("org.freedesktop.DBus.Properties"),
+            Some("PropertiesChanged"),
+            Some("/org/mpris/MediaPlayer2"),
+            Some("org.mpris.MediaPlayer2.Player"),
+            DBusSignalFlags::NONE,
+            |_| refresh_now(),
+        ));
+    }
+    SUBSCRIPTIONS.with(|kept| kept.borrow_mut().extend(subscriptions));
+}
+
+/// `plan` with the sources marked dirty since the last tick, clearing them.
+fn with_dirty(mut plan: TickPlan) -> TickPlan {
+    plan.network |= DIRTY_NETWORK.swap(false, Ordering::Relaxed);
+    plan.battery |= DIRTY_BATTERY.swap(false, Ordering::Relaxed);
+    plan
 }
 
 /// Wakes the poller when the palette shows (L2), instead of letting it
@@ -155,7 +241,7 @@ pub fn start() {
                 continue;
             }
             let start = std::time::Instant::now();
-            let plan = tick_plan(tick, !was_active);
+            let plan = with_dirty(tick_plan(tick, !was_active));
             was_active = true;
             // Cheapest and most visible first: the strip shows them.
             let layout = keyboard_layout();
@@ -166,7 +252,7 @@ pub fn start() {
             // keeps timing out is skipped there, so this stays cheap (M-2).
             let media = media_snapshot();
             publish(&cache, |c| c.media = media);
-            if plan.slow {
+            if plan.battery {
                 let battery = battery_snapshot();
                 publish(&cache, |c| c.battery = battery);
             }
@@ -347,6 +433,7 @@ mod tests {
             network: true,
             system: true,
             slow: true,
+            battery: true,
         };
         assert_eq!(tick_plan(7, true), all);
         assert_eq!(tick_plan(0, false), all);
@@ -355,7 +442,8 @@ mod tests {
             TickPlan {
                 network: false,
                 system: false,
-                slow: false
+                slow: false,
+                battery: false,
             }
         );
         assert_eq!(
@@ -363,8 +451,35 @@ mod tests {
             TickPlan {
                 network: false,
                 system: true,
-                slow: false
+                slow: false,
+                battery: false,
             }
+        );
+    }
+
+    #[test]
+    fn access_point_chatter_does_not_refresh_the_network() {
+        assert!(network_signal_matters("/org/freedesktop/NetworkManager"));
+        assert!(network_signal_matters(
+            "/org/freedesktop/NetworkManager/Devices/3"
+        ));
+        assert!(network_signal_matters(
+            "/org/freedesktop/NetworkManager/ActiveConnection/7"
+        ));
+        assert!(!network_signal_matters(
+            "/org/freedesktop/NetworkManager/AccessPoint/1204"
+        ));
+    }
+
+    #[test]
+    fn a_dirty_source_is_read_on_the_next_tick_once() {
+        let _turn = ACTIVE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        DIRTY_NETWORK.store(true, Ordering::Relaxed);
+        let plan = with_dirty(tick_plan(1, false));
+        assert!(plan.network && !plan.battery);
+        assert!(
+            !with_dirty(tick_plan(1, false)).network,
+            "cleared after one tick"
         );
     }
 

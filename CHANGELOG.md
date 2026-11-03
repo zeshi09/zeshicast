@@ -32,6 +32,9 @@ the section under a version heading and tags it `vX.Y.Z`.
   of finishing a one-second sleep, its first tick refreshes everything and
   publishes each value as soon as it is read, and the status strip and views
   redraw within ~100 ms of new data instead of on the next second.
+- With the palette open, network, battery and media changes show at once:
+  NetworkManager, UPower and MPRIS signals trigger a read instead of waiting
+  for the next poll (access-point scan chatter is ignored).
 
 ## [0.3.0] — 2026-11-03
 

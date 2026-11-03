@@ -63,6 +63,7 @@ pub(crate) fn build_ui(
     install_clipboard_background_watcher(&launcher);
     crate::ui::install_audio_watcher();
     crate::ui::install_brightness_watcher();
+    crate::services::poll_cache::subscribe_dbus_changes();
     crate::services::poll_cache::set_nvidia_smi(
         launcher
             .borrow()
