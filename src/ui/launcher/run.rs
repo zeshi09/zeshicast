@@ -31,26 +31,21 @@ pub(crate) fn show_form_for_action(
         let script_output_view = script_output_view.clone();
         // The panel borrows a clone: `window` itself is moved into the closure.
         let confirm_window = window.clone();
-        crate::ui::show_confirmation_panel(
-            &confirm_window,
-            &title,
-            &detail,
-            "Confirm",
-            move || {
-                present_form_panel(
-                    &window,
-                    &launcher,
-                    &hold,
-                    &entry,
-                    &list,
-                    &results,
-                    &navigation,
-                    &action_bar,
-                    &script_output_view,
-                    action.clone(),
-                );
-            },
-        );
+        let audited = action.clone();
+        crate::ui::confirm_action_panel(&confirm_window, &audited, &title, &detail, move || {
+            present_form_panel(
+                &window,
+                &launcher,
+                &hold,
+                &entry,
+                &list,
+                &results,
+                &navigation,
+                &action_bar,
+                &script_output_view,
+                action.clone(),
+            );
+        });
         return;
     }
 
@@ -312,7 +307,8 @@ pub(crate) fn run_json_command_action_or_confirm(
     let entry = entry.clone();
     let list = list.clone();
     let results = Rc::clone(results);
-    crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
+    let audited = action.clone();
+    crate::ui::confirm_action_panel(window, &audited, &title, &detail, move || {
         run_json_command_action_async(&entry, &list, &results, action.clone());
     });
 }
@@ -326,6 +322,8 @@ fn run_json_command_action_async(
     let Some(command) = action.json_command_data().cloned() else {
         return;
     };
+    // The command runs here, not through `action::execute`, so log it here.
+    action.audit_ran();
     let query = entry.text().to_string();
     set_raw_result_actions(
         results,
@@ -402,7 +400,8 @@ pub(crate) fn run_action_or_confirm(
     let launcher = Rc::clone(launcher);
     let hold = Rc::clone(hold);
     let finish_window = window.clone();
-    crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
+    let audited = action.clone();
+    crate::ui::confirm_action_panel(window, &audited, &title, &detail, move || {
         finish_interaction(&finish_window, &hold);
         if action.category == "Window" {
             let action_clone = action.clone();
@@ -471,7 +470,8 @@ pub(crate) fn run_secondary_action_or_confirm<F>(
     let title = risk.label().to_string();
     let detail = secondary_action_confirmation_detail(&action, kind);
     let launcher = Rc::clone(launcher);
-    crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
+    let audited = action.clone();
+    crate::ui::confirm_action_panel(window, &audited, &title, &detail, move || {
         run_secondary_action_confirmed(&launcher, &action, kind);
         on_done();
     });

@@ -79,6 +79,16 @@ A result that asks for a capability the extension lacks is not dropped. It
 is shown with a `Blocked: … requires …` subtitle and does nothing, so the
 missing permission is visible.
 
+### What the user sees
+
+Every time something your extension produced asks for a capability, the
+decision goes to a permission log the user can read in the Extension Browser
+(Ctrl+B): `granted`, `confirmed`, `cancelled` or `denied`, with the
+capability and the command line, URL or item id. A reply effect your
+manifest does not allow shows up there as `denied`. `docs/security.md`
+describes the log.
+<!-- test: every_extension_request_is_logged_with_its_outcome -->
+
 ## Commands
 
 A command file has the same format as one in `~/.config/zeshicast/commands/`;

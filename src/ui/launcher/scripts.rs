@@ -94,7 +94,8 @@ pub(crate) fn execute_script_action(
         let entry = entry.clone();
         let action_bar = action_bar.clone();
         let script_output_view = script_output_view.clone();
-        crate::ui::show_confirmation_panel(window, &title, &detail, "Confirm", move || {
+        let audited = action.clone();
+        crate::ui::confirm_action_panel(window, &audited, &title, &detail, move || {
             dispatch_script_run(
                 &confirm_window,
                 &launcher,
@@ -137,6 +138,8 @@ fn dispatch_script_run(
     mode: crate::action::ScriptMode,
 ) {
     let _ = launcher.borrow_mut().record_recent(action);
+    // Scripts run here rather than through `action::execute`; log them here.
+    action.audit_ran();
 
     match mode {
         crate::action::ScriptMode::Silent => {

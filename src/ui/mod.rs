@@ -31,6 +31,7 @@ pub use launcher::{
 pub use layer_shell::configure_launcher;
 pub use navigation::{LauncherView, NavigationStack};
 pub use osd::{dismiss_notification_osd, show_layout_osd, show_notification_osd, show_toast_osd};
+pub(crate) use panels::confirm_action_panel;
 pub use panels::{show_alias_panel, show_confirmation_panel, show_snippet_editor_panel};
 pub use status_strip::StatusStrip;
 pub use style::{install_css, preferred_renderer};

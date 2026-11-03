@@ -264,6 +264,7 @@ impl Zeshicast {
                     },
                     capabilities: action.capabilities.clone(),
                     risk: ActionRisk::Shell,
+                    origin: action.origin.clone(),
                 };
                 Ok(execute(ExecutionRequest::Command(command), &ticket))
             }
@@ -303,6 +304,7 @@ impl Zeshicast {
             policy,
             capabilities: form.capabilities.clone(),
             risk: form.risk,
+            origin: action.origin.clone(),
         };
         let mut args = form.current_args.clone();
         args.extend(values);

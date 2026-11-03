@@ -106,6 +106,8 @@ pub struct JsonCommandAction {
     pub(crate) command: ShellCommand,
     pub(crate) capabilities: Vec<Capability>,
     pub(crate) score: i32,
+    /// Extension that owns the command; its result rows carry it too.
+    pub(crate) origin: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +162,22 @@ pub(crate) enum ExecutionRequest {
 }
 
 impl ExecutionRequest {
+    /// What the audit log shows for this request. Clipboard text is not
+    /// stored, only its length: the log must not become a second history.
+    fn audit_detail(&self) -> String {
+        match self {
+            Self::Shell { command } => command.command.clone(),
+            Self::Command(command) => command.display(),
+            Self::OpenPath(path) => path.display().to_string(),
+            Self::OpenUrl(url) => url.clone(),
+            Self::Copy(text) => format!("{} characters", text.chars().count()),
+            Self::Http(_) => "HTTP request".to_string(),
+            Self::ExtensionExec { id, .. } => format!("execute {id}"),
+            Self::KillProcess { pid, .. } => format!("kill {pid}"),
+            Self::Media(_) | Self::Notification(_) => String::new(),
+        }
+    }
+
     /// Capabilities this request needs. An empty set means "in-process effect
     /// only" (media keys, notification toggles).
     pub(crate) fn required_capabilities(&self) -> CapabilitySet {
@@ -218,6 +236,8 @@ pub(crate) struct ExecutionTicket {
     pub(crate) capabilities: CapabilitySet,
     /// Risk of the originating action; drives the confirmation gate.
     pub(crate) risk: ActionRisk,
+    /// Extension that asked; set, the decision is written to the audit log.
+    pub(crate) origin: Option<String>,
 }
 
 impl ExecutionTicket {
@@ -226,6 +246,7 @@ impl ExecutionTicket {
             policy,
             capabilities: action.capabilities.clone(),
             risk: action.risk,
+            origin: action.origin.clone(),
         }
     }
 
@@ -236,6 +257,7 @@ impl ExecutionTicket {
             policy: ExecutionPolicy::confirmed(),
             capabilities: CapabilitySet::trusted(),
             risk: ActionRisk::Normal,
+            origin: None,
         }
     }
 
@@ -254,6 +276,14 @@ impl ExecutionTicket {
         }
         ExecutionDecision::RunNow
     }
+}
+
+fn capability_labels(capabilities: &CapabilitySet) -> String {
+    capabilities
+        .iter()
+        .map(Capability::label)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn missing_capabilities(required: &CapabilitySet, granted: &CapabilitySet) -> String {
@@ -280,6 +310,9 @@ pub struct Action {
     /// actions derived from commands/scripts/manifests narrow it to what the
     /// manifest declared.
     pub(crate) capabilities: CapabilitySet,
+    /// Id of the extension that produced this action; its permission requests
+    /// go to the audit log (Q5.4). `None` for the user's own and built-in rows.
+    pub(crate) origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -411,6 +444,148 @@ mod tests {
     }
 
     #[test]
+    fn every_extension_request_is_logged_with_its_outcome() {
+        use crate::audit::{Outcome, take_test_log};
+        let _ = take_test_log();
+
+        // Granted: no confirmation needed, nothing missing.
+        let media = media_action(ActionRisk::Normal)
+            .with_capabilities(CapabilitySet::empty())
+            .with_origin("ext.media");
+        assert_eq!(
+            media.run_with_policy(ExecutionPolicy::interactive()),
+            ExecutionDecision::RunNow
+        );
+
+        // Asking first writes nothing; the confirmed run does.
+        let shell = Action::new(
+            "Ext",
+            "run",
+            ActionKind::Shell(ShellCommand::new("true")),
+            0,
+        )
+        .with_risk(ActionRisk::Shell)
+        .with_capabilities(CapabilitySet::new(vec![Capability::Shell]))
+        .with_origin("ext.shell");
+        assert!(matches!(
+            shell.run_with_policy(ExecutionPolicy::interactive()),
+            ExecutionDecision::NeedsConfirmation(_)
+        ));
+        assert_eq!(
+            shell.run_with_policy(ExecutionPolicy::confirmed()),
+            ExecutionDecision::RunNow
+        );
+
+        // Denied: the capability is missing, even after a confirmation.
+        let denied = Action::new(
+            "Ext",
+            "run",
+            ActionKind::Shell(ShellCommand::new("true")),
+            0,
+        )
+        .with_risk(ActionRisk::Shell)
+        .with_capabilities(CapabilitySet::empty())
+        .with_origin("ext.denied");
+        assert!(matches!(
+            denied.run_with_policy(ExecutionPolicy::confirmed()),
+            ExecutionDecision::Denied(_)
+        ));
+        let _ = take_exec_count();
+
+        let log = take_test_log();
+        let summary: Vec<_> = log
+            .iter()
+            .map(|r| (r.extension.as_str(), r.capability.as_str(), r.outcome))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("ext.media", "", Outcome::Granted),
+                ("ext.shell", "shell", Outcome::Confirmed),
+                ("ext.denied", "shell", Outcome::Denied),
+            ]
+        );
+        assert_eq!(log[1].detail, "true");
+    }
+
+    #[test]
+    fn built_in_actions_are_not_logged() {
+        let _ = crate::audit::take_test_log();
+        let action = media_action(ActionRisk::Normal);
+        assert_eq!(
+            action.run_with_policy(ExecutionPolicy::interactive()),
+            ExecutionDecision::RunNow
+        );
+        let _ = take_exec_count();
+        assert!(crate::audit::take_test_log().is_empty());
+    }
+
+    #[test]
+    fn trying_a_blocked_extension_row_is_logged_as_denied() {
+        let _ = crate::audit::take_test_log();
+        let row = Action::new("Extension: Demo", "Docs", ActionKind::None, 0)
+            .with_subtitle(
+                "Blocked: JSON action requires permissions = [\"network\"] or [\"open_url\"]",
+            )
+            .with_capabilities(CapabilitySet::empty())
+            .with_origin("ext.demo");
+        assert!(matches!(
+            row.run_with_policy(ExecutionPolicy::interactive()),
+            ExecutionDecision::Denied(_)
+        ));
+        let log = crate::audit::take_test_log();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].capability, "network");
+        assert_eq!(log[0].outcome, crate::audit::Outcome::Denied);
+    }
+
+    #[test]
+    fn a_dismissed_confirmation_is_logged_as_cancelled() {
+        let _ = crate::audit::take_test_log();
+        let action = Action::new(
+            "Ext",
+            "deploy",
+            ActionKind::Shell(ShellCommand::new("deploy prod")),
+            0,
+        )
+        .with_risk(ActionRisk::Shell)
+        .with_origin("ext.deploy");
+        action.audit_cancelled();
+        let log = crate::audit::take_test_log();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].outcome, crate::audit::Outcome::Cancelled);
+        assert_eq!(log[0].capability, "shell");
+        assert_eq!(log[0].detail, "deploy prod");
+    }
+
+    #[test]
+    fn a_dropped_reply_effect_is_logged_as_denied() {
+        let _ = crate::audit::take_test_log();
+        let reply = crate::services::extension_protocol::ExtensionExecuteResult {
+            success: true,
+            output: None,
+            open_url: Some("https://example.com".to_string()),
+            copy_text: Some("token".to_string()),
+            notify: None,
+        };
+        let granted = CapabilitySet::new(vec![Capability::ClipboardWrite]);
+        assert_eq!(
+            extension_reply_effects(&reply, &granted, Some("ext.reply")).len(),
+            1
+        );
+        let log = crate::audit::take_test_log();
+        assert_eq!(log.len(), 1, "only the refused effect is logged here");
+        assert_eq!(log[0].capability, "network");
+        assert_eq!(log[0].detail, "reply open_url https://example.com");
+    }
+
+    #[test]
+    fn copied_text_is_not_written_to_the_log() {
+        let request = ExecutionRequest::Copy("hunter2".to_string());
+        assert_eq!(request.audit_detail(), "7 characters");
+    }
+
+    #[test]
     fn gateway_denies_shell_without_capability() {
         let _ = take_exec_count();
         let action = Action::new(
@@ -474,6 +649,7 @@ mod tests {
                 policy: ExecutionPolicy::confirmed(),
                 capabilities: CapabilitySet::empty(),
                 risk: ActionRisk::Normal,
+                origin: None,
             },
         );
         assert!(matches!(denied, ExecutionDecision::Denied(_)));
@@ -556,12 +732,12 @@ mod tests {
         };
 
         assert!(
-            extension_reply_effects(&reply, &CapabilitySet::empty()).is_empty(),
+            extension_reply_effects(&reply, &CapabilitySet::empty(), None).is_empty(),
             "an empty ceiling must neither open a URL nor copy text"
         );
 
         let granted = CapabilitySet::new(vec![Capability::OpenUrl, Capability::ClipboardWrite]);
-        assert_eq!(extension_reply_effects(&reply, &granted).len(), 2);
+        assert_eq!(extension_reply_effects(&reply, &granted, None).len(), 2);
     }
 
     #[test]
@@ -577,7 +753,7 @@ mod tests {
         // `open_url` alone must not open local paths, exactly as for search
         // results.
         let granted = CapabilitySet::new(vec![Capability::OpenUrl]);
-        assert!(extension_reply_effects(&reply, &granted).is_empty());
+        assert!(extension_reply_effects(&reply, &granted, None).is_empty());
     }
 }
 
@@ -711,6 +887,52 @@ impl Action {
             score,
             script_mode: None,
             capabilities: CapabilitySet::trusted(),
+            origin: None,
+        }
+    }
+
+    pub(crate) fn with_origin(mut self, extension_id: impl Into<String>) -> Self {
+        self.origin = Some(extension_id.into());
+        self
+    }
+
+    /// The capabilities this action would ask for, as the audit log names them.
+    pub(crate) fn audit_capability(&self) -> String {
+        match &self.kind {
+            ActionKind::Form(_) | ActionKind::JsonCommand(_) => {
+                Capability::Shell.label().to_string()
+            }
+            _ => self
+                .execution_request()
+                .map(|request| capability_labels(&request.required_capabilities()))
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Log a run that does not pass through [`execute`] (scripts, JSON
+    /// commands): confirmed when its risk asked first, granted otherwise.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub(crate) fn audit_ran(&self) {
+        if let Some(extension) = &self.origin {
+            let outcome = if self.risk.requires_confirmation() {
+                crate::audit::Outcome::Confirmed
+            } else {
+                crate::audit::Outcome::Granted
+            };
+            crate::audit::record(extension, &self.audit_capability(), &self.value(), outcome);
+        }
+    }
+
+    /// Log that the user dismissed this action's confirmation.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub(crate) fn audit_cancelled(&self) {
+        if let Some(extension) = &self.origin {
+            crate::audit::record(
+                extension,
+                &self.audit_capability(),
+                &self.value(),
+                crate::audit::Outcome::Cancelled,
+            );
         }
     }
 
@@ -782,6 +1004,18 @@ impl Action {
     pub(crate) fn run_with_policy(&self, policy: ExecutionPolicy) -> ExecutionDecision {
         let ticket = ExecutionTicket::for_action(policy, self);
         let Some(request) = self.execution_request() else {
+            // A row an extension produced but the gate blocked at build time
+            // (`Blocked: … requires …`): the user tried it, so log the refusal.
+            if let Some(extension) = &self.origin
+                && self.subtitle.contains("Blocked:")
+            {
+                crate::audit::record(
+                    extension,
+                    blocked_capability(&self.subtitle),
+                    &self.subtitle,
+                    crate::audit::Outcome::Denied,
+                );
+            }
             return ExecutionDecision::Denied("action has no executable request".to_string());
         };
         execute(request, &ticket)
@@ -872,17 +1106,58 @@ impl Action {
 /// `run_verified_request` below is private and has exactly one caller — this
 /// function; `grep -rn "run_execution_request" src/` is expected to stay empty.
 pub(crate) fn execute(request: ExecutionRequest, ticket: &ExecutionTicket) -> ExecutionDecision {
-    match ticket.preflight(Some(&request)) {
+    let decision = ticket.preflight(Some(&request));
+    if let Some(extension) = &ticket.origin {
+        audit_decision(extension, &request, ticket, &decision);
+    }
+    match decision {
         ExecutionDecision::RunNow => {
-            run_verified_request(request);
+            run_verified_request(request, ticket.origin.clone());
             ExecutionDecision::RunNow
         }
         decision => decision,
     }
 }
 
+/// One audit row per decision on an extension's request. `NeedsConfirmation`
+/// writes nothing: the confirmation panel that follows logs either the
+/// confirmed run (back through here) or the cancel.
+fn audit_decision(
+    extension: &str,
+    request: &ExecutionRequest,
+    ticket: &ExecutionTicket,
+    decision: &ExecutionDecision,
+) {
+    use crate::audit::Outcome;
+    let outcome = match decision {
+        ExecutionDecision::RunNow if ticket.policy.is_confirmed() => Outcome::Confirmed,
+        ExecutionDecision::RunNow => Outcome::Granted,
+        ExecutionDecision::Denied(_) => Outcome::Denied,
+        ExecutionDecision::NeedsConfirmation(_) => return,
+    };
+    crate::audit::record(
+        extension,
+        &capability_labels(&request.required_capabilities()),
+        &request.audit_detail(),
+        outcome,
+    );
+}
+
+/// The capability a `Blocked: … requires … ["name"]` subtitle names first.
+fn blocked_capability(subtitle: &str) -> &str {
+    subtitle
+        .split_once("[\"")
+        .and_then(|(_, rest)| rest.split_once('"'))
+        .map(|(name, _)| name)
+        .unwrap_or(if subtitle.contains("protocol") {
+            "protocol"
+        } else {
+            "unknown"
+        })
+}
+
 /// Private tail of [`execute`]: only reached once a request passed preflight.
-fn run_verified_request(request: ExecutionRequest) {
+fn run_verified_request(request: ExecutionRequest, origin: Option<String>) {
     #[cfg(test)]
     EXEC_COUNT.with(|count| count.set(count.get() + 1));
     match request {
@@ -937,7 +1212,9 @@ fn run_verified_request(request: ExecutionRequest) {
         } => {
             // A JSON-RPC round trip with its own timeout: keep it off the
             // caller's thread, like the HTTP round trips above.
-            std::thread::spawn(move || run_extension_item(&binary, &id, &granted));
+            std::thread::spawn(move || {
+                run_extension_item(&binary, &id, &granted, origin.as_deref())
+            });
         }
         ExecutionRequest::Media(control) => crate::services::media::media_control(control),
         ExecutionRequest::Notification(action) => match action {
@@ -967,7 +1244,7 @@ const COPY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 /// id means. Previously the id was handed to `sh -c` as if it were a command
 /// line, so an item whose id happened to look like a command ran that command
 /// instead of the item the user picked.
-fn run_extension_item(binary: &Path, id: &str, granted: &CapabilitySet) {
+fn run_extension_item(binary: &Path, id: &str, granted: &CapabilitySet, origin: Option<&str>) {
     let reply = match crate::services::extension_protocol::execute(
         binary,
         id,
@@ -990,7 +1267,7 @@ fn run_extension_item(binary: &Path, id: &str, granted: &CapabilitySet) {
         return;
     }
 
-    for effect in extension_reply_effects(&reply, granted) {
+    for effect in extension_reply_effects(&reply, granted, origin) {
         apply_extension_effect(effect);
     }
 
@@ -1005,6 +1282,7 @@ fn run_extension_item(binary: &Path, id: &str, granted: &CapabilitySet) {
 fn extension_reply_effects(
     reply: &crate::services::extension_protocol::ExtensionExecuteResult,
     granted: &CapabilitySet,
+    origin: Option<&str>,
 ) -> Vec<ActionKind> {
     use crate::search::commands::{ActionIntent, gate_action_intent};
 
@@ -1019,7 +1297,19 @@ fn extension_reply_effects(
         .flatten()
         .filter_map(|intent| {
             // A denial here means "do not do this", never "do it anyway".
+            let detail = match &intent {
+                ActionIntent::OpenUrl(url) => format!("reply open_url {url}"),
+                _ => "reply copy_text".to_string(),
+            };
             let gated = gate_action_intent(intent, &granted);
+            if let (Some(extension), Some(denial)) = (origin, &gated.denial) {
+                crate::audit::record(
+                    extension,
+                    blocked_capability(denial),
+                    &detail,
+                    crate::audit::Outcome::Denied,
+                );
+            }
             gated.denial.is_none().then_some(gated.kind)
         })
         .collect()

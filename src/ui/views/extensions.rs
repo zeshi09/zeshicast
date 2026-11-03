@@ -42,7 +42,42 @@ pub fn extension_browser_view(commands: &[CommandSummary]) -> ExtensionBrowserVi
 
     let scroller = super::scrollable_list(&list);
     root.append(&scroller);
+
+    // Q5.4: what extensions asked to do. Re-read whenever the view is shown,
+    // so a run that just happened is already there.
+    let audit_title = super::panel_title("Permission log");
+    root.append(&audit_title);
+    let audit_list = super::results_list();
+    audit_list.set_selection_mode(gtk::SelectionMode::None);
+    let audit_scroller = super::scrollable_list(&audit_list);
+    audit_scroller.set_min_content_height(120);
+    audit_scroller.set_vexpand(false);
+    root.append(&audit_scroller);
+    root.connect_map(move |_| fill_audit_list(&audit_list));
+
     ExtensionBrowserView { root, list }
+}
+
+/// Rows shown in the permission log; older ones stay in the database.
+const AUDIT_ROWS_SHOWN: usize = 50;
+
+fn fill_audit_list(list: &ListBox) {
+    while let Some(row) = list.row_at_index(0) {
+        list.remove(&row);
+    }
+    let rows = crate::audit::recent(None, AUDIT_ROWS_SHOWN);
+    if rows.is_empty() {
+        list.append(&extension_section_header(
+            "No requests yet",
+            "Extension commands, scripts and binaries are logged when they ask to run",
+        ));
+        return;
+    }
+    for row in &rows {
+        let (title, subtitle) =
+            crate::audit::describe(row, &crate::config::format_time_ago(row.at));
+        list.append(&extension_section_header(&title, &subtitle));
+    }
 }
 
 fn extension_row(command: &CommandSummary) -> gtk::ListBoxRow {

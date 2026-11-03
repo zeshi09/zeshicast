@@ -1,5 +1,6 @@
 mod action;
 mod app;
+mod audit;
 pub mod cli;
 mod config;
 pub mod deeplink;
@@ -511,6 +512,48 @@ command = "rm -rf ~"
         .with_extension_origin(origin);
         assert!(silent.capabilities.is_empty());
         assert!(silent.permissions.is_empty());
+    }
+
+    #[test]
+    fn extension_command_rows_name_their_extension_for_the_audit_log() {
+        let origin = crate::extensions::ExtensionOrigin {
+            id: "example.git-tools".to_string(),
+            name: "Git Tools".to_string(),
+            version: "0.1.0".to_string(),
+            capabilities: vec![],
+        };
+        let entries = vec![
+            crate::search::commands::parse_command_entry(
+                "name = \"Git Log\"\ncommand = \"git log\"\npermissions = [\"shell\"]\n",
+            )
+            .unwrap()
+            .with_extension_origin(origin),
+            crate::search::commands::parse_command_entry(
+                "name = \"Git Local\"\ncommand = \"git status\"\npermissions = [\"shell\"]\n",
+            )
+            .unwrap(),
+        ];
+        let context = crate::placeholders::PlaceholderContext {
+            query: String::new(),
+            clipboard: String::new(),
+            args: HashMap::new(),
+            preferences: Cow::Owned(HashMap::new()),
+            now: UNIX_EPOCH,
+        };
+        let results = crate::search::commands::search_commands(&entries, "git", &context);
+        let origin_of = |title: &str| {
+            results
+                .iter()
+                .find(|action| action.title == title)
+                .and_then(|action| action.origin.clone())
+        };
+        // Blocked (the manifest grants nothing) but still attributed.
+        assert_eq!(origin_of("Git Log").as_deref(), Some("example.git-tools"));
+        assert_eq!(
+            origin_of("Git Local"),
+            None,
+            "the user's own commands are not logged"
+        );
     }
 
     #[test]

@@ -367,10 +367,9 @@ pub(crate) fn search_commands(
             {
                 let command = expand_placeholders_shell(&entry.command, &command_context);
                 let shell_command = ShellCommand::with_env(command, env);
-                return Some(vec![json_command_action(
+                return Some(vec![with_entry_origin(
+                    json_command_action(entry, shell_command, command_match.score),
                     entry,
-                    shell_command,
-                    command_match.score,
                 )]);
             }
 
@@ -446,10 +445,18 @@ pub(crate) fn search_commands(
                 action = action.with_risk(ActionRisk::Shell);
             }
 
-            Some(vec![action])
+            Some(vec![with_entry_origin(action, entry)])
         })
         .flatten()
         .collect()
+}
+
+/// Tag a row with the extension its command came from, for the audit log.
+fn with_entry_origin(action: Action, entry: &CommandEntry) -> Action {
+    match &entry.origin {
+        Some(origin) => action.with_origin(origin.id.clone()),
+        None => action,
+    }
 }
 
 const BLOCKED_LACKS_SHELL: &str = "Blocked: command manifest lacks permissions = [\"shell\"]";
@@ -537,6 +544,7 @@ fn json_command_action(entry: &CommandEntry, command: ShellCommand, score: i32) 
             command,
             capabilities: entry.capabilities.clone(),
             score: score + 100,
+            origin: entry.origin.as_ref().map(|origin| origin.id.clone()),
         }),
         score + 85,
     )
@@ -554,7 +562,13 @@ pub(crate) fn run_json_command_actions(action: &JsonCommandAction) -> Vec<Action
             &action.category,
             action.score,
             &action.capabilities,
-        ),
+        )
+        .into_iter()
+        .map(|result| match &action.origin {
+            Some(extension) => result.with_origin(extension.clone()),
+            None => result,
+        })
+        .collect(),
         Err(error) => vec![
             Action::new(
                 &action.category,

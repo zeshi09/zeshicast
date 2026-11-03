@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, Result, params};
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 fn open(config_dir: &Path) -> Result<Connection> {
     if let Err(error) = std::fs::create_dir_all(config_dir) {
@@ -77,6 +77,10 @@ fn migrate(conn: &mut Connection) -> Result<()> {
                 migrate_1_to_2(&transaction)?;
                 version = 2;
             }
+            2 => {
+                migrate_2_to_3(&transaction)?;
+                version = 3;
+            }
             _ => {
                 return Err(rusqlite::Error::InvalidParameterName(format!(
                     "no migration path from schema version {version}"
@@ -122,6 +126,20 @@ fn migrate_1_to_2(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_snippets_title ON snippets(title);
         CREATE INDEX IF NOT EXISTS idx_snippets_prefix ON snippets(prefix);",
+    )
+}
+
+fn migrate_2_to_3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS extension_audit (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            extension  TEXT    NOT NULL,
+            capability TEXT    NOT NULL,
+            detail     TEXT    NOT NULL DEFAULT '',
+            outcome    TEXT    NOT NULL,
+            at         INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_extension_audit_extension ON extension_audit(extension, id);",
     )
 }
 
@@ -250,6 +268,67 @@ pub fn usage_has_data(config_dir: &Path) -> bool {
     conn.query_row("SELECT COUNT(*) FROM usage", [], |row| row.get::<_, i64>(0))
         .map(|n| n > 0)
         .unwrap_or(false)
+}
+
+// ── Extension audit log (Q5.4) ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditRow {
+    pub extension: String,
+    pub capability: String,
+    pub detail: String,
+    pub outcome: String,
+    pub at: i64,
+}
+
+/// Append one row and keep only the newest `limit`. The log is written
+/// whatever the private mode says: it is a security record, not history.
+pub fn audit_insert(
+    config_dir: &Path,
+    extension: &str,
+    capability: &str,
+    detail: &str,
+    outcome: &str,
+    limit: usize,
+) -> Result<()> {
+    let conn = open(config_dir)?;
+    conn.execute(
+        "INSERT INTO extension_audit (extension, capability, detail, outcome, at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![extension, capability, detail, outcome, now()],
+    )?;
+    conn.execute(
+        "DELETE FROM extension_audit WHERE id NOT IN (
+            SELECT id FROM extension_audit ORDER BY id DESC LIMIT ?1
+        )",
+        params![limit as i64],
+    )?;
+    Ok(())
+}
+
+/// Newest first; `extension = None` reads every extension's rows.
+pub fn audit_recent(config_dir: &Path, extension: Option<&str>, limit: usize) -> Vec<AuditRow> {
+    let Ok(conn) = open(config_dir) else {
+        return Vec::new();
+    };
+    let mut stmt = match conn.prepare(
+        "SELECT extension, capability, detail, outcome, at FROM extension_audit
+         WHERE ?1 IS NULL OR extension = ?1 ORDER BY id DESC LIMIT ?2",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stmt.query_map(params![extension, limit as i64], |row| {
+        Ok(AuditRow {
+            extension: row.get(0)?,
+            capability: row.get(1)?,
+            detail: row.get(2)?,
+            outcome: row.get(3)?,
+            at: row.get(4)?,
+        })
+    })
+    .map(|rows| rows.flatten().collect())
+    .unwrap_or_default()
 }
 
 // ── Snippets ─────────────────────────────────────────────────────────────────
@@ -497,6 +576,26 @@ mod tests {
             })
             .unwrap();
         assert_eq!(migrated_text, "old");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn audit_log_keeps_the_newest_rows_per_retention() {
+        let dir = test_dir("audit-retention");
+        for i in 0..7 {
+            audit_insert(&dir, "ext.a", "shell", &format!("run {i}"), "granted", 5).unwrap();
+        }
+        audit_insert(&dir, "ext.b", "open_url", "https://x", "denied", 5).unwrap();
+
+        let all = audit_recent(&dir, None, 100);
+        assert_eq!(all.len(), 5, "pruned to the limit");
+        assert_eq!(all[0].extension, "ext.b", "newest first");
+        assert_eq!(all[0].outcome, "denied");
+        assert_eq!(all[4].detail, "run 3", "the oldest rows went first");
+
+        let only_a = audit_recent(&dir, Some("ext.a"), 100);
+        assert_eq!(only_a.len(), 4);
+        assert!(only_a.iter().all(|row| row.extension == "ext.a"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

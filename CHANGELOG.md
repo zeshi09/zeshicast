@@ -20,6 +20,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Extension permission log: every capability request from an extension is
+  recorded as granted, confirmed, cancelled or denied (`extension_audit` in
+  `zeshicast.db`, newest 1000 rows, kept in private mode too). The
+  Extension Browser (Ctrl+B) shows the latest under "Permission log".
 - Binary cache: CI pushes the x86_64-linux package to
   `zeshicast.cachix.org`; `nix build`/`nix run` on the flake offer it via
   `nixConfig`, and the README shows the two `nix.settings` lines for a system

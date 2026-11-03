@@ -443,6 +443,9 @@ pub(crate) fn search_scripts(entries: &[ScriptEntry], query: &str) -> Vec<Action
             if !blocked {
                 action = action.with_risk(entry.confirmation_risk());
             }
+            if let Some(origin) = &entry.origin {
+                action = action.with_origin(origin.id.clone());
+            }
             Some(action)
         })
         .collect();

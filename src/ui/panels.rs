@@ -20,9 +20,53 @@ pub fn show_confirmation_panel<F>(
 ) where
     F: Fn() + 'static,
 {
+    show_confirmation_panel_inner(parent, title, subtitle, confirm_label, on_confirm, || {});
+}
+
+/// Like [`show_confirmation_panel`] for an action that may come from an
+/// extension: closing the panel without confirming goes to the audit log as
+/// `cancelled` (Q5.4).
+pub(crate) fn confirm_action_panel<F>(
+    parent: &ApplicationWindow,
+    action: &Action,
+    title: &str,
+    subtitle: &str,
+    on_confirm: F,
+) where
+    F: Fn() + 'static,
+{
+    let cancelled = action.clone();
+    show_confirmation_panel_inner(parent, title, subtitle, "Confirm", on_confirm, move || {
+        cancelled.audit_cancelled()
+    });
+}
+
+fn show_confirmation_panel_inner<F, C>(
+    parent: &ApplicationWindow,
+    title: &str,
+    subtitle: &str,
+    confirm_label: &str,
+    on_confirm: F,
+    on_cancel: C,
+) where
+    F: Fn() + 'static,
+    C: Fn() + 'static,
+{
     let Some(panel) = super::action_panel(parent, title, 460, 170) else {
         return;
     };
+    // Every way out that is not the confirm button (Cancel, Escape, the
+    // compositor closing the panel) counts as a cancel.
+    let confirmed = Rc::new(std::cell::Cell::new(false));
+    {
+        let confirmed = Rc::clone(&confirmed);
+        panel.connect_close_request(move |_| {
+            if !confirmed.get() {
+                on_cancel();
+            }
+            glib::Propagation::Proceed
+        });
+    }
     let root = super::panel_root(12, 14);
     let header = super::panel_title(title);
     root.append(&header);
@@ -54,7 +98,9 @@ pub fn show_confirmation_panel<F>(
     {
         let panel = panel.clone();
         let on_confirm = Rc::clone(&on_confirm);
+        let confirmed = Rc::clone(&confirmed);
         confirm.connect_clicked(move |_| {
+            confirmed.set(true);
             on_confirm();
             panel.close();
         });

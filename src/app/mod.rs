@@ -248,6 +248,7 @@ impl Zeshicast {
         let (preferences, preferences_writable) = load_preferences_with_backup(&preferences_path);
         let script_dirs = preference_script_dirs(&preferences, &config_dir);
         let extensions = load_extension_manifests(&config_dir);
+        crate::audit::init(&config_dir);
 
         migrate_legacy_storage_if_needed(&config_dir);
         let storage_data = crate::trace::timed("clipboard and usage load", || {
@@ -826,6 +827,31 @@ mod tests {
             "the in-memory map must not change either"
         );
         assert!(app.get_preferences().is_empty());
+    }
+
+    #[test]
+    fn private_mode_does_not_turn_off_the_extension_audit_log() {
+        let _ = crate::audit::take_test_log();
+        let mut app = test_app(
+            test_cache_dir("audit-private"),
+            HashMap::from([("clipboard_private_mode".to_string(), "true".to_string())]),
+        );
+        assert!(app.clipboard_private_mode());
+        let action = Action::new(
+            "Extension: Demo",
+            "run",
+            ActionKind::Shell(crate::action::ShellCommand::new("true")),
+            0,
+        )
+        .with_capabilities(crate::action::CapabilitySet::empty())
+        .with_origin("ext.private");
+        assert!(matches!(
+            app.run_action_confirmed(&action),
+            ExecutionDecision::Denied(_)
+        ));
+        let log = crate::audit::take_test_log();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].extension, "ext.private");
     }
 
     #[test]

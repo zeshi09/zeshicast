@@ -46,6 +46,7 @@ impl BrowserTab {
             script_mode: None,
             score,
             capabilities: crate::action::CapabilitySet::trusted(),
+            origin: None,
         }
     }
 }

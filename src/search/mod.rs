@@ -430,21 +430,24 @@ impl SearchProvider for ExtensionsProvider<'_> {
         let mut actions = Vec::new();
         for manifest in self.manifests {
             if let Some(reason) = &manifest.binaries_blocked {
-                actions.extend(blocked_extension_row(
-                    &manifest.origin.name,
-                    reason,
-                    context.query,
-                ));
+                actions.extend(
+                    blocked_extension_row(&manifest.origin.name, reason, context.query)
+                        .map(|row| row.with_origin(manifest.origin.id.clone())),
+                );
                 continue;
             }
             let capabilities = commands::parse_capabilities(&manifest.origin.capabilities);
             for binary in &manifest.binaries {
-                actions.extend(extensions::search_extension(
-                    binary,
-                    &manifest.origin.name,
-                    context.query,
-                    &capabilities,
-                ));
+                actions.extend(
+                    extensions::search_extension(
+                        binary,
+                        &manifest.origin.name,
+                        context.query,
+                        &capabilities,
+                    )
+                    .into_iter()
+                    .map(|action| action.with_origin(manifest.origin.id.clone())),
+                );
             }
         }
         actions

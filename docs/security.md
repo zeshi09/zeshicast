@@ -118,6 +118,34 @@ directories in `script_dirs` loads its scripts as plain user scripts
 (`origin: None`): they skip the manifest capability check and are treated as
 trusted user scripts, gated only by the shell confirmation prompt.
 
+### Permission Audit Log
+
+Every permission decision on something an extension produced is written to
+the `extension_audit` table of `zeshicast.db`: the extension id, the
+capability, a short detail (command line, URL, item id) and the outcome:
+
+- `granted`: ran without a prompt (its risk does not ask);
+- `confirmed`: ran after the user confirmed it;
+- `cancelled`: the user dismissed the confirmation;
+- `denied`: the extension lacks the capability, including a blocked row the
+  user tried and a reply effect (`open_url`, `copy_text`) that was dropped.
+<!-- test: every_extension_request_is_logged_with_its_outcome -->
+<!-- test: a_dismissed_confirmation_is_logged_as_cancelled -->
+<!-- test: trying_a_blocked_extension_row_is_logged_as_denied -->
+<!-- test: a_dropped_reply_effect_is_logged_as_denied -->
+
+The user's own commands and built-in rows are not logged.
+<!-- test: built_in_actions_are_not_logged -->
+Clipboard text an extension copies is logged as its length only, so the log
+does not become a second clipboard history.
+<!-- test: copied_text_is_not_written_to_the_log -->
+Private mode does not pause the log: it is a security record, not usage
+history.
+<!-- test: private_mode_does_not_turn_off_the_extension_audit_log -->
+The newest 1000 rows are kept.
+<!-- test: audit_log_keeps_the_newest_rows_per_retention -->
+The Extension Browser (Ctrl+B) shows the latest 50 under "Permission log".
+
 ## Placeholder Handling
 
 Placeholder values such as `{{query}}`, `{{clipboard}}`, `{{arg:*}}`, and
