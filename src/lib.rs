@@ -4,6 +4,7 @@ pub mod cli;
 mod config;
 pub mod deeplink;
 pub mod dmenu;
+pub mod extension_lint;
 mod extensions;
 pub mod logging;
 mod placeholders;

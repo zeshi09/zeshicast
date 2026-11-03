@@ -53,6 +53,18 @@ fn run_cli(command: CliCommand) -> i32 {
             }
             0
         }
+        CliCommand::ExtensionLint { dir, json } => {
+            use zeshicast::extension_lint::{has_errors, lint_extension, render_json, render_text};
+            let findings = lint_extension(&dir);
+            if json {
+                println!("{}", render_json(&findings));
+            } else if findings.is_empty() {
+                println!("{}: no problems found", dir.display());
+            } else {
+                print!("{}", render_text(&findings));
+            }
+            i32::from(has_errors(&findings))
+        }
         CliCommand::Import { src } => {
             let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
             let config_dir = home.join(".config/zeshicast");
@@ -254,6 +266,9 @@ Usage:
                             Also export clipboard/usage history (zeshicast.db,
                             calc_history.json); excluded by default
   zeshicast --import <file> Import config from tar.gz
+  zeshicast --extension-lint <dir> [--json]
+                            Check an extension directory; exit 1 on errors
+                            (docs/extensions.md)
 
 Queries:
   firefox                   Search installed .desktop applications (reads XDG_DATA_DIRS)

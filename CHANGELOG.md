@@ -24,6 +24,11 @@ the section under a version heading and tags it `vX.Y.Z`.
   capabilities, JSON-RPC protocol and limits), a JSON Schema for
   `extension.toml` (`resources/extension.schema.json`) and a template
   extension in `packaging/examples/extension-template/` (sh + jq or Python).
+- `zeshicast --extension-lint <dir> [--json]`: explains everything the
+  loader would silently skip or block in an extension (mistyped keys,
+  unknown capabilities, unsafe or missing paths, missing `shell` or
+  `protocol`, scripts without metadata, non-executable binaries); exit 1 on
+  errors.
 
 ### Fixed
 

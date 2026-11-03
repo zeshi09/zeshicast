@@ -232,6 +232,20 @@ you do not know.
 
 ## Testing an extension
 
+Lint it first. The loader skips what it cannot use without complaining (a
+mistyped key, a script without metadata, a command without `shell`); the
+linter runs the same parsers and says what would be ignored or blocked:
+
+```sh
+zeshicast --extension-lint ~/.config/zeshicast/extensions/template
+zeshicast --extension-lint --json ./my-extension   # for editors and CI
+```
+
+It exits 1 when there is an error. Errors are things the host ignores or
+blocks; warnings are things that work, but not as written (a capability
+alias, a permission the manifest does not grant, `protocol` without
+`binaries`). Rule ids such as `needs-shell` or `path-unsafe` are stable.
+
 Run the binary by hand with a request on stdin:
 
 ```sh

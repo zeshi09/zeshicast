@@ -15,6 +15,11 @@ pub enum CliCommand {
     Import {
         src: PathBuf,
     },
+    /// `--extension-lint <dir> [--json]` (Q5.3).
+    ExtensionLint {
+        dir: PathBuf,
+        json: bool,
+    },
     Query(String),
     Repl,
 }
@@ -53,6 +58,16 @@ where
             Some(src) => CliCommand::Import { src },
             None => CliCommand::Help,
         },
+        Some("--extension-lint") => {
+            let dir = args[1..].iter().find(|arg| !arg.starts_with("--"));
+            match dir {
+                Some(dir) => CliCommand::ExtensionLint {
+                    dir: PathBuf::from(dir),
+                    json: args[1..].iter().any(|arg| arg == "--json"),
+                },
+                None => CliCommand::Help,
+            }
+        }
         _ => CliCommand::Query(args.join(" ")),
     }
 }
@@ -85,6 +100,30 @@ fn parse_bool_flag(args: &[String], flag: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_lint_takes_a_directory_and_an_optional_json_flag() {
+        assert_eq!(
+            parse_cli_args(vec!["--extension-lint", "ext"]),
+            CliCommand::ExtensionLint {
+                dir: PathBuf::from("ext"),
+                json: false,
+            }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--extension-lint", "--json", "ext"]),
+            CliCommand::ExtensionLint {
+                dir: PathBuf::from("ext"),
+                json: true,
+            }
+        );
+        assert_eq!(parse_cli_args(vec!["--extension-lint"]), CliCommand::Help);
+        // Only as the first argument, like --export.
+        assert_eq!(
+            parse_cli_args(vec!["find", "--extension-lint"]),
+            CliCommand::Query("find --extension-lint".to_string())
+        );
+    }
 
     #[test]
     fn test_parse_cli_args() {
