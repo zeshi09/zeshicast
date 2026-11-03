@@ -249,8 +249,11 @@ pub(crate) fn build_ui(
         let action_bar_cb = action_bar.clone();
         let back_btn_cb = back_btn.clone();
         let ctrl_k_hint_cb = ctrl_k_hint.clone();
+        let status_strip_cb = status_strip.clone();
         navigation.connect_view_changed(move |view| {
             let is_root = view == crate::ui::LauncherView::Root;
+            // The dashboard's own clock is the big one; no second copy below.
+            status_strip_cb.show_clock(view != crate::ui::LauncherView::Dashboard);
             entry_cb.set_visible(is_root);
             action_bar_cb.set_visible(is_root);
             ctrl_k_hint_cb.set_visible(is_root);
@@ -1318,7 +1321,9 @@ pub(crate) fn action_bar(
     counter.set_visible(false);
 
     // Right: Actions button
-    let actions = footer_button("Actions  Ctrl+K");
+    // The shortcut is on the keycap in the search field already.
+    let actions = footer_button("Actions");
+    actions.set_tooltip_text(Some("Actions  Ctrl+K"));
 
     {
         let window = window.clone();

@@ -421,7 +421,13 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
         .map(|k| format!("{:.1}", k as f64 / 1024.0 / 1024.0))
         .unwrap_or_else(|| "—".to_string());
     view.memory.set_text(&mem_gb);
-    view.memory_sub.set_text("GB");
+    // Used memory alone does not say whether it is a lot.
+    view.memory_sub.set_text(
+        &snapshot
+            .memory_total_kib
+            .map(|total| format!("GB of {:.1}", total as f64 / 1024.0 / 1024.0))
+            .unwrap_or_else(|| "GB".to_string()),
+    );
     view.memory_bar.set_fraction(memory_fraction);
     push_metric_graph(&view.memory_graph, memory_fraction);
 

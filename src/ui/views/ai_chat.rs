@@ -44,12 +44,18 @@ pub fn ai_chat_view() -> AiChatView {
     model_label.set_valign(gtk::Align::Center);
     model_bar.append(&model_label);
 
-    // Filled at runtime from the Ollama server (see populate_ai_models).
+    // Filled at runtime from the Ollama server (see populate_ai_models). A
+    // long list scrolls sideways instead of running off the window's edge.
     let model_list = GtkBox::new(Orientation::Horizontal, 6);
-    model_list.set_hexpand(true);
-    model_bar.append(&model_list);
+    let model_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .hexpand(true)
+        .child(&model_list)
+        .build();
+    model_bar.append(&model_scroll);
 
-    let refresh_models = Button::with_label("⟳");
+    let refresh_models = Button::from_icon_name("view-refresh-symbolic");
     refresh_models.add_css_class("ai-model-btn");
     refresh_models.set_valign(gtk::Align::Center);
     refresh_models.set_tooltip_text(Some("Refresh models"));

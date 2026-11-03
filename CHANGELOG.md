@@ -21,6 +21,12 @@ the section under a version heading and tags it `vX.Y.Z`.
 - Empty states: the clipboard explains that nothing was copied yet and
   disables "Copy", notifications centre "No notifications" and disable
   "Clear All", audio greys out sliders without a device.
+- Rows of chips that scroll sideways (emoji categories, AI models) fade at
+  the edge with more behind it instead of cutting a chip in half; the
+  dashboard shows its clock once, not again in the strip; the memory card
+  says how much there is ("GB of 62.7"); a process's kill button shows on
+  the selected or hovered row only; the footer says "Actions" without
+  repeating the Ctrl+K already on the search field.
 
 ### Fixed
 

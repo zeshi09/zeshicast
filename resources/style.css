@@ -125,6 +125,26 @@ entry placeholder {
   color: @fg_secondary;
 }
 
+/* A kill button on every process row read as a wall of danger: it shows on
+   the row under the pointer and on the selected one. */
+row .row-kill-button {
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+row:hover .row-kill-button,
+row:selected .row-kill-button {
+  opacity: 1;
+}
+
+/* A row that scrolls sideways shows a fade at the edge with more behind it
+   (GTK draws the undershoot only there), instead of a chip cut in half. */
+scrolledwindow undershoot.right {
+  background: linear-gradient(to right, alpha(@window_bg_color, 0), @window_bg_color);
+}
+scrolledwindow undershoot.left {
+  background: linear-gradient(to left, alpha(@window_bg_color, 0), @window_bg_color);
+}
+
 /* Selected text takes the accent, not GTK's stock blue. */
 label selection,
 text selection,

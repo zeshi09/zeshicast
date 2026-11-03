@@ -113,6 +113,14 @@ impl StatusStrip {
         }
     }
 
+    /// Hide the clock and date where the view shows them in large (the
+    /// dashboard); elsewhere they follow `status_items`.
+    pub fn show_clock(&self, shown: bool) {
+        let items = self.items.borrow();
+        self.clock.set_visible(shown && items.contains("clock"));
+        self.date.set_visible(shown && items.contains("date"));
+    }
+
     fn show_chip(&self, chip: &Chip, name: &str, has_data: bool) {
         chip.root
             .set_visible(chip_visible(&self.items.borrow(), name, has_data));
