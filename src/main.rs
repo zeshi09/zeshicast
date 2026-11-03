@@ -76,6 +76,7 @@ fn run_cli(command: CliCommand) -> i32 {
             root,
             yes,
         } => install_extension(&id, registry.as_deref(), root, yes),
+        CliCommand::ResetEncryptedData { yes } => reset_encrypted_data(yes),
         CliCommand::Import { src } => {
             let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
             let config_dir = home.join(".config/zeshicast");
@@ -90,13 +91,58 @@ fn run_cli(command: CliCommand) -> i32 {
         }
         CliCommand::Query(query) => {
             let app = Zeshicast::load();
+            if let Some(error) = app.storage_error() {
+                eprintln!("{error}");
+            }
             run_once(&app, &query);
             0
         }
         CliCommand::Repl => {
             let mut app = Zeshicast::load();
+            if let Some(error) = app.storage_error() {
+                eprintln!("{error}");
+            }
             run_repl(&mut app);
             0
+        }
+    }
+}
+
+/// `--reset-encrypted-data` (Q6.3): the way out when the database key is
+/// lost. Asks first unless `--yes`.
+fn reset_encrypted_data(yes: bool) -> i32 {
+    use std::io::{BufRead, IsTerminal};
+    let config_dir = env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
+        .join(".config/zeshicast");
+    if !yes {
+        if !io::stdin().is_terminal() {
+            eprintln!("not a terminal: pass --yes to delete without asking");
+            return 1;
+        }
+        print!(
+            "Delete clipboard history, snippets and their encryption key in {}? [y/N] ",
+            config_dir.display()
+        );
+        let _ = io::stdout().flush();
+        let mut answer = String::new();
+        let _ = io::stdin().lock().read_line(&mut answer);
+        if !matches!(answer.trim(), "y" | "Y" | "yes") {
+            println!("nothing was deleted");
+            return 1;
+        }
+    }
+    match zeshicast::reset_encrypted_data(&config_dir) {
+        Ok(()) => {
+            println!(
+                "deleted; restart the daemon (systemctl --user restart zeshicast) to start a new key"
+            );
+            0
+        }
+        Err(error) => {
+            eprintln!("reset failed: {error}");
+            1
         }
     }
 }
@@ -336,6 +382,9 @@ Usage:
                             Download one extension from the registry, check its
                             sha256 and permissions, ask, then install it under
                             ~/.config/zeshicast/extensions/ (or <dir>/extensions/)
+  zeshicast --reset-encrypted-data [--yes]
+                            Delete clipboard history, snippets and their key, when
+                            the key is lost and they cannot be decrypted
                             (docs/extensions.md)
 
 Queries:

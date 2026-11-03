@@ -24,6 +24,11 @@ pub fn reap_finished_children() -> usize {
 
 pub use action::{Action, ActionRisk, ExecutionDecision, SecondaryActionKind};
 pub use app::Zeshicast;
+
+/// Delete clipboard history, snippets and their key (Q6.3, key lost).
+pub fn reset_encrypted_data(config_dir: &std::path::Path) -> Result<(), String> {
+    services::storage::reset_encrypted_data(config_dir).map_err(|error| error.to_string())
+}
 pub use config::{
     export_config_with_options, import_config, load_global_preferences, resolve_include_history,
     resolve_include_secrets,
@@ -325,6 +330,7 @@ mod tests {
             frequencies: HashMap::new(),
             extensions: Vec::new(),
             files: Default::default(),
+            storage_error: None,
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
         let action = crate::action::Action::new(
@@ -363,6 +369,7 @@ mod tests {
             frequencies: HashMap::new(),
             extensions: Vec::new(),
             files: Default::default(),
+            storage_error: None,
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
         let action = crate::action::Action::new(
@@ -1179,6 +1186,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             frequencies: HashMap::new(),
             extensions: Vec::new(),
             files: Default::default(),
+            storage_error: None,
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
 
@@ -1244,6 +1252,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             frequencies: HashMap::new(),
             extensions: Vec::new(),
             files: Default::default(),
+            storage_error: None,
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
 

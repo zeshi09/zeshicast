@@ -2,9 +2,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::sync::Arc;
+
 use rusqlite::{Connection, Result, params};
 
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+use super::crypto::Cipher;
+
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 fn open(config_dir: &Path) -> Result<Connection> {
     if let Err(error) = std::fs::create_dir_all(config_dir) {
@@ -17,7 +21,9 @@ fn open(config_dir: &Path) -> Result<Connection> {
     if let Err(error) = secure_database_permissions(&db_path) {
         log::warn!("could not restrict {} to 0600: {error}", db_path.display());
     }
-    conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+    // Q6.3: freed pages are zeroed, so a value that was rewritten sealed (or
+    // deleted) does not linger readable in the file.
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA secure_delete = ON;")?;
     init(&mut conn)?;
     secure_sidecar_permissions(&db_path);
     Ok(conn)
@@ -84,6 +90,10 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             3 => {
                 migrate_3_to_4(&transaction)?;
                 version = 4;
+            }
+            4 => {
+                migrate_4_to_5(&transaction)?;
+                version = 5;
             }
             _ => {
                 return Err(rusqlite::Error::InvalidParameterName(format!(
@@ -161,6 +171,127 @@ fn migrate_3_to_4(conn: &Connection) -> Result<()> {
     )
 }
 
+/// Q6.3: clipboard and snippet values are sealed (see `services::crypto`).
+/// `meta` remembers that a key was set up; `text_hash` (a keyed
+/// fingerprint) replaces the plaintext UNIQUE lookup for de-duplication.
+/// Existing rows are sealed by the first keyed open, not here: a migration
+/// runs without the key.
+fn migrate_4_to_5(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT NOT NULL PRIMARY KEY,
+            value BLOB NOT NULL
+        );
+        ALTER TABLE clipboard ADD COLUMN text_hash BLOB;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_text_hash ON clipboard(text_hash);",
+    )
+}
+
+fn meta_get(conn: &Connection, key: &str) -> Option<Vec<u8>> {
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = ?1",
+        params![key],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+fn meta_set(conn: &Connection, key: &str, value: &[u8]) -> Result<()> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = ?2",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
+fn key_error(error: super::db_key::KeyError) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+}
+
+fn seal_error(error: std::io::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+}
+
+fn open_error(error: super::crypto::CryptoError) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(error.to_string().into())
+}
+
+/// A connection plus the database's cipher; seals rows still stored in
+/// plaintext (written before Q6.3, or by a legacy import) on the way.
+fn open_keyed(config_dir: &Path) -> Result<(Connection, Arc<Cipher>)> {
+    let conn = open(config_dir)?;
+    let cipher =
+        super::db_key::cipher_for(config_dir, meta_get(&conn, "key_check"), |check, store| {
+            meta_set(&conn, "key_check", check)
+                .and_then(|()| meta_set(&conn, "key_store", store.label().as_bytes()))
+                .map_err(std::io::Error::other)
+        })
+        .map_err(key_error)?;
+    seal_plaintext_rows(&conn, &cipher)?;
+    Ok((conn, cipher))
+}
+
+fn seal_plaintext_rows(conn: &Connection, cipher: &Cipher) -> Result<()> {
+    let clipboard: Vec<(i64, String)> = conn
+        .prepare("SELECT id, text FROM clipboard WHERE typeof(text) = 'text'")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_>>()?;
+    let snippets: Vec<(i64, [String; 4])> = conn
+        .prepare(
+            "SELECT id, title, prefix, content, tags FROM snippets WHERE typeof(content) = 'text'",
+        )?
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                [row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?],
+            ))
+        })?
+        .collect::<Result<_>>()?;
+    if clipboard.is_empty() && snippets.is_empty() {
+        return Ok(());
+    }
+    for (id, text) in &clipboard {
+        conn.execute(
+            "UPDATE clipboard SET text = ?1, text_hash = ?2 WHERE id = ?3",
+            params![
+                cipher.seal(text.as_bytes()).map_err(seal_error)?,
+                cipher.fingerprint(text.as_bytes()),
+                id
+            ],
+        )?;
+    }
+    for (id, fields) in &snippets {
+        let sealed = fields
+            .iter()
+            .map(|field| cipher.seal(field.as_bytes()).map_err(seal_error))
+            .collect::<Result<Vec<_>>>()?;
+        conn.execute(
+            "UPDATE snippets SET title = ?1, prefix = ?2, content = ?3, tags = ?4 WHERE id = ?5",
+            params![sealed[0], sealed[1], sealed[2], sealed[3], id],
+        )?;
+    }
+    // The plaintext versions are gone from the pages (`secure_delete`); also
+    // drop them from the WAL.
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    Ok(())
+}
+
+/// Delete the encrypted data and its key, so the next start sets up a new
+/// one: the way out when the key is lost (`--reset-encrypted-data`).
+pub fn reset_encrypted_data(config_dir: &Path) -> Result<()> {
+    let conn = open(config_dir)?;
+    conn.execute_batch(
+        "DELETE FROM clipboard;
+         DELETE FROM snippets;
+         DELETE FROM meta WHERE key IN ('key_check', 'key_store');
+         PRAGMA wal_checkpoint(TRUNCATE);",
+    )?;
+    drop(conn);
+    super::db_key::delete_key(config_dir);
+    Ok(())
+}
+
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -170,28 +301,32 @@ fn now() -> i64 {
 
 // ── Clipboard ────────────────────────────────────────────────────────────────
 
-pub fn clipboard_load_with_limit(config_dir: &Path, limit: usize) -> Vec<(String, i64)> {
-    let Ok(conn) = open(config_dir) else {
-        return Vec::new();
-    };
-    let mut stmt = match conn
-        .prepare("SELECT text, added_at FROM clipboard ORDER BY added_at DESC LIMIT ?1")
-    {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    stmt.query_map(params![limit as i64], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    })
-    .map(|rows| rows.flatten().collect())
-    .unwrap_or_default()
+/// Newest first. Fails (rather than returning a partial list) when the key
+/// is missing or does not open a row.
+pub fn clipboard_load_with_limit(config_dir: &Path, limit: usize) -> Result<Vec<(String, i64)>> {
+    let (conn, cipher) = open_keyed(config_dir)?;
+    let mut stmt =
+        conn.prepare("SELECT text, added_at FROM clipboard ORDER BY added_at DESC LIMIT ?1")?;
+    let rows = stmt
+        .query_map(params![limit as i64], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(|(sealed, added_at)| Ok((cipher.open_text(&sealed).map_err(open_error)?, added_at)))
+        .collect()
 }
 
 pub fn clipboard_insert_with_limit(config_dir: &Path, text: &str, limit: usize) -> Result<()> {
-    let conn = open(config_dir)?;
+    let (conn, cipher) = open_keyed(config_dir)?;
     conn.execute(
-        "INSERT OR REPLACE INTO clipboard (text, added_at) VALUES (?1, ?2)",
-        params![text, now()],
+        "INSERT INTO clipboard (text, text_hash, added_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(text_hash) DO UPDATE SET text = excluded.text, added_at = excluded.added_at",
+        params![
+            cipher.seal(text.as_bytes()).map_err(seal_error)?,
+            cipher.fingerprint(text.as_bytes()),
+            now()
+        ],
     )?;
     // Keep the table bounded — only the newest entries are ever loaded (LIMIT
     // 100), so prune the rest to stop the db from growing without bound.
@@ -216,8 +351,11 @@ pub fn clipboard_prune(config_dir: &Path, limit: usize) -> Result<()> {
 }
 
 pub fn clipboard_delete(config_dir: &Path, text: &str) -> Result<()> {
-    let conn = open(config_dir)?;
-    conn.execute("DELETE FROM clipboard WHERE text = ?1", params![text])?;
+    let (conn, cipher) = open_keyed(config_dir)?;
+    conn.execute(
+        "DELETE FROM clipboard WHERE text_hash = ?1",
+        params![cipher.fingerprint(text.as_bytes())],
+    )?;
     Ok(())
 }
 
@@ -433,34 +571,59 @@ pub struct SnippetRecord {
     pub tags: Vec<String>,
 }
 
-pub fn snippets_load(config_dir: &Path) -> Vec<SnippetRecord> {
-    let Ok(conn) = open(config_dir) else {
-        return Vec::new();
-    };
-    let mut stmt = match conn
-        .prepare("SELECT id, title, prefix, content, tags FROM snippets ORDER BY id ASC")
-    {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    stmt.query_map([], |row| {
-        let tags_str: String = row.get(4)?;
-        let tags = tags_str
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
-        Ok(SnippetRecord {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            prefix: row.get(2)?,
-            content: row.get(3)?,
-            tags,
+/// Every snippet, decrypted. Fails when the key is missing or wrong.
+pub fn snippets_load(config_dir: &Path) -> Result<Vec<SnippetRecord>> {
+    let (conn, cipher) = open_keyed(config_dir)?;
+    let mut stmt =
+        conn.prepare("SELECT id, title, prefix, content, tags FROM snippets ORDER BY id ASC")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                [
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, Vec<u8>>(4)?,
+                ],
+            ))
+        })?
+        .collect::<Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(|(id, sealed)| {
+            let [title, prefix, content, tags] = sealed;
+            let open = |blob: &[u8]| cipher.open_text(blob).map_err(open_error);
+            let tags = open(&tags)?
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            Ok(SnippetRecord {
+                id,
+                title: open(&title)?,
+                prefix: open(&prefix)?,
+                content: open(&content)?,
+                tags,
+            })
         })
-    })
-    .map(|rows| rows.flatten().collect())
-    .unwrap_or_default()
+        .collect()
+}
+
+fn seal_snippet(
+    cipher: &Cipher,
+    title: &str,
+    prefix: &str,
+    content: &str,
+    tags: &[String],
+) -> Result<[Vec<u8>; 4]> {
+    let seal = |text: &str| cipher.seal(text.as_bytes()).map_err(seal_error);
+    Ok([
+        seal(title)?,
+        seal(prefix)?,
+        seal(content)?,
+        seal(&tags.join(", "))?,
+    ])
 }
 
 pub fn snippet_insert(
@@ -470,11 +633,12 @@ pub fn snippet_insert(
     content: &str,
     tags: &[String],
 ) -> Result<i64> {
-    let conn = open(config_dir)?;
+    let (conn, cipher) = open_keyed(config_dir)?;
+    let [title, prefix, content, tags] = seal_snippet(&cipher, title, prefix, content, tags)?;
     let ts = now();
     conn.execute(
         "INSERT INTO snippets (title, prefix, content, tags, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![title, prefix, content, tags.join(", "), ts, ts],
+        params![title, prefix, content, tags, ts, ts],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -487,10 +651,11 @@ pub fn snippet_update(
     content: &str,
     tags: &[String],
 ) -> Result<()> {
-    let conn = open(config_dir)?;
+    let (conn, cipher) = open_keyed(config_dir)?;
+    let [title, prefix, content, tags] = seal_snippet(&cipher, title, prefix, content, tags)?;
     conn.execute(
         "UPDATE snippets SET title = ?1, prefix = ?2, content = ?3, tags = ?4, updated_at = ?5 WHERE id = ?6",
-        params![title, prefix, content, tags.join(", "), now(), id],
+        params![title, prefix, content, tags, now(), id],
     )?;
     Ok(())
 }
@@ -506,11 +671,16 @@ pub fn snippet_delete_by_title_and_content(
     title: &str,
     content: &str,
 ) -> Result<()> {
+    // Sealed values differ per row, so match after decrypting.
+    let ids: Vec<i64> = snippets_load(config_dir)?
+        .into_iter()
+        .filter(|snippet| snippet.title == title && snippet.content == content)
+        .map(|snippet| snippet.id)
+        .collect();
     let conn = open(config_dir)?;
-    conn.execute(
-        "DELETE FROM snippets WHERE title = ?1 AND content = ?2",
-        params![title, content],
-    )?;
+    for id in ids {
+        conn.execute("DELETE FROM snippets WHERE id = ?1", params![id])?;
+    }
     Ok(())
 }
 
@@ -667,6 +837,153 @@ mod tests {
             })
             .unwrap();
         assert_eq!(migrated_text, "old");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Every byte of the database and its sidecars, as someone who copied
+    /// the files (but not the key) would see them.
+    fn raw_database(dir: &Path) -> Vec<u8> {
+        ["zeshicast.db", "zeshicast.db-wal", "zeshicast.db-shm"]
+            .iter()
+            .flat_map(|name| std::fs::read(dir.join(name)).unwrap_or_default())
+            .collect()
+    }
+
+    fn contains(haystack: &[u8], needle: &str) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle.as_bytes())
+    }
+
+    #[test]
+    fn the_database_file_does_not_reveal_clipboard_or_snippets() {
+        let dir = test_dir("sealed");
+        clipboard_insert_with_limit(&dir, "token-ghp_SECRETCLIP", 100).unwrap();
+        snippet_insert(
+            &dir,
+            "Bank PIN",
+            ":pin",
+            "SECRETSNIPPET 4821",
+            &["private".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            clipboard_load_with_limit(&dir, 10).unwrap()[0].0,
+            "token-ghp_SECRETCLIP"
+        );
+        assert_eq!(
+            snippets_load(&dir).unwrap()[0].content,
+            "SECRETSNIPPET 4821"
+        );
+
+        let raw = raw_database(&dir);
+        for secret in ["SECRETCLIP", "SECRETSNIPPET", "Bank PIN", ":pin", "private"] {
+            assert!(
+                !contains(&raw, secret),
+                "`{secret}` is readable in the file"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn duplicates_and_deletes_work_on_sealed_text() {
+        let dir = test_dir("sealed-dedupe");
+        clipboard_insert_with_limit(&dir, "same", 100).unwrap();
+        clipboard_insert_with_limit(&dir, "other", 100).unwrap();
+        clipboard_insert_with_limit(&dir, "same", 100).unwrap();
+        let texts: Vec<_> = clipboard_load_with_limit(&dir, 10)
+            .unwrap()
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        clipboard_delete(&dir, "same").unwrap();
+        assert_eq!(clipboard_load_with_limit(&dir, 10).unwrap().len(), 1);
+
+        let id = snippet_insert(&dir, "t", "", "c", &[]).unwrap();
+        snippet_insert(&dir, "keep", "", "c", &[]).unwrap();
+        snippet_delete_by_title_and_content(&dir, "t", "c").unwrap();
+        let left = snippets_load(&dir).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_ne!(left[0].id, id);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn plaintext_rows_from_before_encryption_are_read_and_sealed() {
+        let dir = test_dir("sealed-legacy");
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            // A schema-4 database: clipboard and snippets in plaintext.
+            let conn = Connection::open(dir.join("zeshicast.db")).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE clipboard (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     text TEXT NOT NULL UNIQUE, added_at INTEGER NOT NULL);
+                 CREATE TABLE usage (identity TEXT NOT NULL PRIMARY KEY,
+                     last_used INTEGER NOT NULL, count INTEGER NOT NULL DEFAULT 1);
+                 CREATE TABLE snippets (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     title TEXT NOT NULL, prefix TEXT NOT NULL DEFAULT '',
+                     content TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '',
+                     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+                 CREATE TABLE extension_audit (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     extension TEXT NOT NULL, capability TEXT NOT NULL,
+                     detail TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL, at INTEGER NOT NULL);
+                 CREATE TABLE files (path BLOB NOT NULL PRIMARY KEY, name_lower TEXT NOT NULL,
+                     is_dir INTEGER NOT NULL, mtime INTEGER NOT NULL DEFAULT 0);
+                 INSERT INTO clipboard (text, added_at) VALUES ('OLDCLIPVALUE', 1);
+                 INSERT INTO snippets (title, prefix, content, tags, created_at, updated_at)
+                     VALUES ('Old', ':o', 'OLDSNIPVALUE', 'a, b', 1, 1);
+                 PRAGMA user_version = 4;",
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            clipboard_load_with_limit(&dir, 10).unwrap()[0].0,
+            "OLDCLIPVALUE"
+        );
+        let snippet = &snippets_load(&dir).unwrap()[0];
+        assert_eq!(
+            (snippet.content.as_str(), snippet.tags.len()),
+            ("OLDSNIPVALUE", 2)
+        );
+
+        let raw = raw_database(&dir);
+        assert!(
+            !contains(&raw, "OLDCLIPVALUE"),
+            "the old plaintext is gone from the file"
+        );
+        assert!(!contains(&raw, "OLDSNIPVALUE"));
+        // Still de-duplicated against the sealed copy.
+        clipboard_insert_with_limit(&dir, "OLDCLIPVALUE", 100).unwrap();
+        assert_eq!(clipboard_load_with_limit(&dir, 10).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn without_its_key_the_database_gives_nothing_back() {
+        let dir = test_dir("sealed-lost");
+        clipboard_insert_with_limit(&dir, "secret", 100).unwrap();
+        snippet_insert(&dir, "s", "", "secret", &[]).unwrap();
+        super::super::db_key::forget(&dir);
+        std::fs::remove_file(dir.join(super::super::db_key::KEY_FILE)).unwrap();
+
+        let error = clipboard_load_with_limit(&dir, 10).unwrap_err().to_string();
+        assert!(error.contains("--reset-encrypted-data"), "{error}");
+        assert!(snippets_load(&dir).is_err());
+        assert!(
+            clipboard_insert_with_limit(&dir, "new", 100).is_err(),
+            "no new key is made over data sealed with the old one"
+        );
+        assert!(!dir.join(super::super::db_key::KEY_FILE).exists());
+
+        reset_encrypted_data(&dir).unwrap();
+        clipboard_insert_with_limit(&dir, "fresh start", 100).unwrap();
+        assert_eq!(
+            clipboard_load_with_limit(&dir, 10).unwrap()[0].0,
+            "fresh start"
+        );
+        assert!(snippets_load(&dir).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -839,7 +1156,7 @@ mod tests {
         .unwrap();
         assert!(snippet_has_data(&dir));
 
-        let loaded = snippets_load(&dir);
+        let loaded = snippets_load(&dir).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].id, id);
         assert_eq!(loaded[0].title, "Greeting");
@@ -857,7 +1174,7 @@ mod tests {
         )
         .unwrap();
 
-        let updated = snippets_load(&dir);
+        let updated = snippets_load(&dir).unwrap();
         assert_eq!(updated[0].title, "Greeting Updated");
         assert_eq!(updated[0].prefix, ":hello");
         assert_eq!(updated[0].content, "Hello, updated world!");
@@ -883,7 +1200,7 @@ mod tests {
         migrate_snippets(&dir, &entries).unwrap();
         assert!(snippet_has_data(&dir));
 
-        let loaded = snippets_load(&dir);
+        let loaded = snippets_load(&dir).unwrap();
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].title, "Snippet 1");
         assert_eq!(loaded[0].content, "echo 1");

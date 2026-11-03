@@ -31,6 +31,13 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Clipboard history and snippets are encrypted in `zeshicast.db`
+  (ChaCha20-Poly1305). The key lives in the Secret Service keyring, or in
+  `~/.config/zeshicast/db.key` (0600) without one. Existing rows are
+  encrypted on first start. A lost or wrong key shows nothing and says so
+  instead of starting over; `zeshicast --reset-encrypted-data` deletes the
+  encrypted data and the key. `--export --include-history` carries the key.
+  The database moves to schema 5.
 - `zeshicast --extension-install <id>`: installs an extension from the git
   registry (`docs/extensions-registry.md`) only on that command. It checks
   the tarball's sha256, unpacks it only inside `extensions/`, refuses a
@@ -64,6 +71,8 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Fixed
 
+- Snippets are no longer written to `snippets.txt` in plaintext after every
+  change; the database is the only copy.
 - An extension whose `binaries` are refused for lack of `shell` now shows a
   blocked row when you search for its name, like one refused for its
   protocol, instead of vanishing silently.

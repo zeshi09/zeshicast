@@ -50,6 +50,16 @@ pub(crate) fn build_ui(
     let clipboard_items = Rc::new(RefCell::new(Vec::<ClipboardSummary>::new()));
     let snippet_items = Rc::new(RefCell::new(Vec::<SnippetSummary>::new()));
     install_clipboard_monitor(&launcher);
+    // Q6.3: an encrypted history whose key is gone is not shown as empty
+    // without a word; the notification names the way out.
+    if let Some(error) = launcher.borrow().storage_error() {
+        crate::services::notifications::push_notification(
+            "Zeshicast",
+            "Clipboard history is locked",
+            error,
+            0,
+        );
+    }
     install_clipboard_background_watcher(&launcher);
     if launcher.borrow().notifications_history_enabled() {
         super::super::notify_server::install_notification_server();

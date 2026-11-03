@@ -9,6 +9,8 @@ pub mod battery;
 pub mod clipboard_store;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod compositor;
+pub(crate) mod crypto;
+pub(crate) mod db_key;
 pub mod extension_protocol;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod local_ai;

@@ -72,6 +72,9 @@ pub struct Zeshicast {
     /// Shared with every search snapshot; replaced whole when the index
     /// changes, so a snapshot never copies 10k entries (Q6.1).
     pub(crate) files: Arc<Vec<FileEntry>>,
+    /// Set when clipboard history or snippets could not be decrypted
+    /// (Q6.3); the UI shows it once, the CLI prints it.
+    pub(crate) storage_error: Option<String>,
     pub(crate) config_dir: PathBuf,
 }
 
@@ -125,6 +128,8 @@ struct LoadedClipboardAndUsage {
     timestamps: HashMap<String, i64>,
     recent: Vec<String>,
     frequencies: HashMap<String, u32>,
+    /// Why the clipboard history could not be read (Q6.3: key lost).
+    error: Option<String>,
 }
 
 fn load_clipboard_and_usage(
@@ -132,10 +137,18 @@ fn load_clipboard_and_usage(
     preferences: &HashMap<String, String>,
 ) -> LoadedClipboardAndUsage {
     let clipboard_retention = clipboard_retention_value(preferences);
-    let clip_rows = storage::clipboard_load_with_limit(config_dir, clipboard_retention);
+    let (clip_rows, error) =
+        match storage::clipboard_load_with_limit(config_dir, clipboard_retention) {
+            Ok(rows) => (rows, None),
+            Err(error) => (Vec::new(), Some(error.to_string())),
+        };
     let history: Vec<String> = clip_rows.iter().map(|(t, _)| t.clone()).collect();
     let timestamps: HashMap<String, i64> = clip_rows.into_iter().collect();
-    if let Err(error) = prune_clipboard_image_cache(&history) {
+    // An unreadable history is not an empty one: pruning against it would
+    // delete every cached image the (encrypted) rows still point to.
+    if error.is_none()
+        && let Err(error) = prune_clipboard_image_cache(&history)
+    {
         log::warn!("could not prune the clipboard image cache: {error}");
     }
 
@@ -147,6 +160,7 @@ fn load_clipboard_and_usage(
         timestamps,
         recent,
         frequencies,
+        error,
     }
 }
 
@@ -297,18 +311,28 @@ impl Zeshicast {
         });
         let calc_history = load_calc_history(&config_dir.join("calc_history.json"));
 
+        let mut storage_error = storage_data.error.clone();
         let snippets = if storage::snippet_has_data(&config_dir) {
-            storage::snippets_load(&config_dir)
-                .into_iter()
-                .map(|record| NamedValue {
-                    name: record.title,
-                    value: record.content,
-                    tags: record.tags,
-                })
-                .collect()
+            match storage::snippets_load(&config_dir) {
+                Ok(records) => records
+                    .into_iter()
+                    .map(|record| NamedValue {
+                        name: record.title,
+                        value: record.content,
+                        tags: record.tags,
+                    })
+                    .collect(),
+                Err(error) => {
+                    storage_error.get_or_insert(error.to_string());
+                    Vec::new()
+                }
+            }
         } else {
             load_named_values(&config_dir.join("snippets.txt"))
         };
+        if let Some(error) = &storage_error {
+            log::error!("{error}");
+        }
 
         let apps = crate::trace::timed("apps load", || load_apps(&home));
 
@@ -332,6 +356,7 @@ impl Zeshicast {
             frequencies: storage_data.frequencies,
             extensions,
             files: Arc::new(Vec::new()),
+            storage_error,
             config_dir,
         };
         if index_files {
@@ -346,6 +371,12 @@ impl Zeshicast {
             app.files = Arc::new(index.snapshot());
         }
         app
+    }
+
+    /// Why clipboard history or snippets could not be read, if they could
+    /// not (Q6.3).
+    pub fn storage_error(&self) -> Option<&str> {
+        self.storage_error.as_deref()
     }
 
     pub fn reload(&mut self) {
@@ -519,6 +550,7 @@ mod tests {
             frequencies: HashMap::new(),
             extensions: Vec::new(),
             files: Arc::new(Vec::new()),
+            storage_error: None,
             config_dir,
         }
     }

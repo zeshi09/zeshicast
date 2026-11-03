@@ -268,6 +268,32 @@ Extension items are executed over the extension's JSON-RPC `execute` method
 (P1.5c). A failure there is reported to the user instead of being invisible on a
 shell's stderr, and the item's `output`/`notify` are shown as a notification.
 
+## Encryption At Rest
+
+Clipboard history and snippets are sealed per value (ChaCha20-Poly1305,
+random nonce); de-duplication and delete-by-text use an HMAC-SHA256
+fingerprint under a second derived key. `docs/privacy.md` describes where
+the key lives.
+
+- Nothing sealed is readable in the database or its WAL without the key.
+  <!-- test: the_database_file_does_not_reveal_clipboard_or_snippets -->
+  <!-- test: sealed_text_round_trips_and_hides_the_plaintext -->
+- Rows from before encryption are read, then sealed, and their plaintext is
+  zeroed in the file.
+  <!-- test: plaintext_rows_from_before_encryption_are_read_and_sealed -->
+- Fail closed: without the key, or with another one, nothing is returned and
+  no new key is made over the old data.
+  <!-- test: without_its_key_the_database_gives_nothing_back -->
+  <!-- test: a_missing_or_wrong_key_fails_closed -->
+  <!-- test: another_key_or_a_flipped_bit_does_not_decrypt -->
+- The key file is created 0600 and tightened back if loosened.
+  <!-- test: a_new_key_file_is_0600_and_found_again -->
+  <!-- test: a_loosened_key_file_is_tightened -->
+- The key is exported only together with the history.
+  <!-- test: safe_export_excludes_clipboard_db -->
+- Snippets are no longer mirrored to a plaintext `snippets.txt`.
+  <!-- test: snippets_are_not_mirrored_to_a_plaintext_file -->
+
 ## Known Gaps (as of 2026-08)
 
 No known gaps as of 2026-08-23. The previously documented deviation (CLI REPL

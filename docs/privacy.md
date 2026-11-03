@@ -10,12 +10,13 @@ Zeshicast stores data under the current user's home directory.
 | --- | --- |
 | `~/.config/zeshicast/preferences.toml` | UI, integration, privacy, AI, translation, and extension preferences. May contain API keys. |
 | `~/.config/zeshicast/zeshicast.db` | SQLite database for clipboard history, action usage history, the extension permission log and the file index (paths of files and folders under `$HOME`, see below). Uses schema migrations via `PRAGMA user_version` and WAL journal mode; the `zeshicast.db-wal` and `zeshicast.db-shm` sidecar files hold transient WAL state for the same data. |
+| `~/.config/zeshicast/db.key` | The database key (32 bytes, 0600), when it is not kept in the keyring; see "Encryption at rest". |
 | `~/.cache/zeshicast/clipboard/` | Cached PNG files for image clipboard entries. |
 | `~/.config/zeshicast/commands/*.toml` | Custom command definitions and per-command defaults. |
 | `~/.config/zeshicast/extensions/*/extension.toml` | Local extension metadata, version, capabilities, and command/script file lists. |
 | `~/.config/zeshicast/extensions/*/` | Local extension command TOMLs and scripts referenced by extension manifests. |
 | `~/.config/zeshicast/quicklinks.txt` | User quicklinks. |
-| `~/.config/zeshicast/snippets.txt` | User snippets. |
+| `~/.config/zeshicast/snippets.txt` | Snippets written before SQLite; imported once, then ignored and no longer written. |
 | `~/.config/zeshicast/aliases.txt` | User aliases. |
 | `~/.config/zeshicast/pins.txt` | User pins. |
 | `~/.config/zeshicast/calc_history.json` | Recent calculator results. |
@@ -25,6 +26,33 @@ Zeshicast stores data under the current user's home directory.
 Legacy text files such as `clipboard.txt`, `recent.txt`, and
 `frequencies.txt` may be read during migration to SQLite, but active clipboard
 and usage history are stored in SQLite.
+
+## Encryption At Rest
+
+Clipboard history and snippets (title, prefix, content, tags) are encrypted
+in `zeshicast.db` with ChaCha20-Poly1305, so a copy of the database (a
+backup, a synced dotfiles folder) shows none of them without the key.
+
+The key is kept in the Secret Service keyring (gnome-keyring, KeePassXC,
+KWallet) as "zeshicast database key"; without a keyring that answers, in
+`~/.config/zeshicast/db.key` (0600). Rows written before encryption are
+encrypted the first time the key is available, and their plaintext is
+zeroed in the file (`secure_delete`) and in the WAL.
+
+If the key is lost or does not match, zeshicast shows no clipboard history
+and no snippets, keeps the encrypted data, and does not make a new key over
+it: a notification says so. Restore the key, or start over with
+`zeshicast --reset-encrypted-data`, which deletes clipboard history,
+snippets and the key.
+
+`--export --include-history` puts the key into the archive next to the
+database, so the history restores on another machine; such an archive is as
+sensitive as the history itself. A safe export carries neither.
+
+Not encrypted: the image files under `~/.cache/zeshicast/clipboard/`, usage
+history, the file index, the extension permission log, and legacy files
+from before SQLite (`clipboard.txt`, `recent.txt`, `frequencies.txt`),
+which zeshicast reads once and never deletes; remove them by hand.
 
 ## Clipboard History
 

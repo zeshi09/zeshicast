@@ -6,6 +6,10 @@ impl Zeshicast {
     pub fn list_snippets(&self) -> Vec<SnippetSummary> {
         if storage::snippet_has_data(&self.config_dir) {
             storage::snippets_load(&self.config_dir)
+                .unwrap_or_else(|error| {
+                    log::error!("{error}");
+                    Vec::new()
+                })
                 .into_iter()
                 .map(|r| SnippetSummary {
                     id: r.id,
@@ -37,14 +41,14 @@ impl Zeshicast {
             .map_err(|error| io::Error::other(error.to_string()))?;
         self.snippets
             .retain(|snippet| snippet.name != name || snippet.value != value);
-        self.write_snippets()
+        Ok(())
     }
 
     pub fn delete_snippet_by_id(&mut self, id: i64) -> io::Result<()> {
         storage::snippet_delete(&self.config_dir, id)
             .map_err(|error| io::Error::other(error.to_string()))?;
         self.reload_snippets();
-        self.write_snippets()
+        Ok(())
     }
 
     pub fn add_snippet(&mut self, name: &str, value: &str) -> io::Result<()> {
@@ -63,7 +67,7 @@ impl Zeshicast {
             value: value.to_string(),
             tags: vec!["ai".to_string()],
         });
-        self.write_snippets()
+        Ok(())
     }
 
     pub fn save_snippet(
@@ -92,46 +96,26 @@ impl Zeshicast {
         }
 
         self.reload_snippets();
-        self.write_snippets()
+        Ok(())
     }
 
     fn reload_snippets(&mut self) {
         if storage::snippet_has_data(&self.config_dir) {
-            self.snippets = storage::snippets_load(&self.config_dir)
-                .into_iter()
-                .map(|r| NamedValue {
-                    name: r.title,
-                    value: r.content,
-                    tags: r.tags,
-                })
-                .collect();
+            match storage::snippets_load(&self.config_dir) {
+                Ok(records) => {
+                    self.snippets = records
+                        .into_iter()
+                        .map(|r| NamedValue {
+                            name: r.title,
+                            value: r.content,
+                            tags: r.tags,
+                        })
+                        .collect();
+                }
+                Err(error) => log::error!("{error}"),
+            }
         }
     }
-
-    fn write_snippets(&self) -> io::Result<()> {
-        let lines = self
-            .snippets
-            .iter()
-            .map(|snippet| {
-                // The file format is line- and delimiter-based: strip newlines
-                // so a pasted value cannot break it (M-13).
-                let name = sanitize_snippet_field(&snippet.name);
-                let value = sanitize_snippet_field(&snippet.value);
-                if snippet.tags.is_empty() {
-                    format!("{name} = {value}")
-                } else {
-                    let tags = sanitize_snippet_field(&snippet.tags.join(", "));
-                    format!("{name} | {tags} = {value}")
-                }
-            })
-            .collect::<Vec<_>>();
-        write_lines(&self.config_dir.join("snippets.txt"), &lines)
-    }
-}
-
-/// Keep a snippet field on one line: `snippets.txt` is parsed line by line.
-fn sanitize_snippet_field(field: &str) -> String {
-    field.replace(['\n', '\r'], " ")
 }
 
 #[cfg(test)]
@@ -139,8 +123,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn snippet_fields_never_break_the_line_format() {
-        assert_eq!(sanitize_snippet_field("one\ntwo\rthree"), "one two three");
-        assert_eq!(sanitize_snippet_field("plain"), "plain");
+    fn snippets_are_not_mirrored_to_a_plaintext_file() {
+        // Q6.3: the database is the only copy, and it is encrypted.
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = super::super::tests::test_app(dir.path().to_path_buf(), HashMap::new());
+        app.save_snippet(None, "Bank", ":pin", "SECRET 4821", &[])
+            .unwrap();
+        app.add_snippet("Other", "value").unwrap();
+        assert!(!dir.path().join("snippets.txt").exists());
+        assert_eq!(app.list_snippets().len(), 2);
     }
 }

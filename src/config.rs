@@ -55,6 +55,9 @@ pub fn export_config_with_options(
 
     let result = (|| {
         copy_config_sanitized(config_dir, &staged_config, Path::new(""), include_history)?;
+        if include_history {
+            stage_database_key(config_dir, &staged_config)?;
+        }
         sanitize_export_preferences(&staged_config.join("preferences.toml"))?;
         export_config_dir(&staged_config, dest)
     })();
@@ -114,13 +117,36 @@ fn append_tree<W: io::Write>(
     Ok(())
 }
 
-/// Clipboard/usage history files, excluded from a "safe" export.
-const HISTORY_FILES: [&str; 4] = [
+/// Clipboard/usage history files, excluded from a "safe" export. The
+/// database key goes with the database: without it the encrypted history
+/// is unreadable (Q6.3), with it the archive is as sensitive as the history.
+const HISTORY_FILES: [&str; 5] = [
     "zeshicast.db",
     "zeshicast.db-wal",
     "zeshicast.db-shm",
     "calc_history.json",
+    crate::services::db_key::KEY_FILE,
 ];
+
+/// A key kept in the keyring is written into the archive as the key file,
+/// so the history restores on a machine without that keyring.
+fn stage_database_key(config_dir: &Path, staged_config: &Path) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let staged = staged_config.join(crate::services::db_key::KEY_FILE);
+    if staged.exists() {
+        return Ok(());
+    }
+    let Some(key) = crate::services::db_key::export_key(config_dir) else {
+        return Ok(());
+    };
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(staged)?;
+    file.write_all(&key)
+}
 
 fn copy_config_sanitized(
     src: &Path,
@@ -1251,6 +1277,7 @@ mod tests {
         fs::write(config.join("zeshicast.db"), b"clipboard history").unwrap();
         fs::write(config.join("zeshicast.db-wal"), b"wal").unwrap();
         fs::write(config.join("calc_history.json"), b"[]").unwrap();
+        fs::write(config.join("db.key"), [3u8; 32]).unwrap();
         fs::write(
             config.join("preferences.toml"),
             "ai_model = \"llama\"\nai_api_key = \"sk-secret\"\n",
@@ -1270,7 +1297,13 @@ mod tests {
             names.iter().any(|name| name.ends_with("preferences.toml")),
             "{names:?}"
         );
-        for excluded in ["zeshicast.db", "zeshicast.db-wal", "calc_history.json"] {
+        // The database key travels with the database only (Q6.3).
+        for excluded in [
+            "zeshicast.db",
+            "zeshicast.db-wal",
+            "calc_history.json",
+            "db.key",
+        ] {
             assert!(
                 !names.iter().any(|name| name.ends_with(excluded)),
                 "{excluded} must not be exported: {names:?}"
@@ -1293,6 +1326,10 @@ mod tests {
         assert!(
             names.iter().any(|name| name.ends_with("zeshicast.db")),
             "{names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name.ends_with("db.key")),
+            "the key goes with the encrypted history: {names:?}"
         );
         let prefs = archive_members(&dest_all)
             .into_iter()

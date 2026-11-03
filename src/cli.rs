@@ -30,6 +30,11 @@ pub enum CliCommand {
         root: Option<PathBuf>,
         yes: bool,
     },
+    /// `--reset-encrypted-data [--yes]` (Q6.3): delete clipboard history,
+    /// snippets and their key, when the key is lost.
+    ResetEncryptedData {
+        yes: bool,
+    },
     Query(String),
     Repl,
 }
@@ -96,6 +101,9 @@ where
                 None => CliCommand::Help,
             }
         }
+        Some("--reset-encrypted-data") => CliCommand::ResetEncryptedData {
+            yes: args.iter().any(|arg| arg == "--yes"),
+        },
         Some("--extension-install") => {
             let value_of = |flag: &str| {
                 args.iter()
@@ -217,6 +225,10 @@ mod tests {
         assert_eq!(
             parse_cli_args(vec!["--extension-install"]),
             CliCommand::Help
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--reset-encrypted-data", "--yes"]),
+            CliCommand::ResetEncryptedData { yes: true }
         );
         // Only as the first argument, like --export.
         assert_eq!(
