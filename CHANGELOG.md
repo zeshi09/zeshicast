@@ -11,6 +11,12 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Changed
 
+- The file index is stored in `zeshicast.db` and kept live with inotify:
+  search over files works as soon as the daemon starts (no `$HOME` walk),
+  files saved while it runs are found within a second, and files saved
+  while it was stopped are found on the next start. `files_exclude` (Privacy
+  settings) keeps names and paths out. The database moves to schema 4; an
+  older zeshicast refuses to open it.
 - **Breaking for JSON-RPC extensions:** an `extension.toml` with `binaries`
   must declare `protocol = 1`. Without it (or with another version) the
   binaries are not run, and searching for the extension's name shows why.

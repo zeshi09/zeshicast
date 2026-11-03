@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, Result, params};
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 fn open(config_dir: &Path) -> Result<Connection> {
     if let Err(error) = std::fs::create_dir_all(config_dir) {
@@ -81,6 +81,10 @@ fn migrate(conn: &mut Connection) -> Result<()> {
                 migrate_2_to_3(&transaction)?;
                 version = 3;
             }
+            3 => {
+                migrate_3_to_4(&transaction)?;
+                version = 4;
+            }
             _ => {
                 return Err(rusqlite::Error::InvalidParameterName(format!(
                     "no migration path from schema version {version}"
@@ -140,6 +144,20 @@ fn migrate_2_to_3(conn: &Connection) -> Result<()> {
             at         INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_extension_audit_extension ON extension_audit(extension, id);",
+    )
+}
+
+/// Q6.1: the file index survives restarts. `path` is the raw OS bytes, so a
+/// non-UTF-8 name reopens exactly; `mtime` (nanoseconds) is kept for folders
+/// and tells which ones changed while the daemon was not running.
+fn migrate_3_to_4(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS files (
+            path       BLOB    NOT NULL PRIMARY KEY,
+            name_lower TEXT    NOT NULL,
+            is_dir     INTEGER NOT NULL,
+            mtime      INTEGER NOT NULL DEFAULT 0
+        );",
     )
 }
 
@@ -329,6 +347,79 @@ pub fn audit_recent(config_dir: &Path, extension: Option<&str>, limit: usize) ->
     })
     .map(|rows| rows.flatten().collect())
     .unwrap_or_default()
+}
+
+// ── File index (Q6.1) ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRow {
+    pub path: std::path::PathBuf,
+    pub is_dir: bool,
+    pub mtime: i64,
+}
+
+fn path_bytes(path: &Path) -> &[u8] {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes()
+}
+
+pub fn files_load(config_dir: &Path) -> Vec<FileRow> {
+    use std::os::unix::ffi::OsStringExt;
+    let Ok(conn) = open(config_dir) else {
+        return Vec::new();
+    };
+    let mut stmt = match conn.prepare("SELECT path, is_dir, mtime FROM files") {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stmt.query_map([], |row| {
+        Ok(FileRow {
+            path: std::ffi::OsString::from_vec(row.get::<_, Vec<u8>>(0)?).into(),
+            is_dir: row.get(1)?,
+            mtime: row.get(2)?,
+        })
+    })
+    .map(|rows| rows.flatten().collect())
+    .unwrap_or_default()
+}
+
+/// Upsert `rows` and delete `removed` in one transaction; `replace` empties
+/// the table first (a full rebuild).
+pub fn files_apply(
+    config_dir: &Path,
+    rows: &[FileRow],
+    removed: &[std::path::PathBuf],
+    replace: bool,
+) -> Result<()> {
+    let mut conn = open(config_dir)?;
+    let transaction = conn.transaction()?;
+    if replace {
+        transaction.execute("DELETE FROM files", [])?;
+    }
+    {
+        let mut delete = transaction.prepare("DELETE FROM files WHERE path = ?1")?;
+        for path in removed {
+            delete.execute(params![path_bytes(path)])?;
+        }
+        let mut upsert = transaction.prepare(
+            "INSERT INTO files (path, name_lower, is_dir, mtime) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(path) DO UPDATE SET is_dir = ?3, mtime = ?4",
+        )?;
+        for row in rows {
+            let name_lower = row
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            upsert.execute(params![
+                path_bytes(&row.path),
+                name_lower,
+                row.is_dir,
+                row.mtime
+            ])?;
+        }
+    }
+    transaction.commit()
 }
 
 // ── Snippets ─────────────────────────────────────────────────────────────────
@@ -576,6 +667,36 @@ mod tests {
             })
             .unwrap();
         assert_eq!(migrated_text, "old");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn file_rows_round_trip_including_non_utf8_names() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = test_dir("files-rows");
+        let odd = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b"/home/u/caf\xe9.txt"));
+        let rows = vec![
+            FileRow {
+                path: "/home/u/Downloads".into(),
+                is_dir: true,
+                mtime: 42,
+            },
+            FileRow {
+                path: odd.clone(),
+                is_dir: false,
+                mtime: 0,
+            },
+        ];
+        files_apply(&dir, &rows, &[], true).unwrap();
+        let mut loaded = files_load(&dir);
+        loaded.sort_by(|a, b| a.path.cmp(&b.path));
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded.iter().any(|row| row.path == odd));
+
+        files_apply(&dir, &[], &[odd], false).unwrap();
+        assert_eq!(files_load(&dir).len(), 1);
+        files_apply(&dir, &[], &[], true).unwrap();
+        assert!(files_load(&dir).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -18,13 +18,15 @@ use crate::placeholders::{PlaceholderContext, expand_placeholders, expand_placeh
 use crate::search::apps::{AppEntry, load_apps};
 use crate::search::clipboard::load_clipboard_history;
 use crate::search::commands::{CommandEntry, load_command_entries, load_extension_command_entries};
-use crate::search::files::{FileEntry, load_file_index};
+use crate::search::file_index;
+use crate::search::files::{Excludes, FileEntry, default_roots};
 use crate::search::named_values::{NamedValue, load_named_values};
 use crate::search::scripts::{ScriptEntry, load_extension_script_entries, load_script_entries};
 use crate::search::snapshot::SearchData;
 pub use crate::services::clipboard_store::*;
 use crate::services::storage;
 use crate::services::text_input::{is_wtype_available, paste_via_wtype, type_text_via_wtype};
+use std::sync::Arc;
 
 mod clipboard;
 mod extensions;
@@ -67,7 +69,9 @@ pub struct Zeshicast {
     pub(crate) recent: Vec<String>,
     pub(crate) frequencies: HashMap<String, u32>,
     pub(crate) extensions: Vec<ExtensionManifest>,
-    pub(crate) files: Vec<FileEntry>,
+    /// Shared with every search snapshot; replaced whole when the index
+    /// changes, so a snapshot never copies 10k entries (Q6.1).
+    pub(crate) files: Arc<Vec<FileEntry>>,
     pub(crate) config_dir: PathBuf,
 }
 
@@ -242,16 +246,37 @@ impl Zeshicast {
         Self::load_inner(false)
     }
 
-    /// Build the filesystem index. Safe to call off the main thread.
+    /// Load the stored file index (or build it), publish it, then keep it
+    /// live with inotify until `publish` returns `false` (Q6.1). Blocks: run
+    /// it on a worker thread.
     #[cfg(feature = "gui")]
-    pub(crate) fn build_file_index() -> Vec<FileEntry> {
-        crate::trace::timed("file index", || load_file_index(&home_dir()))
+    pub(crate) fn run_file_index(&self) -> impl FnOnce(file_index::Publish) + Send + 'static {
+        let config_dir = self.config_dir.clone();
+        let excludes = self.file_excludes();
+        move |publish| {
+            let index = crate::trace::timed("file index", || {
+                file_index::load_or_build(&config_dir, default_roots(&home_dir()), excludes)
+            });
+            if publish(Arc::new(index.snapshot())) {
+                file_index::watch_forever(&config_dir, index, publish);
+            }
+        }
     }
 
-    /// Install a filesystem index built elsewhere (see `build_file_index`).
+    /// Install a filesystem index built elsewhere (see `run_file_index`).
     #[cfg(feature = "gui")]
-    pub(crate) fn set_file_index(&mut self, files: Vec<FileEntry>) {
+    pub(crate) fn set_file_index(&mut self, files: Arc<Vec<FileEntry>>) {
         self.files = files;
+    }
+
+    fn file_excludes(&self) -> Excludes {
+        Excludes::parse(
+            self.preferences
+                .get("files_exclude")
+                .map(String::as_str)
+                .unwrap_or_default(),
+            &home_dir(),
+        )
     }
 
     fn load_inner(index_files: bool) -> Self {
@@ -287,7 +312,7 @@ impl Zeshicast {
 
         let apps = crate::trace::timed("apps load", || load_apps(&home));
 
-        Self {
+        let mut app = Self {
             apps,
             quicklinks: load_named_values(&config_dir.join("quicklinks.txt")),
             snippets,
@@ -306,13 +331,21 @@ impl Zeshicast {
             recent: storage_data.recent,
             frequencies: storage_data.frequencies,
             extensions,
-            files: if index_files {
-                crate::trace::timed("file index", || load_file_index(&home))
-            } else {
-                Vec::new()
-            },
+            files: Arc::new(Vec::new()),
             config_dir,
+        };
+        if index_files {
+            // The CLI: read the stored index (or build it once), no watcher.
+            let index = crate::trace::timed("file index", || {
+                file_index::load_or_build(
+                    &app.config_dir,
+                    default_roots(&home),
+                    app.file_excludes(),
+                )
+            });
+            app.files = Arc::new(index.snapshot());
         }
+        app
     }
 
     pub fn reload(&mut self) {
@@ -485,7 +518,7 @@ mod tests {
             recent: Vec::new(),
             frequencies: HashMap::new(),
             extensions: Vec::new(),
-            files: Vec::new(),
+            files: Arc::new(Vec::new()),
             config_dir,
         }
     }

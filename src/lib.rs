@@ -324,7 +324,7 @@ mod tests {
             recent: Vec::new(),
             frequencies: HashMap::new(),
             extensions: Vec::new(),
-            files: Vec::new(),
+            files: Default::default(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
         let action = crate::action::Action::new(
@@ -362,7 +362,7 @@ mod tests {
             recent: Vec::new(),
             frequencies: HashMap::new(),
             extensions: Vec::new(),
-            files: Vec::new(),
+            files: Default::default(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
         let action = crate::action::Action::new(
@@ -1178,7 +1178,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             recent: Vec::new(),
             frequencies: HashMap::new(),
             extensions: Vec::new(),
-            files: Vec::new(),
+            files: Default::default(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
 
@@ -1243,7 +1243,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
             recent: Vec::new(),
             frequencies: HashMap::new(),
             extensions: Vec::new(),
-            files: Vec::new(),
+            files: Default::default(),
             config_dir: PathBuf::from("/tmp/zeshicast-test"),
         };
 

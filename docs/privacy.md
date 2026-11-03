@@ -9,7 +9,7 @@ Zeshicast stores data under the current user's home directory.
 | Path | Contents |
 | --- | --- |
 | `~/.config/zeshicast/preferences.toml` | UI, integration, privacy, AI, translation, and extension preferences. May contain API keys. |
-| `~/.config/zeshicast/zeshicast.db` | SQLite database for clipboard history and action usage history. Uses schema migrations via `PRAGMA user_version` and WAL journal mode; the `zeshicast.db-wal` and `zeshicast.db-shm` sidecar files hold transient WAL state for the same data. |
+| `~/.config/zeshicast/zeshicast.db` | SQLite database for clipboard history, action usage history, the extension permission log and the file index (paths of files and folders under `$HOME`, see below). Uses schema migrations via `PRAGMA user_version` and WAL journal mode; the `zeshicast.db-wal` and `zeshicast.db-shm` sidecar files hold transient WAL state for the same data. |
 | `~/.cache/zeshicast/clipboard/` | Cached PNG files for image clipboard entries. |
 | `~/.config/zeshicast/commands/*.toml` | Custom command definitions and per-command defaults. |
 | `~/.config/zeshicast/extensions/*/extension.toml` | Local extension metadata, version, capabilities, and command/script file lists. |
@@ -51,6 +51,20 @@ When clipboard rows are pruned, unreferenced cached image PNGs are pruned too.
 Clearing clipboard history deletes SQLite clipboard rows and cached PNG files.
 Deleting an individual image entry removes the cached PNG when no remaining row
 references it.
+
+## File Index
+
+File search reads an index of up to ~12,000 files and folders under `$HOME`
+(`Desktop`, `Downloads`, `Documents`, `Projects`, `Code` first, then the rest,
+five levels deep). Since Q6.1 the index is stored in the `files` table of
+`zeshicast.db`: paths and folder modification times, never file contents.
+It is updated live with inotify while the daemon runs.
+
+Hidden entries (`.name`), `target`, `node_modules` and similar build or cache
+folders are never indexed. `files_exclude` keeps more out: a comma separated
+list of names (`Videos, vm`) and paths (`~/Private`, `/home/me/secret`);
+everything below an excluded folder is left out too, and rows already stored
+for it are dropped on the next start.
 
 ## Notification History
 

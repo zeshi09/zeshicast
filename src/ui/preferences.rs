@@ -33,6 +33,7 @@ pub(crate) const PREFERENCE_DEFAULTS: &[(&str, &str)] = &[
     ("translate_api_key", ""),
     ("translate_target", "en"),
     ("script_dirs", "~/.config/zeshicast/scripts"),
+    ("files_exclude", ""),
 ];
 
 pub(crate) struct PrefSection {
@@ -93,6 +94,7 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
             ("clipboard_retention", "Clipboard retention"),
             ("clipboard_capture_images", "Clipboard images"),
             ("notifications_history_enabled", "Notification history"),
+            ("files_exclude", "Exclude from file search"),
             ("export_include_secrets", "Export secrets"),
         ],
     },

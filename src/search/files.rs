@@ -6,8 +6,8 @@ use crate::action::{Action, ActionKind};
 use crate::search::MAX_RESULTS;
 use crate::search::fuzzy_score_lower;
 
-const MAX_FILE_DEPTH: usize = 5;
-const MAX_INDEXED_FILES: usize = 10_000;
+pub(crate) const MAX_FILE_DEPTH: usize = 5;
+pub(crate) const MAX_INDEXED_FILES: usize = 10_000;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FileEntry {
@@ -115,10 +115,6 @@ pub(crate) fn default_roots(home: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-pub(crate) fn load_file_index(home: &Path) -> Vec<FileEntry> {
-    load_file_index_from(&default_roots(home), MAX_INDEXED_FILES)
-}
-
 /// Index `roots` into at most `limit` entries.
 ///
 /// The last root is the catch-all (`$HOME`); the others are priority roots
@@ -126,7 +122,17 @@ pub(crate) fn load_file_index(home: &Path) -> Vec<FileEntry> {
 /// breadth-first so shallow entries win over deep ones. Whatever budget is
 /// left then goes to the priority roots' overflow first, and to the catch-all
 /// last.
+#[cfg(test)]
 pub(crate) fn load_file_index_from(roots: &[PathBuf], limit: usize) -> Vec<FileEntry> {
+    load_file_index_excluding(roots, limit, &Excludes::default())
+}
+
+/// [`load_file_index_from`] that also skips what `files_exclude` names.
+pub(crate) fn load_file_index_excluding(
+    roots: &[PathBuf],
+    limit: usize,
+    excludes: &Excludes,
+) -> Vec<FileEntry> {
     let Some((catch_all, priority)) = roots.split_last() else {
         return Vec::new();
     };
@@ -134,6 +140,7 @@ pub(crate) fn load_file_index_from(roots: &[PathBuf], limit: usize) -> Vec<FileE
         files: Vec::new(),
         seen: HashSet::new(),
         roots: roots.iter().cloned().collect(),
+        excludes,
     };
     let share = limit / roots.len();
     let start = |root: &PathBuf| VecDeque::from([(root.clone(), 0)]);
@@ -153,7 +160,8 @@ pub(crate) fn load_file_index_from(roots: &[PathBuf], limit: usize) -> Vec<FileE
     walk.files
 }
 
-struct IndexWalk {
+struct IndexWalk<'a> {
+    excludes: &'a Excludes,
     files: Vec<FileEntry>,
     /// Every path already considered, so a resumed walk and nested roots never
     /// index an entry twice.
@@ -163,7 +171,7 @@ struct IndexWalk {
     roots: HashSet<PathBuf>,
 }
 
-impl IndexWalk {
+impl IndexWalk<'_> {
     /// Walk `queue` breadth-first until the index holds `cap` entries. Returns
     /// the unfinished part of the queue so the walk can resume later.
     fn run(
@@ -193,7 +201,7 @@ impl IndexWalk {
 
                 let file_name = entry.file_name();
                 let name = file_name.to_string_lossy();
-                if should_skip_file(&name) {
+                if should_skip_file(&name) || self.excludes.matches(&path, &name) {
                     continue;
                 }
 
@@ -216,7 +224,43 @@ impl IndexWalk {
     }
 }
 
-fn should_skip_file(name: &str) -> bool {
+/// What the `files_exclude` preference keeps out of the index: a comma
+/// separated list of folder or file names (`node_modules, Videos`) and of
+/// paths (`~/Music`, `/home/me/vm`), which exclude everything below them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Excludes {
+    names: Vec<String>,
+    paths: Vec<PathBuf>,
+}
+
+impl Excludes {
+    pub(crate) fn parse(value: &str, home: &Path) -> Self {
+        let mut excludes = Self::default();
+        for item in value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+        {
+            if let Some(rest) = item.strip_prefix("~/") {
+                excludes.paths.push(home.join(rest));
+            } else if item.starts_with('/') {
+                excludes
+                    .paths
+                    .push(PathBuf::from(item.trim_end_matches('/')));
+            } else {
+                excludes.names.push(item.to_string());
+            }
+        }
+        excludes
+    }
+
+    pub(crate) fn matches(&self, path: &Path, name: &str) -> bool {
+        self.names.iter().any(|excluded| excluded == name)
+            || self.paths.iter().any(|excluded| path.starts_with(excluded))
+    }
+}
+
+pub(crate) fn should_skip_file(name: &str) -> bool {
     if name.starts_with('.') {
         return true;
     }

@@ -54,7 +54,7 @@ pub(crate) struct SearchData {
     pub recent: Vec<String>,
     pub frequencies: HashMap<String, u32>,
     pub extensions: Vec<ExtensionManifest>,
-    pub files: Vec<FileEntry>,
+    pub files: std::sync::Arc<Vec<FileEntry>>,
     pub calc_history: Vec<CalcHistoryEntry>,
 }
 
@@ -478,11 +478,11 @@ mod tests {
             recent: Vec::new(),
             frequencies: HashMap::new(),
             extensions: Vec::new(),
-            files: vec![FileEntry::new(
+            files: std::sync::Arc::new(vec![FileEntry::new(
                 "invoice.pdf",
                 PathBuf::from("/home/user/Downloads/invoice.pdf"),
                 false,
-            )],
+            )]),
             calc_history: Vec::new(),
         }
     }
@@ -550,7 +550,7 @@ mod layout_tests {
             recent: Vec::new(),
             frequencies: HashMap::new(),
             extensions: Vec::new(),
-            files: Vec::new(),
+            files: Default::default(),
             calc_history: Vec::new(),
         }
     }

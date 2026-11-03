@@ -13,22 +13,34 @@ pub(crate) fn build_ui(
     // swaps it in; until then file search simply returns no matches.
     let launcher = Rc::new(RefCell::new(Zeshicast::load_deferred_files()));
     {
+        // Q6.1: the worker loads the stored index (or walks `$HOME` once),
+        // then keeps it live with inotify and sends every new version here.
         let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = sender.send(Zeshicast::build_file_index());
-        });
+        let run = launcher.borrow().run_file_index();
+        std::thread::Builder::new()
+            .name("file-index".to_string())
+            .spawn(move || run(Box::new(move |files| sender.send(files).is_ok())))
+            .expect("spawn the file index thread");
         let launcher = Rc::clone(&launcher);
-        glib::timeout_add_local(
-            std::time::Duration::from_millis(100),
-            move || match receiver.try_recv() {
-                Ok(files) => {
-                    launcher.borrow_mut().set_file_index(files);
-                    glib::ControlFlow::Break
+        glib::timeout_add_local(std::time::Duration::from_millis(250), move || {
+            let mut latest = None;
+            loop {
+                match receiver.try_recv() {
+                    Ok(files) => latest = Some(files),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        if let Some(files) = latest {
+                            launcher.borrow_mut().set_file_index(files);
+                        }
+                        return glib::ControlFlow::Break;
+                    }
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-            },
-        );
+            }
+            if let Some(files) = latest {
+                launcher.borrow_mut().set_file_index(files);
+            }
+            glib::ControlFlow::Continue
+        });
     }
     let results = Rc::new(RefCell::new(Vec::<Action>::new()));
     let current_action = Rc::new(RefCell::new(None::<Action>));

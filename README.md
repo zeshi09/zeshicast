@@ -213,7 +213,7 @@ in the action panel.
 
 ```text
 firefox                   Search installed .desktop apps (reads XDG_DATA_DIRS)
-file invoice              Search files under $HOME, open via xdg-open
+file invoice              Search files under $HOME (a live index, kept between restarts), open via xdg-open
 calc (12 + 8) / 5         Evaluate an expression
 shell systemctl status    Run a shell command
 system lock               Lock screen

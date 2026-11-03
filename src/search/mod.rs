@@ -5,6 +5,7 @@ pub(crate) mod clipboard;
 pub(crate) mod commands;
 pub(crate) mod emoji;
 pub(crate) mod extensions;
+pub(crate) mod file_index;
 pub(crate) mod files;
 pub(crate) mod layout;
 pub(crate) mod media;

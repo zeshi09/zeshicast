@@ -594,7 +594,7 @@ mod tests {
             recent: Vec::new(),
             frequencies: std::collections::HashMap::new(),
             extensions: Vec::new(),
-            files: Vec::new(),
+            files: Default::default(),
             config_dir: std::env::temp_dir().join("zeshicast-launcher-delete-gate-test"),
         };
         let hotkey_action = super::clipboard_item_action("secret");
