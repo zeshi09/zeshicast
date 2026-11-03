@@ -46,6 +46,16 @@ const LAUNCHER: Surface = Surface {
     margin: 0,
 };
 
+/// Confirmations, forms and detail panels opened from the palette: centered
+/// on the overlay layer like the palette itself (a plain toplevel would sit
+/// under it), and they take the keyboard while open.
+const PANEL: Surface = Surface {
+    namespace: Some(c"zeshicast-panel"),
+    keyboard: KeyboardMode::Exclusive,
+    anchors: &[],
+    margin: 0,
+};
+
 /// Volume/brightness/layout pills: centered, never take the keyboard.
 const OSD: Surface = Surface {
     namespace: Some(c"zeshicast-osd"),
@@ -74,6 +84,10 @@ const NOTIFICATION: Surface = Surface {
 /// Configure the launcher window. Passed to `ensure_ui` by the GTK binary.
 pub fn configure_launcher(window: &ApplicationWindow) {
     apply(window, &LAUNCHER);
+}
+
+pub(crate) fn configure_panel(window: &impl IsA<gtk::Window>) {
+    apply(window, &PANEL);
 }
 
 pub(crate) fn configure_osd(window: &gtk::Window) {
@@ -145,6 +159,11 @@ mod tests {
         // An OSD or a toast that grabbed the keyboard would steal typing from
         // the focused application every time the volume changes.
         assert_eq!(LAUNCHER.keyboard, KeyboardMode::Exclusive);
+        assert_eq!(
+            PANEL.keyboard,
+            KeyboardMode::Exclusive,
+            "a panel is typed into"
+        );
         assert_eq!(OSD.keyboard, KeyboardMode::None);
         assert_eq!(NOTIFICATION.keyboard, KeyboardMode::None);
     }

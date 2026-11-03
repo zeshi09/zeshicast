@@ -24,6 +24,7 @@ pub fn action_panel(
         .decorated(false)
         .build();
     panel.add_css_class("action-panel");
+    super::layer_shell::configure_panel(&panel);
     Some(panel)
 }
 

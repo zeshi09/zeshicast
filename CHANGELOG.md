@@ -30,6 +30,11 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Fixed
 
+- Confirmations ("Run this command?"), forms, the alias and snippet editors
+  and extension details opened behind the palette on layer-shell
+  compositors (niri), so a command such as "GitHub: Refresh" seemed to do
+  nothing. They now open on the overlay layer above it and take the
+  keyboard; closing one gives the keyboard back to the palette.
 - Four CSS properties GTK rejects (`overflow`, `max-width`, `cursor` ×2) are
   gone; the theme loads without parser warnings.
 - Wi-Fi rows no longer touch, process memory bars sit on their row's centre,
