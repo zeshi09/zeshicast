@@ -141,6 +141,11 @@ pub(crate) enum ExecutionRequest {
     OpenUrl(String),
     Copy(String),
     Http(HttpRequest),
+    /// Read the selection, ask the AI endpoint, paste the answer (Q8.1).
+    QuickAi {
+        task: crate::search::quick_ai::QuickAiTask,
+        request: HttpRequest,
+    },
     Media(crate::services::media::MediaControl),
     Notification(crate::services::notifications::NotificationAction),
     /// Terminate `pid` only when its start time still matches (PID reuse).
@@ -172,6 +177,7 @@ impl ExecutionRequest {
             Self::OpenUrl(url) => url.clone(),
             Self::Copy(text) => format!("{} characters", text.chars().count()),
             Self::Http(_) => "HTTP request".to_string(),
+            Self::QuickAi { .. } => "AI on the selection".to_string(),
             Self::ExtensionExec { id, .. } => format!("execute {id}"),
             Self::KillProcess { pid, .. } => format!("kill {pid}"),
             Self::Media(_) | Self::Notification(_) => String::new(),
@@ -191,6 +197,11 @@ impl ExecutionRequest {
             Self::OpenUrl(_) => CapabilitySet::new(vec![Capability::OpenUrl]),
             Self::Copy(_) => CapabilitySet::new(vec![Capability::ClipboardWrite]),
             Self::Http(_) => CapabilitySet::new(vec![Capability::Network]),
+            Self::QuickAi { .. } => CapabilitySet::new(vec![
+                Capability::Network,
+                Capability::ClipboardRead,
+                Capability::ClipboardWrite,
+            ]),
             Self::Media(_) | Self::Notification(_) => CapabilitySet::empty(),
         }
     }
@@ -577,6 +588,67 @@ mod tests {
         assert_eq!(log.len(), 1, "only the refused effect is logged here");
         assert_eq!(log[0].capability, "network");
         assert_eq!(log[0].detail, "reply open_url https://example.com");
+    }
+
+    #[test]
+    fn quick_ai_reads_the_selection_only_when_it_runs_and_reports_why_not() {
+        use crate::search::quick_ai::QuickAiTask;
+        let template = HttpRequest::LocalAiGenerate {
+            endpoint: "http://localhost:11434".to_string(),
+            model: "m".to_string(),
+            query: String::new(),
+        };
+        let asked = std::cell::Cell::new(false);
+        let nothing = quick_ai_answer(
+            &QuickAiTask::Fix,
+            &template,
+            || Some("  ".into()),
+            |_| {
+                asked.set(true);
+                Some("x".into())
+            },
+        );
+        assert!(nothing.unwrap_err().contains("Nothing is selected"));
+        assert!(!asked.get(), "no request without a selection");
+
+        let answer = quick_ai_answer(
+            &QuickAiTask::Fix,
+            &template,
+            || Some("teh cat".into()),
+            |request| match request {
+                HttpRequest::LocalAiGenerate { query, .. } if query.ends_with("teh cat") => {
+                    Some("  the cat\n".into())
+                }
+                _ => None,
+            },
+        );
+        assert_eq!(answer.unwrap(), "the cat");
+        assert!(
+            quick_ai_answer(
+                &QuickAiTask::Summarize,
+                &template,
+                || Some("x".into()),
+                |_| None
+            )
+            .unwrap_err()
+            .contains("did not answer")
+        );
+    }
+
+    #[test]
+    fn quick_ai_needs_network_and_the_clipboard() {
+        let request = ExecutionRequest::QuickAi {
+            task: crate::search::quick_ai::QuickAiTask::Fix,
+            request: HttpRequest::LocalAiGenerate {
+                endpoint: String::new(),
+                model: String::new(),
+                query: String::new(),
+            },
+        };
+        let needed = request.required_capabilities();
+        assert!(needed.allows(Capability::Network));
+        assert!(needed.allows(Capability::ClipboardRead));
+        assert!(!CapabilitySet::new(vec![Capability::Network]).covers(&needed));
     }
 
     #[test]
@@ -985,6 +1057,10 @@ impl Action {
             }),
             ActionKind::Command(command) => Some(ExecutionRequest::Command(command.clone())),
             ActionKind::HttpCopy(req) => Some(ExecutionRequest::Http(req.clone())),
+            ActionKind::QuickAi { task, request } => Some(ExecutionRequest::QuickAi {
+                task: task.clone(),
+                request: request.clone(),
+            }),
             ActionKind::Media(control) => Some(ExecutionRequest::Media(*control)),
             ActionKind::Notification(action) => Some(ExecutionRequest::Notification(*action)),
             ActionKind::KillProcess { pid, start_time } => Some(ExecutionRequest::KillProcess {
@@ -1059,6 +1135,8 @@ impl Action {
             ActionKind::Command(command) => command.display(),
             ActionKind::OpenPath(path) => path.display().to_string(),
             ActionKind::Copy(text) => text.clone(),
+            // The selection is not known until it runs.
+            ActionKind::QuickAi { .. } => self.title.clone(),
             ActionKind::HttpCopy(req) => match req {
                 HttpRequest::Translate { text, .. } => text.clone(),
                 HttpRequest::LocalAiGenerate { query, .. } => query.clone(),
@@ -1207,6 +1285,12 @@ fn run_verified_request(request: ExecutionRequest, origin: Option<String>) {
                 }
             });
         }
+        ExecutionRequest::QuickAi { task, request } => {
+            // Seconds of model time: off the caller's thread. By the time it
+            // answers, the palette is gone and the window with the selection
+            // has focus again, so the paste lands there.
+            std::thread::spawn(move || run_quick_ai(&task, &request));
+        }
         ExecutionRequest::ExtensionExec {
             binary,
             id,
@@ -1233,6 +1317,73 @@ fn run_verified_request(request: ExecutionRequest, origin: Option<String>) {
             }
         }
     }
+}
+
+/// Quick AI's steps with the I/O passed in: the selection is read here and
+/// only here; nothing is asked without one.
+pub(crate) fn quick_ai_answer(
+    task: &crate::search::quick_ai::QuickAiTask,
+    template: &HttpRequest,
+    read_selection: impl FnOnce() -> Option<String>,
+    ask: impl FnOnce(&HttpRequest) -> Option<String>,
+) -> Result<String, &'static str> {
+    let selection = read_selection()
+        .filter(|text| !text.trim().is_empty())
+        .ok_or("Nothing is selected: select text in a window, then run it again")?;
+    let request = crate::search::quick_ai::with_prompt(template, task.prompt(&selection));
+    let answer = ask(&request).ok_or("The AI endpoint did not answer: check Settings → AI")?;
+    let answer = answer.trim();
+    if answer.is_empty() {
+        return Err("The AI endpoint answered with nothing");
+    }
+    Ok(answer.to_string())
+}
+
+/// The Wayland PRIMARY selection: what is highlighted, without Ctrl+C.
+#[cfg(feature = "gui")]
+fn read_primary_selection() -> Option<String> {
+    let mut command = Command::new("wl-paste");
+    command.args(["--primary", "--no-newline", "--type", "text"]);
+    let run = crate::process::run_capped(
+        &mut command,
+        std::time::Duration::from_secs(2),
+        256 * 1024,
+        4096,
+    )
+    .ok()?;
+    run.status
+        .success()
+        .then(|| String::from_utf8_lossy(&run.stdout).into_owned())
+}
+
+#[cfg(not(feature = "gui"))]
+fn read_primary_selection() -> Option<String> {
+    None
+}
+
+fn run_quick_ai(task: &crate::search::quick_ai::QuickAiTask, template: &HttpRequest) {
+    match quick_ai_answer(task, template, read_primary_selection, execute_http_request) {
+        Ok(answer) => {
+            copy_to_clipboard(&answer);
+            if crate::services::text_input::is_wtype_available() {
+                crate::services::text_input::paste_via_wtype();
+            } else {
+                report_quick_ai("The result is on the clipboard (install wtype to paste it)");
+            }
+        }
+        Err(message) => report_quick_ai(message),
+    }
+}
+
+fn report_quick_ai(message: &'static str) {
+    log::warn!("quick AI: {message}");
+    #[cfg(feature = "gui")]
+    glib::idle_add_once(move || {
+        crate::services::notifications::push_notification("Zeshicast", "Quick AI", message, 0);
+        if !crate::services::notifications::is_dnd_enabled() {
+            crate::ui::show_notification_osd(None, "Zeshicast", "Quick AI", message, "", 4500);
+        }
+    });
 }
 
 /// How long one extension `execute` call may run before its child is killed.
@@ -1356,6 +1507,11 @@ pub(crate) enum ActionKind {
     Shell(ShellCommand),
     Command(ProcessCommand),
     HttpCopy(HttpRequest),
+    /// Run an AI task on the selected text and paste the result (Q8.1).
+    QuickAi {
+        task: crate::search::quick_ai::QuickAiTask,
+        request: HttpRequest,
+    },
     Launcher(LauncherCommand),
     Form(ActionForm),
     JsonCommand(JsonCommandAction),

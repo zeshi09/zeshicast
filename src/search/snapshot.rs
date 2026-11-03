@@ -32,9 +32,9 @@ use crate::search::{
     AppsProvider, AudioProvider, BluetoothProvider, BrowserTabsProvider, ClipboardProvider,
     CommandsProvider, EmojiProvider, ExtensionsProvider, FilesProvider, HyprlandProvider,
     MAX_RESULTS, MediaProvider, NamedValuesProvider, NetworkProvider, NiriProvider,
-    NotificationsProvider, PowerProfilesProvider, ProcessesProvider, ScriptsProvider,
-    SearchContext, SearchProvider, SwayProvider, SystemProvider, UnitsProvider, WebProvider,
-    WindowsProvider, fuzzy_score,
+    NotificationsProvider, PowerProfilesProvider, ProcessesProvider, QuickAiProvider,
+    ScriptsProvider, SearchContext, SearchProvider, SwayProvider, SystemProvider, UnitsProvider,
+    WebProvider, WindowsProvider, fuzzy_score,
 };
 
 /// Score handicap for results found by reading a Cyrillic query as QWERTY.
@@ -192,6 +192,7 @@ impl SearchData {
 
         if self.preference_enabled("ai_enabled", true) {
             providers.push(Box::new(WebProvider));
+            providers.push(Box::new(QuickAiProvider));
         }
 
         providers.push(Box::new(ScriptsProvider {

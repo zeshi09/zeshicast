@@ -133,6 +133,13 @@ remote providers, that endpoint may receive user prompts and any API key require
 for the request. Local Ollama-style endpoints keep requests on the configured
 host.
 
+Quick AI (`fix`, `translate`, `summarize` in the palette) reads the selected
+text (the Wayland PRIMARY selection) only when you run one of them, never
+while you search, and sends at most 20,000 characters of it to the same
+endpoint. The answer is copied to the clipboard and pasted over the
+selection. With a remote provider configured, the selected text leaves the
+machine.
+
 ## Export Behavior
 
 `zeshicast --export [file]` creates a config archive with secret-like preference

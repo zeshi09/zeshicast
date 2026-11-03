@@ -401,6 +401,8 @@ Queries:
   bt headphones             Bluetooth: adapter power, connect/disconnect paired devices (BlueZ)
   profile performance       Switch the power profile (power-profiles-daemon)
   unit syncthing            systemd user units: restart/start/stop, journal
+  fix / translate / summarize
+                            AI on the selected text, pasted over it (GTK launcher)
   niri screenshot           Niri compositor actions: screenshot, workspaces, windows
   hypr fullscreen           Hyprland compositor actions: screenshot, workspaces, windows
   sway reload               Sway compositor actions: screenshot, workspaces, windows

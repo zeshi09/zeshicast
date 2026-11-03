@@ -230,6 +230,8 @@ net wifi                  Toggle Wi-Fi, open network settings
 bt headphones             Bluetooth: power, connect/disconnect paired devices
 profile performance       Switch the power profile (power-profiles-daemon)
 unit syncthing            systemd user units: restart/start/stop, journal
+fix / translate / summarize
+                          AI on the selected text, pasted over it
 niri screenshot           Interactive screenshot (region)
 niri workspace            Focus next/previous workspace, move window
 hypr fullscreen           Hyprland: fullscreen, float, close, workspaces

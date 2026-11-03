@@ -15,6 +15,7 @@ pub(crate) mod named_values;
 pub(crate) mod notifications;
 pub(crate) mod power;
 pub(crate) mod processes;
+pub(crate) mod quick_ai;
 pub(crate) mod scripts;
 pub(crate) mod snapshot;
 pub(crate) mod system;
@@ -127,6 +128,14 @@ pub(crate) struct UnitsProvider;
 impl SearchProvider for UnitsProvider {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         units::search_units(context.query, crate::services::systemd_units::user_units)
+    }
+}
+
+pub(crate) struct QuickAiProvider;
+
+impl SearchProvider for QuickAiProvider {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        quick_ai::search_quick_ai(context.query, &context.placeholders.preferences)
     }
 }
 

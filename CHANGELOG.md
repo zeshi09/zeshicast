@@ -31,6 +31,12 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Quick AI: select text in any window, open the palette and run `fix`,
+  `translate` or `summarize`; the answer from the configured AI endpoint
+  (Ollama or any OpenAI-compatible one) replaces the selection. The
+  selection is read only when the action runs; without a configured model
+  the row says what to set. `quick_ai_language` (or `translate_target`)
+  picks the translation language.
 - systemd user units (`unit …`): failed units first, restart or start in
   one step (restart and stop ask first), and the journal of a unit in the
   output view (`unit <name>` → "Logs").

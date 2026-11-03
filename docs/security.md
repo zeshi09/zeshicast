@@ -276,6 +276,15 @@ name ending in `.service` that does not start with `-` reaches `systemctl`.
 <!-- test: restart_and_stop_ask_first_start_and_logs_do_not -->
 <!-- test: only_service_names_reach_systemctl -->
 
+## Quick AI
+
+Quick AI rows carry the task and the endpoint, not the text; the selection
+is read when the action runs, and no request is made without one. The
+action needs `network`, `clipboard_read` and `clipboard_write`.
+<!-- test: rows_name_the_task_not_the_text -->
+<!-- test: quick_ai_reads_the_selection_only_when_it_runs_and_reports_why_not -->
+<!-- test: quick_ai_needs_network_and_the_clipboard -->
+
 ## Encryption At Rest
 
 Clipboard history and snippets are sealed per value (ChaCha20-Poly1305,
