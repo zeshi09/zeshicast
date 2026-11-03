@@ -646,8 +646,12 @@ pub(crate) fn build_ui(
         let last_audio = Rc::new(RefCell::new(
             crate::services::audio::AudioSnapshot::default(),
         ));
-        glib::timeout_add_seconds_local(1, move || {
-            if crate::ui::hidden() {
+        let gate = crate::ui::RefreshGate::default();
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            if !gate.due(
+                crate::services::poll_cache::generation(),
+                crate::ui::hidden(),
+            ) {
                 return glib::ControlFlow::Continue;
             }
             if preference_enabled(&launcher, "show_status_strip", true) {
@@ -696,8 +700,12 @@ pub(crate) fn build_ui(
         let last_notifications = Rc::new(RefCell::new(
             crate::services::notifications::NotificationSnapshot::default(),
         ));
-        glib::timeout_add_seconds_local(1, move || {
-            if crate::ui::hidden() {
+        // Notifications are pushed, not polled: count them into the gate too.
+        let gate = crate::ui::RefreshGate::default();
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            let generation = crate::services::poll_cache::generation()
+                .wrapping_add(crate::services::notifications::generation());
+            if !gate.due(generation, crate::ui::hidden()) {
                 return glib::ControlFlow::Continue;
             }
             if navigation.current() == crate::ui::LauncherView::Network {

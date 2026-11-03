@@ -9,6 +9,14 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Fixed
+
+- The palette shows current data as soon as it opens: the clock redraws on
+  show and ticks on the minute, the background poller wakes on show instead
+  of finishing a one-second sleep, its first tick refreshes everything and
+  publishes each value as soon as it is read, and the status strip and views
+  redraw within ~100 ms of new data instead of on the next second.
+
 ## [0.3.0] — 2026-11-03
 
 ### Upgrading

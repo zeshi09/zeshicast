@@ -123,15 +123,15 @@ impl StatusStrip {
         self.date.set_text(&now.format("%a %d %b").to_string());
     }
 
+    /// The time is right in the first frame after showing (L1): redraw on
+    /// map, then on each minute boundary rather than on a free-running
+    /// second that skips while hidden.
     fn start_clock(&self) {
-        let strip = self.clone();
-        glib::timeout_add_seconds_local(1, move || {
-            if crate::ui::hidden() {
-                return glib::ControlFlow::Continue;
-            }
-            strip.refresh();
-            glib::ControlFlow::Continue
-        });
+        {
+            let strip = self.clone();
+            self.root.connect_map(move |_| strip.refresh());
+        }
+        schedule_minute_tick(self.clone());
     }
 
     pub fn set_network_snapshot(&self, snapshot: &NetworkSnapshot) {
@@ -262,9 +262,40 @@ fn status_chip() -> Label {
     label
 }
 
+/// Milliseconds from `now` to the next minute boundary, plus a little so
+/// the tick lands after it, not just before.
+fn ms_until_next_minute(now: chrono::DateTime<Local>) -> u64 {
+    use chrono::Timelike;
+    let into_minute =
+        u64::from(now.second()) * 1000 + u64::from(now.timestamp_subsec_millis().min(999));
+    60_000 - into_minute + 50
+}
+
+fn schedule_minute_tick(strip: StatusStrip) {
+    let delay = ms_until_next_minute(Local::now());
+    glib::timeout_add_local_once(std::time::Duration::from_millis(delay), move || {
+        if !crate::ui::hidden() {
+            strip.refresh();
+        }
+        schedule_minute_tick(strip);
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clock_ticks_just_after_each_minute() {
+        use chrono::TimeZone;
+        let at = |s: u32, ms: u32| {
+            Local.with_ymd_and_hms(2026, 11, 3, 12, 30, s).unwrap()
+                + chrono::Duration::milliseconds(i64::from(ms))
+        };
+        assert_eq!(ms_until_next_minute(at(0, 0)), 60_050);
+        assert_eq!(ms_until_next_minute(at(59, 900)), 150);
+        assert_eq!(ms_until_next_minute(at(30, 0)), 30_050);
+    }
 
     #[test]
     fn a_disabled_chip_stays_hidden_when_a_snapshot_arrives() {

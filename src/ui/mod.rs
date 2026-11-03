@@ -50,6 +50,30 @@ pub(crate) fn hidden() -> bool {
     !UI_VISIBLE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// When a polled view should redraw (L2): the data moved since the last
+/// draw, or the window just appeared. Checked often (it is one atomic
+/// load), so new data shows within ~100 ms instead of on the next second.
+#[derive(Default)]
+pub(crate) struct RefreshGate {
+    drawn: std::cell::Cell<Option<u64>>,
+}
+
+impl RefreshGate {
+    /// `generation` is the data's version, `hidden` whether the window is.
+    pub(crate) fn due(&self, generation: u64, hidden: bool) -> bool {
+        if hidden {
+            // Forget what was drawn: the first visible check redraws.
+            self.drawn.set(None);
+            return false;
+        }
+        if self.drawn.get() == Some(generation) {
+            return false;
+        }
+        self.drawn.set(Some(generation));
+        true
+    }
+}
+
 /// Keeps [`hidden`] and the background pollers in step with the window (P3.3):
 /// hiding the palette pauses `poll_cache`, showing it resumes the poller and the
 /// timers on their next tick.
@@ -98,3 +122,22 @@ pub use widgets::{
     action_panel, control_card, letter_icon, metric_card, move_selection, panel_root, panel_title,
     result_row, results_list, scrollable_list, secondary_action_row, section_header,
 };
+
+#[cfg(test)]
+mod refresh_gate_tests {
+    use super::RefreshGate;
+
+    #[test]
+    fn redraws_on_new_data_and_on_showing_only() {
+        let gate = RefreshGate::default();
+        assert!(gate.due(1, false), "the first visible check draws");
+        assert!(!gate.due(1, false), "nothing new, no redraw");
+        assert!(gate.due(2, false), "new data redraws at once");
+        assert!(!gate.due(3, true), "hidden: never");
+        assert!(
+            gate.due(3, false),
+            "shown again: redraw even if seen before"
+        );
+        assert!(!gate.due(3, false));
+    }
+}

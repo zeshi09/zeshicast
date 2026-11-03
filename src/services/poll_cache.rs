@@ -8,8 +8,8 @@
 //! main thread reads cheaply (a mutex clone, no subprocesses). The cache starts
 //! empty so launcher construction never waits for these tools.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::services::audio::{AudioSnapshot, audio_snapshot};
@@ -77,6 +77,64 @@ fn metrics_snapshot(
     }
 }
 
+/// Which slow sources a tick refreshes. Audio, layout and media every tick;
+/// the forking ones less often (M-3). The first tick after the palette
+/// shows refreshes everything, so nothing on screen is older than that tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TickPlan {
+    pub(crate) network: bool,
+    pub(crate) system: bool,
+    pub(crate) slow: bool,
+}
+
+pub(crate) fn tick_plan(tick: u64, just_shown: bool) -> TickPlan {
+    TickPlan {
+        network: just_shown || tick.is_multiple_of(3),
+        system: just_shown || tick.is_multiple_of(2),
+        slow: just_shown || tick.is_multiple_of(3),
+    }
+}
+
+/// Wakes the poller when the palette shows (L2), instead of letting it
+/// finish a sleep of up to a second first.
+fn wake() -> &'static (Mutex<bool>, Condvar) {
+    static WAKE: OnceLock<(Mutex<bool>, Condvar)> = OnceLock::new();
+    WAKE.get_or_init(|| (Mutex::new(false), Condvar::new()))
+}
+
+/// Sleep up to `timeout`, or less when [`set_active`] wakes the poller.
+fn wait(timeout: Duration) {
+    let (lock, condvar) = wake();
+    let Ok(mut woken) = lock.lock() else {
+        std::thread::sleep(timeout);
+        return;
+    };
+    if !*woken {
+        woken = match condvar.wait_timeout(woken, timeout) {
+            Ok((woken, _)) => woken,
+            Err(_) => return,
+        };
+    }
+    *woken = false;
+}
+
+/// Bumped every time a value in the cache changes; the UI redraws when it
+/// moves instead of on a fixed second (L2).
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::Relaxed)
+}
+
+/// Store one value as soon as it is read, so the cheap ones reach the
+/// screen without waiting for the slow ones in the same tick.
+fn publish(cache: &Mutex<Cache>, update: impl FnOnce(&mut Cache)) {
+    if let Ok(mut cache) = cache.lock() {
+        update(&mut cache);
+        GENERATION.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 /// Start the background poller. Idempotent — subsequent calls are no-ops.
 pub fn start() {
     if STARTED.set(()).is_err() {
@@ -87,73 +145,71 @@ pub fn start() {
         let mut tick: u64 = 0;
         let target_interval = Duration::from_secs(1);
         let mut disk_counters = None;
+        let mut was_active = false;
         loop {
             if !is_active() {
                 // Hidden palette: keep the thread, do no work. The cached values
-                // stay readable and the first visible tick refreshes them.
-                std::thread::sleep(target_interval);
+                // stay readable and showing the palette wakes this at once.
+                was_active = false;
+                wait(target_interval);
                 continue;
             }
             let start = std::time::Instant::now();
-            // Audio reacts to volume keys and the keyboard layout to the switch
-            // hotkey, so refresh both every tick. Network state rarely changes,
-            // so refresh it less often to save power.
-            let audio = audio_snapshot();
+            let plan = tick_plan(tick, !was_active);
+            was_active = true;
+            // Cheapest and most visible first: the strip shows them.
             let layout = keyboard_layout();
-            let network = tick.is_multiple_of(3).then(network_snapshot);
+            publish(&cache, |c| c.keyboard_layout = layout);
+            let audio = audio_snapshot();
+            publish(&cache, |c| c.audio = audio);
             // MPRIS answers within `media`'s per-call budget, and a player that
             // keeps timing out is skipped there, so this stays cheap (M-2).
             let media = media_snapshot();
-            // These fork (ps/ip/thermal zones/compositor): every other tick is
-            // enough for a dashboard nobody is watching continuously (M-3).
-            let system = tick.is_multiple_of(2).then(system_snapshot);
-            let processes = tick
-                .is_multiple_of(2)
-                .then(|| top_processes_by_memory(CACHED_PROCESSES));
-            let workspace = tick.is_multiple_of(3).then(workspace_snapshot);
-            let thermal = tick.is_multiple_of(3).then(thermal_snapshot);
-            let battery = tick.is_multiple_of(3).then(battery_snapshot);
-            let metrics = tick
-                .is_multiple_of(2)
-                .then(|| metrics_snapshot(&mut disk_counters));
-            if let Ok(mut cache) = cache.lock() {
-                cache.audio = audio;
-                cache.keyboard_layout = layout;
-                cache.media = media;
-                if let Some(network) = network {
-                    cache.network = network;
-                }
-                if let Some(system) = system {
-                    cache.system = system;
-                }
-                if let Some(processes) = processes {
-                    cache.processes = processes;
-                }
-                if let Some(workspace) = workspace {
-                    cache.workspace = workspace;
-                }
-                if let Some(thermal) = thermal {
-                    cache.thermal = thermal;
-                }
-                if let Some(battery) = battery {
-                    cache.battery = battery;
-                }
-                if let Some(metrics) = metrics {
-                    cache.metrics = metrics;
-                }
+            publish(&cache, |c| c.media = media);
+            if plan.slow {
+                let battery = battery_snapshot();
+                publish(&cache, |c| c.battery = battery);
+            }
+            if plan.network {
+                let network = network_snapshot();
+                publish(&cache, |c| c.network = network);
+            }
+            if plan.system {
+                let system = system_snapshot();
+                let processes = top_processes_by_memory(CACHED_PROCESSES);
+                let metrics = metrics_snapshot(&mut disk_counters);
+                publish(&cache, |c| {
+                    c.system = system;
+                    c.processes = processes;
+                    c.metrics = metrics;
+                });
+            }
+            if plan.slow {
+                let workspace = workspace_snapshot();
+                let thermal = thermal_snapshot();
+                publish(&cache, |c| {
+                    c.workspace = workspace;
+                    c.thermal = thermal;
+                });
             }
             tick = tick.wrapping_add(1);
-            let elapsed = start.elapsed();
-            if let Some(remaining) = target_interval.checked_sub(elapsed) {
-                std::thread::sleep(remaining);
+            if let Some(remaining) = target_interval.checked_sub(start.elapsed()) {
+                wait(remaining);
             }
         }
     });
 }
 
-/// Pause or resume the poller (P3.3). Idempotent.
+/// Pause or resume the poller (P3.3). Idempotent; resuming wakes it now.
 pub fn set_active(active: bool) {
-    ACTIVE.store(active, Ordering::Relaxed);
+    let was = ACTIVE.swap(active, Ordering::Relaxed);
+    if active && !was {
+        let (lock, condvar) = wake();
+        if let Ok(mut woken) = lock.lock() {
+            *woken = true;
+            condvar.notify_one();
+        }
+    }
 }
 
 /// Whether the poller is currently running its loop body.
@@ -239,8 +295,12 @@ pub fn cached_battery_snapshot() -> BatterySnapshot {
 mod tests {
     use super::*;
 
+    /// `ACTIVE` is process-wide: tests that flip it take turns.
+    static ACTIVE_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn poller_can_be_paused_and_resumed() {
+        let _turn = ACTIVE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         assert!(is_active(), "the poller starts running");
 
         set_active(false);
@@ -248,5 +308,47 @@ mod tests {
 
         set_active(true);
         assert!(is_active(), "showing the palette resumes it");
+    }
+
+    #[test]
+    fn the_first_tick_after_showing_refreshes_everything() {
+        let all = TickPlan {
+            network: true,
+            system: true,
+            slow: true,
+        };
+        assert_eq!(tick_plan(7, true), all);
+        assert_eq!(tick_plan(0, false), all);
+        assert_eq!(
+            tick_plan(1, false),
+            TickPlan {
+                network: false,
+                system: false,
+                slow: false
+            }
+        );
+        assert_eq!(
+            tick_plan(2, false),
+            TickPlan {
+                network: false,
+                system: true,
+                slow: false
+            }
+        );
+    }
+
+    #[test]
+    fn showing_the_palette_wakes_a_sleeping_poller() {
+        let _turn = ACTIVE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        set_active(false);
+        let waiter = std::thread::spawn(|| {
+            let start = std::time::Instant::now();
+            wait(Duration::from_secs(5));
+            start.elapsed()
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        set_active(true);
+        let slept = waiter.join().unwrap();
+        assert!(slept < Duration::from_secs(1), "woke after {slept:?}");
     }
 }

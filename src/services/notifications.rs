@@ -80,6 +80,17 @@ fn lock_state() -> std::sync::MutexGuard<'static, NotificationState> {
 
 const MAX_HISTORY: usize = 100;
 
+/// Bumped on every change to the history, so views redraw when it moves.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn generation() -> u64 {
+    GENERATION.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn bump() {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Where history is saved once the daemon turns persistence on (Q6.5), and
 /// whether bodies are saved (not in private mode). Off for the CLI and tests.
 struct Persistence {
@@ -263,6 +274,7 @@ pub fn push_notification_from(
     state.entries.truncate(MAX_HISTORY);
     let saved = state.entries[0].clone();
     drop(state);
+    bump();
     save(&saved);
     id
 }
@@ -288,6 +300,7 @@ pub fn close_notification_from(id: u32, sender: Option<&str>) {
     }
     state.entries.retain(|entry| entry.id != id);
     drop(state);
+    bump();
     if let Some(dir) = persisted_dir()
         && let Err(error) = crate::services::storage::notification_delete(&dir, id)
     {
@@ -297,6 +310,7 @@ pub fn close_notification_from(id: u32, sender: Option<&str>) {
 
 pub fn clear_notifications() {
     lock_state().entries.clear();
+    bump();
     if let Some(dir) = persisted_dir()
         && let Err(error) = crate::services::storage::notifications_clear(&dir)
     {
@@ -309,6 +323,7 @@ pub fn toggle_dnd() -> bool {
     let mut state = lock_state();
     state.dnd = !state.dnd;
     persist_dnd(state.dnd);
+    bump();
     state.dnd
 }
 
