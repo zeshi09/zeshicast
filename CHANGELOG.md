@@ -11,6 +11,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Changed
 
+- **Breaking for JSON-RPC extensions:** an `extension.toml` with `binaries`
+  must declare `protocol = 1`. Without it (or with another version) the
+  binaries are not run, and searching for the extension's name shows why.
+  Requests now carry `params.protocol`.
 - The first palette show after the daemon starts takes ~115 ms instead of
   ~190 ms: fonts and styles are prepared while the daemon is idle.
 

@@ -94,6 +94,11 @@ The `permissions` field is enforced for custom commands.
 - The `commands` field of a manifest accepts only `*.toml` files. Executable
   JSON-RPC extensions must be declared in `binaries`, which requires
   `capabilities = ["shell"]`; entries without it are not loaded.
+- `binaries` also need `protocol = 1`, the JSON-RPC protocol version this
+  build speaks. Missing, older, newer or non-numeric: the binaries are never
+  spawned and the extension appears in search as blocked, with the reason.
+  <!-- test: binaries_are_refused_for_another_or_missing_protocol -->
+  <!-- test: an_extension_refused_for_its_protocol_shows_why_without_running -->
 
 Unknown or undeclared capabilities cause actions to be blocked rather than run.
 Risky actions are also routed through execution policy and confirmation where

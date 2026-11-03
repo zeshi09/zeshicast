@@ -19,6 +19,9 @@ pub(crate) struct ExtensionManifest {
     /// smuggled through `commands`; they now need their own field and the
     /// manifest must grant the `shell` capability (B-5).
     pub(crate) binaries: Vec<PathBuf>,
+    /// Why the declared `binaries` were not loaded, when they were refused
+    /// before any spawn (Q5.1: protocol version). Shown as a blocked result.
+    pub(crate) binaries_blocked: Option<String>,
 }
 
 pub(crate) fn load_extension_manifests(config_dir: &Path) -> Vec<ExtensionManifest> {
@@ -57,11 +60,21 @@ pub(crate) fn parse_extension_manifest(root: &Path, input: &str) -> Option<Exten
         .collect();
     let scripts = manifest_paths(root, &table, "scripts");
     // Executing extension code requires the manifest to say so.
-    let binaries = if grants_shell_capability(&capabilities) {
+    let mut binaries = if grants_shell_capability(&capabilities) {
         manifest_paths(root, &table, "binaries")
     } else {
         Vec::new()
     };
+    // A binary written for another protocol would misread our requests (or we
+    // its replies): refuse it here, so it is never spawned.
+    let binaries_blocked = if binaries.is_empty() {
+        None
+    } else {
+        protocol_mismatch(table.get("protocol"))
+    };
+    if binaries_blocked.is_some() {
+        binaries.clear();
+    }
 
     Some(ExtensionManifest {
         origin: ExtensionOrigin {
@@ -73,7 +86,32 @@ pub(crate) fn parse_extension_manifest(root: &Path, input: &str) -> Option<Exten
         commands,
         scripts,
         binaries,
+        binaries_blocked,
     })
+}
+
+/// The reason a manifest's `protocol` rules its binaries out, if it does.
+fn protocol_mismatch(value: Option<&toml::Value>) -> Option<String> {
+    use crate::services::extension_protocol::PROTOCOL_VERSION;
+    match value {
+        None => Some(format!(
+            "Blocked: extension manifest lacks protocol = {PROTOCOL_VERSION}"
+        )),
+        Some(toml::Value::Integer(version)) if *version == i64::from(PROTOCOL_VERSION) => None,
+        Some(toml::Value::Integer(version)) if *version > i64::from(PROTOCOL_VERSION) => {
+            Some(format!(
+                "Blocked: extension needs protocol {version}; this zeshicast speaks \
+                 {PROTOCOL_VERSION} (update zeshicast)"
+            ))
+        }
+        Some(toml::Value::Integer(version)) => Some(format!(
+            "Blocked: extension speaks protocol {version}; this zeshicast speaks \
+             {PROTOCOL_VERSION} (update the extension)"
+        )),
+        Some(_) => Some(format!(
+            "Blocked: extension protocol must be a number (protocol = {PROTOCOL_VERSION})"
+        )),
+    }
 }
 
 fn grants_shell_capability(capabilities: &[String]) -> bool {
@@ -195,6 +233,7 @@ commands = ["/etc/passwd", "../escape.toml", "ok.toml"]
 id = "example.mixed"
 name = "Mixed"
 version = "0.1.0"
+protocol = 1
 capabilities = ["shell"]
 commands = ["git-log.toml", "bin/tool"]
 binaries = ["bin/tool"]
@@ -229,12 +268,70 @@ binaries = ["bin/tool"]
 id = "example.with-shell"
 name = "With Shell"
 version = "0.1.0"
+protocol = 1
 capabilities = ["shell"]
 binaries = ["bin/tool"]
 "#,
         )
         .unwrap();
         assert_eq!(granted.binaries, vec![root.join("bin/tool")]);
+    }
+
+    fn binary_manifest(protocol_line: &str) -> ExtensionManifest {
+        let root = PathBuf::from("/tmp/example-extension");
+        parse_extension_manifest(
+            &root,
+            &format!(
+                r#"
+id = "example.rpc"
+name = "Rpc"
+version = "0.1.0"
+{protocol_line}
+capabilities = ["shell"]
+commands = ["one.toml"]
+binaries = ["bin/tool"]
+"#
+            ),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn binaries_load_when_the_protocol_matches() {
+        let manifest = binary_manifest("protocol = 1");
+        assert_eq!(manifest.binaries.len(), 1);
+        assert_eq!(manifest.binaries_blocked, None);
+    }
+
+    #[test]
+    fn binaries_are_refused_for_another_or_missing_protocol() {
+        for (line, expected) in [
+            ("", "lacks protocol = 1"),
+            ("protocol = 2", "needs protocol 2"),
+            ("protocol = 0", "speaks protocol 0"),
+            ("protocol = \"1\"", "must be a number"),
+        ] {
+            let manifest = binary_manifest(line);
+            assert!(
+                manifest.binaries.is_empty(),
+                "{line:?} must not load binaries"
+            );
+            let reason = manifest.binaries_blocked.expect("a reason is kept");
+            assert!(reason.starts_with("Blocked"), "{reason}");
+            assert!(reason.contains(expected), "{line:?}: {reason}");
+            // The rest of the extension is not a JSON-RPC client and stays.
+            assert_eq!(manifest.commands.len(), 1, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn manifests_without_binaries_need_no_protocol() {
+        let manifest = parse_extension_manifest(
+            Path::new("/tmp/example-extension"),
+            "id = \"a\"\nname = \"A\"\nversion = \"1\"\ncommands = [\"one.toml\"]\n",
+        )
+        .unwrap();
+        assert_eq!(manifest.binaries_blocked, None);
     }
 
     #[test]

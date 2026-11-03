@@ -669,6 +669,8 @@ For multi-command local extensions, create a directory under
 id = "example.git-tools"
 name = "Git Tools"
 version = "0.1.0"
+# JSON-RPC protocol the binaries speak; required when `binaries` is set.
+protocol = 1
 capabilities = ["shell", "filesystem"]
 commands = ["git-log.toml"]
 scripts = ["scripts/status.sh"]
@@ -680,7 +682,11 @@ binaries = ["bin/git-tools"]
 to Raycast/Vicinae-style script commands with metadata comments, and `binaries`
 points to executable JSON-RPC extensions. Paths are relative to the extension
 directory; absolute paths and `..` entries are ignored. `binaries` are loaded
-only when the manifest grants `capabilities = ["shell"]`.
+only when the manifest grants `capabilities = ["shell"]` and names the
+protocol they speak, `protocol = 1`. A missing or different version keeps
+them from running at all; the extension then shows up in search with the
+reason (update zeshicast or the extension). Every request carries the host's
+version as `params.protocol`.
 
 Manifest capabilities are a **ceiling, not a grant**: each command and script
 must also declare the permissions it needs (`effective = declared ∩ manifest`),

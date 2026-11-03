@@ -10,6 +10,17 @@ use serde_json::Value;
 
 use crate::process::{CHILD_EXIT_GRACE, ChildGuard};
 
+/// The JSON-RPC extension protocol this build speaks (Q5.1). An extension
+/// declares the version it was written for as `protocol = N` in its
+/// `extension.toml`; a binary whose manifest names another version, or none,
+/// is never spawned. Every request also carries it as `params.protocol`, so
+/// an extension can refuse a host it does not understand.
+///
+/// Bump it only for a change an existing extension could misread: a new
+/// method, a changed field meaning, a removed field. Adding an optional field
+/// to a reply is not such a change.
+pub const PROTOCOL_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
@@ -199,6 +210,7 @@ pub fn search(
     timeout_ms: u64,
 ) -> Result<Vec<ExtensionSearchResultItem>, String> {
     let params = serde_json::json!({
+        "protocol": PROTOCOL_VERSION,
         "query": query,
     });
     let result = call_json_rpc(binary_path, "search", params, timeout_ms)?;
@@ -212,6 +224,7 @@ pub fn execute(
     timeout_ms: u64,
 ) -> Result<ExtensionExecuteResult, String> {
     let params = serde_json::json!({
+        "protocol": PROTOCOL_VERSION,
         "id": id,
         "arguments": arguments.unwrap_or(serde_json::json!({})),
     });
@@ -452,6 +465,10 @@ mod tests {
 
         let request = std::fs::read_to_string(&seen).expect("the request was recorded");
         assert!(request.contains(r#""method":"execute""#), "got {request}");
+        assert!(
+            request.contains(&format!(r#""protocol":{PROTOCOL_VERSION}"#)),
+            "the host's protocol version travels with every request: {request}"
+        );
         assert!(
             request.contains(r#""deploy""#),
             "the id must travel in the request: {request}"

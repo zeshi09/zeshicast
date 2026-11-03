@@ -504,6 +504,7 @@ mod tests {
             commands: Vec::new(),
             scripts: scripts.iter().map(|name| root.join(name)).collect(),
             binaries: Vec::new(),
+            binaries_blocked: None,
         }
     }
 

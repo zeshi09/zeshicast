@@ -21,7 +21,7 @@ pub(crate) mod windows;
 /// How many results a provider may contribute before the palette truncates.
 pub(crate) const MAX_RESULTS: usize = 40;
 
-use crate::action::Action;
+use crate::action::{Action, ActionKind};
 use crate::placeholders::PlaceholderContext;
 use crate::search::apps::{AppEntry, search_apps};
 use crate::search::clipboard::search_clipboard;
@@ -429,6 +429,14 @@ impl SearchProvider for ExtensionsProvider<'_> {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
         for manifest in self.manifests {
+            if let Some(reason) = &manifest.binaries_blocked {
+                actions.extend(blocked_extension_row(
+                    &manifest.origin.name,
+                    reason,
+                    context.query,
+                ));
+                continue;
+            }
             let capabilities = commands::parse_capabilities(&manifest.origin.capabilities);
             for binary in &manifest.binaries {
                 actions.extend(extensions::search_extension(
@@ -443,9 +451,54 @@ impl SearchProvider for ExtensionsProvider<'_> {
     }
 }
 
+/// An extension whose binaries were refused before any spawn (Q5.1) still
+/// answers to its name, so the user learns why its results are missing.
+fn blocked_extension_row(name: &str, reason: &str, query: &str) -> Option<Action> {
+    let score = fuzzy_score(name, query.trim())?;
+    Some(
+        Action::new(
+            format!("Extension: {name}"),
+            name.to_string(),
+            ActionKind::None,
+            score,
+        )
+        .with_subtitle(reason.to_string())
+        .with_icon("dialog-warning-symbolic"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_extension_refused_for_its_protocol_shows_why_without_running() {
+        let manifest = crate::extensions::parse_extension_manifest(
+            std::path::Path::new("/nonexistent/extension"),
+            r#"
+id = "example.future"
+name = "Future Tools"
+version = "1.0.0"
+protocol = 9
+capabilities = ["shell"]
+binaries = ["bin/tool"]
+"#,
+        )
+        .unwrap();
+        let row = blocked_extension_row(
+            &manifest.origin.name,
+            manifest.binaries_blocked.as_deref().unwrap(),
+            "future",
+        )
+        .expect("the name matches");
+        assert!(matches!(row.kind, ActionKind::None));
+        assert!(
+            row.subtitle.contains("needs protocol 9"),
+            "{}",
+            row.subtitle
+        );
+        assert!(blocked_extension_row("Future Tools", "Blocked", "zzz").is_none());
+    }
 
     fn score(text: &str, query: &str) -> i32 {
         fuzzy_score(text, query).unwrap_or_else(|| panic!("{query:?} should match {text:?}"))
