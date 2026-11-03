@@ -42,7 +42,10 @@ pub fn metric_graph_with_color(r: f64, g: f64, b: f64) -> MetricGraph {
             .iter()
             .enumerate()
             .map(|(i, &v)| {
-                let x = pad_x + i as f64 * step;
+                // Newest sample at the right edge: a history that is still
+                // filling grows leftwards like a timeline, instead of a
+                // stub squeezed against the left edge.
+                let x = w - pad_x - (n - 1 - i) as f64 * step;
                 let y = h - pad_y - (v.clamp(0.0, 1.0) * (h - pad_y * 2.0));
                 (x, y)
             })

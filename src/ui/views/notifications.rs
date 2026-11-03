@@ -59,17 +59,17 @@ pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView 
         dismiss_notification_row(row);
     });
 
-    let scroller = super::scrollable_list(&history);
-    root.append(&scroller);
-
-    // Empty state message (shown when list is empty)
-    let message = Label::new(Some("All caught up ✓"));
+    // The empty state is the list's placeholder: centred in the list area,
+    // instead of a second expanding widget pushed below an empty list.
+    let message = Label::new(Some("No notifications"));
     message.add_css_class("result-subtitle");
     message.set_xalign(0.5);
     message.set_valign(gtk::Align::Center);
     message.set_vexpand(true);
-    message.set_margin_top(40);
-    root.append(&message);
+    history.set_placeholder(Some(&message));
+
+    let scroller = super::scrollable_list(&history);
+    root.append(&scroller);
 
     // Compat labels
     let count = Label::new(None);
@@ -91,8 +91,14 @@ pub fn notifications_view(snapshot: &NotificationSnapshot) -> NotificationsView 
 }
 
 pub fn set_notification_snapshot(view: &NotificationsView, snapshot: &NotificationSnapshot) {
-    let backend_text = snapshot.backend.as_deref().unwrap_or("No backend");
-    view.backend.set_text(backend_text);
+    // The backend is zeshicast itself; what the user wants here is how many.
+    let count = snapshot.history.len();
+    view.backend.set_text(&match count {
+        0 => String::new(),
+        1 => "1 notification".to_string(),
+        n => format!("{n} notifications"),
+    });
+    view.close_all.set_sensitive(count > 0);
 
     let dnd_on = snapshot.dnd.unwrap_or(false);
     view.dnd.set_text(if dnd_on { "DND On" } else { "" });
@@ -105,20 +111,19 @@ pub fn set_notification_snapshot(view: &NotificationsView, snapshot: &Notificati
 
     set_notification_history_rows(&view.history, snapshot);
 
-    let has_notifs = !snapshot.history.is_empty();
-    view.message.set_visible(!has_notifs);
-    if !has_notifs {
-        if snapshot.is_available() {
-            view.message.set_text("All caught up ✓");
+    if snapshot.history.is_empty() {
+        view.message.set_text(if snapshot.is_available() {
+            "No notifications"
         } else {
-            view.message.set_text("No notification backend detected");
-        }
+            "Notifications go to another daemon, so there is no history here"
+        });
     }
 }
 
 fn set_notification_history_rows(list: &ListBox, snapshot: &NotificationSnapshot) {
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
+    // Rows only: removing every child also took the empty-state placeholder.
+    while let Some(row) = list.row_at_index(0) {
+        list.remove(&row);
     }
 
     for entry in snapshot.history.iter().take(12) {

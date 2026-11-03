@@ -400,10 +400,10 @@ pub fn set_system_monitor_snapshot(
             .map(format_duration)
             .unwrap_or("unknown".to_string()),
     );
-    view.load.set_text(
+    view.load.set_markup(
         &snapshot
             .load_average
-            .map(|load| format!("{load:.2}"))
+            .map(|load| metric_markup(&format!("{load:.2}"), "load average"))
             .unwrap_or("unknown".to_string()),
     );
     let load_fraction = snapshot.load_average.map(load_fraction).unwrap_or_default();
@@ -413,13 +413,16 @@ pub fn set_system_monitor_snapshot(
         view,
         &crate::services::poll_cache::cached_thermal_snapshot(),
     );
-    view.memory.set_text(
+    view.memory.set_markup(
         &snapshot
             .memory_used_percent()
             .map(|percent| {
-                let used = snapshot.memory_used_kib().unwrap_or_default() / 1024;
-                let total = snapshot.memory_total_kib.unwrap_or_default() / 1024;
-                format!("{percent:.0}%  ({used} / {total} MiB)")
+                let used = snapshot.memory_used_kib().unwrap_or_default();
+                let total = snapshot.memory_total_kib.unwrap_or_default();
+                metric_markup(
+                    &format!("{percent:.0}%"),
+                    &format!("{} / {}", gib(used), gib(total)),
+                )
             })
             .unwrap_or("unknown".to_string()),
     );
@@ -461,13 +464,16 @@ pub fn set_system_monitor_snapshot(
         &view.metrics,
         &crate::services::poll_cache::cached_metrics(),
     );
-    view.disk.set_text(
+    view.disk.set_markup(
         &snapshot
             .disk_used_percent()
             .map(|percent| {
-                let used = snapshot.disk_used_kib.unwrap_or_default() / 1024;
-                let total = snapshot.disk_total_kib.unwrap_or_default() / 1024;
-                format!("{percent:.0}%  ({used} / {total} MiB)")
+                let used = snapshot.disk_used_kib.unwrap_or_default();
+                let total = snapshot.disk_total_kib.unwrap_or_default();
+                metric_markup(
+                    &format!("{percent:.0}%"),
+                    &format!("{} / {}", gib(used), gib(total)),
+                )
             })
             .unwrap_or("unknown".to_string()),
     );
@@ -516,6 +522,26 @@ fn set_metric_lines(
         row.append(&name);
         row.append(&value);
         container.append(&row);
+    }
+}
+
+/// The figure at full size, its detail small and dim beside it: the detail
+/// at the figure's size made every row a wall of mono digits.
+fn metric_markup(figure: &str, detail: &str) -> String {
+    format!(
+        "{}  <span font_family=\"Outfit\" size=\"12288\" weight=\"normal\" alpha=\"60%\">{}</span>",
+        glib::markup_escape_text(figure),
+        glib::markup_escape_text(detail)
+    )
+}
+
+/// KiB as GiB with one decimal (or TiB past 1024 GiB).
+fn gib(kib: u64) -> String {
+    let gib = kib as f64 / (1024.0 * 1024.0);
+    if gib >= 1024.0 {
+        format!("{:.1} TiB", gib / 1024.0)
+    } else {
+        format!("{gib:.1} GiB")
     }
 }
 
@@ -771,6 +797,8 @@ fn process_row(
     mem_bar.set_fraction(mem_frac.clamp(0.0, 1.0));
     mem_bar.set_show_text(false);
     mem_bar.set_width_request(36);
+    // Centred on the row like its label, not pinned to the row's top edge.
+    mem_bar.set_valign(gtk::Align::Center);
     layout.append(&mem_bar);
 
     // MEM
@@ -825,6 +853,15 @@ mod tests {
             memory_kib: Some(1024),
             start_time: Some(1),
         }
+    }
+
+    #[test]
+    fn metric_details_are_small_and_readable() {
+        assert_eq!(gib(32_657 * 1024), "31.9 GiB");
+        assert_eq!(gib(3 * 1024 * 1024 * 1024), "3.0 TiB");
+        let markup = metric_markup("51%", "31.9 / 62.7 GiB");
+        assert!(markup.starts_with("51%  <span font_family=\"Outfit\" size=\"12288\""));
+        assert!(metric_markup("<b>", "&").contains("&lt;b&gt;"), "escaped");
     }
 
     #[test]

@@ -16,11 +16,11 @@ pub struct StatusStrip {
     root: GtkBox,
     clock: Label,
     date: Label,
-    network: Label,
-    battery: Label,
-    audio: Label,
-    media: Label,
-    layout: Label,
+    network: Chip,
+    battery: Chip,
+    audio: Chip,
+    media: Chip,
+    layout: Chip,
     /// The chips enabled through the `status_items` preference.
     items: Rc<RefCell<HashSet<String>>>,
 }
@@ -68,11 +68,11 @@ impl StatusStrip {
         let media = status_chip();
         let layout = status_chip();
 
-        right.append(&network);
-        right.append(&battery);
-        right.append(&audio);
-        right.append(&media);
-        right.append(&layout);
+        right.append(&network.root);
+        right.append(&battery.root);
+        right.append(&audio.root);
+        right.append(&media.root);
+        right.append(&layout.root);
 
         root.append(&left);
         root.append(&spacer);
@@ -100,21 +100,22 @@ impl StatusStrip {
 
     pub fn set_items(&self, items: &[String]) {
         self.items.replace(items.iter().cloned().collect());
-        for (chip, name) in [
-            (&self.clock, "clock"),
-            (&self.date, "date"),
-            (&self.network, "network"),
-            (&self.battery, "battery"),
-            (&self.audio, "audio"),
-            (&self.media, "media"),
-            (&self.layout, "layout"),
+        for (widget, name) in [
+            (self.clock.upcast_ref::<gtk::Widget>(), "clock"),
+            (self.date.upcast_ref(), "date"),
+            (self.network.root.upcast_ref(), "network"),
+            (self.battery.root.upcast_ref(), "battery"),
+            (self.audio.root.upcast_ref(), "audio"),
+            (self.media.root.upcast_ref(), "media"),
+            (self.layout.root.upcast_ref(), "layout"),
         ] {
-            chip.set_visible(self.items.borrow().contains(name));
+            widget.set_visible(self.items.borrow().contains(name));
         }
     }
 
-    fn show_chip(&self, chip: &Label, name: &str, has_data: bool) {
-        chip.set_visible(chip_visible(&self.items.borrow(), name, has_data));
+    fn show_chip(&self, chip: &Chip, name: &str, has_data: bool) {
+        chip.root
+            .set_visible(chip_visible(&self.items.borrow(), name, has_data));
     }
 
     fn refresh(&self) {
@@ -150,13 +151,17 @@ impl StatusStrip {
         } else {
             "Ethernet"
         };
-        let text = format!("✻  {label}");
-        self.network.set_text(&text);
+        let icon = if iface.is_wireless {
+            "network-wireless-symbolic"
+        } else {
+            "network-wired-symbolic"
+        };
+        self.network.set(icon, label);
         self.show_chip(&self.network, "network", true);
         if connected {
-            self.network.add_css_class("active");
+            self.network.root.add_css_class("active");
         } else {
-            self.network.remove_css_class("active");
+            self.network.root.remove_css_class("active");
         }
     }
 
@@ -170,13 +175,17 @@ impl StatusStrip {
             .map(|v| format!("{v}%"))
             .unwrap_or_else(|| "?".to_string());
         let charging = battery.status.as_deref() == Some("Charging");
-        let icon = if charging { "⚡" } else { "♦" };
-        self.battery.set_text(&format!("{icon}  {capacity}"));
+        let icon = if charging {
+            "battery-good-charging-symbolic"
+        } else {
+            "battery-good-symbolic"
+        };
+        self.battery.set(icon, &capacity);
         self.show_chip(&self.battery, "battery", true);
         if charging {
-            self.battery.add_css_class("active");
+            self.battery.root.add_css_class("active");
         } else {
-            self.battery.remove_css_class("active");
+            self.battery.root.remove_css_class("active");
         }
     }
 
@@ -185,17 +194,20 @@ impl StatusStrip {
             self.show_chip(&self.audio, "audio", false);
             return;
         };
-        let text = if output.muted {
-            "♩  Muted".to_string()
+        let (icon, text) = if output.muted {
+            ("audio-volume-muted-symbolic", "Muted".to_string())
         } else {
-            format!("♩  {}%", output.volume_percent)
+            (
+                "audio-volume-high-symbolic",
+                format!("{}%", output.volume_percent),
+            )
         };
-        self.audio.set_text(&text);
+        self.audio.set(icon, &text);
         self.show_chip(&self.audio, "audio", true);
         if !output.muted {
-            self.audio.add_css_class("active");
+            self.audio.root.add_css_class("active");
         } else {
-            self.audio.remove_css_class("active");
+            self.audio.root.remove_css_class("active");
         }
     }
 
@@ -207,7 +219,11 @@ impl StatusStrip {
                 .or(snapshot.artist.as_deref())
                 .unwrap_or("Media");
             let playing = snapshot.status.as_deref() == Some("Playing");
-            let icon = if playing { "▶" } else { "⏸" };
+            let icon = if playing {
+                "media-playback-start-symbolic"
+            } else {
+                "media-playback-pause-symbolic"
+            };
             // Truncate by chars, not bytes — byte slicing panics on multi-byte
             // UTF-8 (e.g. Cyrillic track titles).
             let short_title = if title.chars().count() > 18 {
@@ -216,12 +232,12 @@ impl StatusStrip {
             } else {
                 title.to_string()
             };
-            self.media.set_text(&format!("{icon}  {short_title}"));
+            self.media.set(icon, &short_title);
             self.show_chip(&self.media, "media", true);
             if playing {
-                self.media.add_css_class("active");
+                self.media.root.add_css_class("active");
             } else {
-                self.media.remove_css_class("active");
+                self.media.root.remove_css_class("active");
             }
         } else {
             self.show_chip(&self.media, "media", false);
@@ -233,9 +249,10 @@ impl StatusStrip {
             self.show_chip(&self.layout, "layout", false);
             return;
         };
-        self.layout.set_text(&format!("⌨  {}", code.to_uppercase()));
+        self.layout
+            .set("input-keyboard-symbolic", &code.to_uppercase());
         self.show_chip(&self.layout, "layout", true);
-        self.layout.add_css_class("active");
+        self.layout.root.add_css_class("active");
     }
 }
 
@@ -254,12 +271,33 @@ fn default_items() -> HashSet<String> {
     .collect()
 }
 
-fn status_chip() -> Label {
-    let label = Label::new(None);
-    label.add_css_class("status-chip");
-    label.set_valign(gtk::Align::Center);
-    label.set_visible(false);
-    label
+/// One chip: a theme icon and its text. Unicode glyphs (✻ ♦ ♩ ⌨) used to
+/// stand in for the icons and did not say what the chip was about.
+#[derive(Clone)]
+struct Chip {
+    root: GtkBox,
+    icon: gtk::Image,
+    text: Label,
+}
+
+impl Chip {
+    fn set(&self, icon: &str, text: &str) {
+        self.icon.set_icon_name(Some(icon));
+        self.text.set_text(text);
+    }
+}
+
+fn status_chip() -> Chip {
+    let root = GtkBox::new(Orientation::Horizontal, 5);
+    root.add_css_class("status-chip");
+    root.set_valign(gtk::Align::Center);
+    root.set_visible(false);
+    let icon = gtk::Image::new();
+    icon.set_pixel_size(12);
+    let text = Label::new(None);
+    root.append(&icon);
+    root.append(&text);
+    Chip { root, icon, text }
 }
 
 /// Milliseconds from `now` to the next minute boundary, plus a little so

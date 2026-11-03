@@ -1124,7 +1124,15 @@ DEPLOY_TOKEN = "{{pref:token}}"
     fn audio_actions_show_on_vol_prefix() {
         let results = crate::search::system::search_audio_actions("vol");
         assert!(!results.is_empty());
-        assert!(results.iter().all(|a| a.category == "Audio"));
+        // Brightness shares the keys' list but is labelled for what it changes.
+        for action in &results {
+            let expected = if action.title.starts_with("Brightness") {
+                "Display"
+            } else {
+                "Audio"
+            };
+            assert_eq!(action.category, expected, "{}", action.title);
+        }
     }
 
     #[test]

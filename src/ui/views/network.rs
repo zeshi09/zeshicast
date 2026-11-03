@@ -79,6 +79,10 @@ pub fn set_network_snapshot(list: &ListBox, snapshot: &NetworkSnapshot) {
         let layout = GtkBox::new(Orientation::Horizontal, 10);
         layout.set_margin_start(14);
         layout.set_margin_end(14);
+        // The same breathing room as the ethernet row and the palette's
+        // results: networks used to touch one another.
+        layout.set_margin_top(7);
+        layout.set_margin_bottom(7);
         layout.set_valign(gtk::Align::Center);
 
         let sig = network.signal_percent.unwrap_or(0);

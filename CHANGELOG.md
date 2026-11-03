@@ -9,6 +9,26 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- Visual pass (kill-ai-slop, impeccable, ui-ux-pro-max): secondary text uses
+  two contrast tiers (≥4.5:1) instead of 23 ad-hoc dim values; result tiles
+  follow the handoff mockup (tinted, not saturated); the footer and status
+  chips use theme icons instead of Unicode glyphs; the back button is a
+  visible pill; brightness rows say "Display", not "Audio"; System Monitor
+  shows memory and disk in GiB with the detail small beside the figure and
+  labels the load average; selected text takes the accent colour.
+- Empty states: the clipboard explains that nothing was copied yet and
+  disables "Copy", notifications centre "No notifications" and disable
+  "Clear All", audio greys out sliders without a device.
+
+### Fixed
+
+- Four CSS properties GTK rejects (`overflow`, `max-width`, `cursor` ×2) are
+  gone; the theme loads without parser warnings.
+- Wi-Fi rows no longer touch, process memory bars sit on their row's centre,
+  and the monitor's graphs grow from the right edge.
+
 ### Added
 
 - Volume OSD: `zeshicast-gtk --volume +5|-5|40|mute` and `--mic-mute`

@@ -173,15 +173,23 @@ pub fn set_clipboard_history_items(list: &ListBox, items: &[ClipboardSummary]) {
 
 pub fn set_clipboard_detail(view: &ClipboardHistoryView, item: Option<&ClipboardSummary>) {
     let Some(item) = item else {
+        // An empty history is a state to explain, not a selection: no
+        // selectable (and pre-selected) text, no kind badge, nothing to copy.
         view.detail_preview.set_visible(true);
         view.detail_image.set_visible(false);
-        view.detail_preview.set_text("No item selected");
-        view.detail_kind.set_text("–");
+        view.detail_preview.set_selectable(false);
+        view.detail_preview
+            .set_text("Nothing copied yet. Text and images you copy appear here.");
+        view.detail_kind.set_visible(false);
         view.detail_size.set_text("");
         view.detail_mime.set_text("");
+        view.copy.set_sensitive(false);
         return;
     };
 
+    view.detail_preview.set_selectable(true);
+    view.detail_kind.set_visible(true);
+    view.copy.set_sensitive(true);
     view.detail_kind.set_text(item.kind.label());
     if let Some(ts) = item.timestamp {
         view.detail_mime

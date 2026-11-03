@@ -1,3 +1,7 @@
+/* Text tiers over the theme's foreground. The lowest passes 4.5:1 on the
+   dark surface; anything dimmer was unreadable (impeccable craft floor). */
+@define-color fg_secondary alpha(@window_fg_color, 0.62);
+@define-color fg_tertiary alpha(@window_fg_color, 0.50);
 @define-color ac_purple __COLOR_PURPLE__;
 @define-color ac_amber  __COLOR_AMBER__;
 @define-color ac_green  __COLOR_GREEN__;
@@ -66,7 +70,6 @@ window { background-color: transparent; }
 .launcher-frame {
   background-color: alpha(@window_bg_color, 0.985);
   border-radius: 14px;
-  overflow: hidden;
   animation: launcher-open 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -119,7 +122,15 @@ entry.search-entry:focus {
 }
 
 entry placeholder {
-  color: alpha(@window_fg_color, 0.350);
+  color: @fg_secondary;
+}
+
+/* Selected text takes the accent, not GTK's stock blue. */
+label selection,
+text selection,
+entry selection {
+  background-color: alpha(@accent_color, 0.35);
+  color: @window_fg_color;
 }
 
 entry, entry:focus, entry:focus-visible {
@@ -147,7 +158,7 @@ entry, entry:focus, entry:focus-visible {
   padding: 2px 5px;
   font-size: 11px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  color: alpha(@window_fg_color, 0.380);
+  color: @fg_tertiary;
   letter-spacing: 0.01em;
 }
 
@@ -176,7 +187,7 @@ entry, entry:focus, entry:focus-visible {
   font-weight: 600;
   letter-spacing: 0.075em;
   text-transform: uppercase;
-  color: alpha(@window_fg_color, 0.300);
+  color: @fg_tertiary;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -250,13 +261,14 @@ entry, entry:focus, entry:focus-visible {
 
 .launcher-hint {
   font-size: __SUBTITLE_SIZE__px;
-  color: alpha(@window_fg_color, 0.450);
-  padding: 6px 14px 2px 14px;
+  color: @fg_secondary;
+  /* Starts where the search text starts, not 4px left of it. */
+  padding: 6px 18px 2px 18px;
 }
 
 .result-subtitle {
   font-size: __SUBTITLE_SIZE__px;
-  color: alpha(@window_fg_color, 0.400);
+  color: @fg_secondary;
   margin-top: 1px;
   min-height: 18px;
 }
@@ -267,7 +279,7 @@ entry, entry:focus, entry:focus-visible {
   border-radius: 6px;
   font-size: 11px;
   font-weight: 500;
-  color: alpha(@window_fg_color, 0.300);
+  color: @fg_tertiary;
   letter-spacing: 0.010em;
   min-height: 18px;
   opacity: 0;
@@ -287,7 +299,7 @@ entry, entry:focus, entry:focus-visible {
   border-radius: 5px;
   font-size: 11px;
   font-weight: 500;
-  color: alpha(@window_fg_color, 0.400);
+  color: @fg_tertiary;
   letter-spacing: 0.010em;
   min-height: 18px;
   opacity: 0;
@@ -318,7 +330,7 @@ entry, entry:focus, entry:focus-visible {
 .no-results-label {
   font-size: 13px;
   font-weight: 500;
-  color: alpha(@window_fg_color, 0.45);
+  color: @fg_secondary;
 }
 
 /* ── Font Browser ── */
@@ -327,7 +339,7 @@ entry, entry:focus, entry:focus-visible {
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: alpha(@window_fg_color, 0.28);
+  color: @fg_tertiary;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -353,7 +365,7 @@ entry, entry:focus, entry:focus-visible {
   font-weight: 600;
   letter-spacing: 0.060em;
   text-transform: uppercase;
-  color: alpha(@window_fg_color, 0.280);
+  color: @fg_tertiary;
   min-height: 24px;
 }
 
@@ -423,7 +435,7 @@ entry, entry:focus, entry:focus-visible {
   padding: 2px 5px;
   font-size: 11px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  color: alpha(@window_fg_color, 0.380);
+  color: @fg_tertiary;
   letter-spacing: 0.010em;
   transition: color 80ms ease, background 80ms ease, border-color 80ms ease;
 }
@@ -454,7 +466,7 @@ entry, entry:focus, entry:focus-visible {
   border-radius: 6px;
   background: transparent;
   border: 1px solid transparent;
-  color: alpha(@window_fg_color, 0.280);
+  color: @fg_tertiary;
   font-size: 13px;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 60ms ease;
 }
@@ -474,7 +486,7 @@ entry, entry:focus, entry:focus-visible {
   border-radius: 6px;
   background: transparent;
   border: 1px solid transparent;
-  color: alpha(@window_fg_color, 0.300);
+  color: @fg_tertiary;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.010em;
@@ -489,6 +501,25 @@ entry, entry:focus, entry:focus-visible {
 
 .action-bar-more:active {
   transform: scale(0.96);
+}
+
+/* The way back out of a view: a bordered pill, as in the handoff mockup,
+   so it reads as a button rather than a caption. */
+.nav-back {
+  padding: 4px 10px;
+  border-radius: 7px;
+  background: alpha(@window_fg_color, 0.050);
+  border: 1px solid alpha(@window_fg_color, 0.120);
+  color: @fg_secondary;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.nav-back:hover {
+  background: alpha(@window_fg_color, 0.090);
+  border-color: alpha(@window_fg_color, 0.180);
+  color: @window_fg_color;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -512,7 +543,7 @@ entry.search-entry:focus-visible {
 .result-counter {
   font-size: 11px;
   font-weight: 500;
-  color: alpha(@window_fg_color, 0.38);
+  color: @fg_tertiary;
   letter-spacing: -0.01em;
 }
 
@@ -528,13 +559,13 @@ entry.search-entry:focus-visible {
 .status-time {
   font-size: 12px;
   font-weight: 600;
-  color: alpha(@window_fg_color, 0.450);
+  color: @fg_secondary;
   letter-spacing: -0.010em;
 }
 
 .status-date {
   font-size: 11px;
-  color: alpha(@window_fg_color, 0.240);
+  color: @fg_tertiary;
   letter-spacing: 0.010em;
 }
 
@@ -581,7 +612,7 @@ entry.search-entry:focus-visible {
 
 .dashboard-date {
   font-size: 15px;
-  color: alpha(@window_fg_color, 0.450);
+  color: @fg_secondary;
   letter-spacing: 0.010em;
   margin-top: 4px;
 }
@@ -651,7 +682,7 @@ entry.search-entry:focus-visible {
   font-weight: 600;
   letter-spacing: 0.065em;
   text-transform: uppercase;
-  color: alpha(@window_fg_color, 0.300);
+  color: @fg_tertiary;
   margin-bottom: 6px;
 }
 
@@ -829,7 +860,7 @@ button.media-btn-seek:hover {
 
 .control-card-sub {
   font-size: 11px;
-  color: alpha(@window_fg_color, 0.360);
+  color: @fg_secondary;
 }
 
 .control-card-actions {
@@ -918,7 +949,7 @@ button.media-btn-seek:hover {
   border-radius: 5px;
   font-size: 11px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  color: alpha(@window_fg_color, 0.380);
+  color: @fg_tertiary;
   transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
 }
 
@@ -1028,7 +1059,7 @@ button.media-btn-seek:hover {
 
 .clipboard-time {
   font-size: 11px;
-  color: alpha(@window_fg_color, 0.280);
+  color: @fg_tertiary;
 }
 
 /* Image clipboard preview. */
@@ -1061,7 +1092,7 @@ button.media-btn-seek:hover {
 
 .notif-time {
   font-size: 11px;
-  color: alpha(@window_fg_color, 0.350);
+  color: @fg_tertiary;
   letter-spacing: 0.010em;
 }
 
@@ -1107,7 +1138,7 @@ button.media-btn-seek:hover {
 
 .media-meta {
   font-size: 12px;
-  color: alpha(@window_fg_color, 0.380);
+  color: @fg_secondary;
 }
 
 /* Album-art placeholder: neutral tinted square. */
@@ -1259,6 +1290,8 @@ scrollbar slider:hover {
 .network-status-connected {
   color: @accent_color;
   font-weight: 500;
+  /* Status sits under the name, smaller than it, never above it in size. */
+  font-size: __SUBTITLE_SIZE__px;
 }
 
 .network-wired-icon {
@@ -1400,13 +1433,11 @@ window.osd-window,
 .osd-notification {
   margin: 20px;
   min-width: 320px;
-  max-width: 420px;
   background-color: @window_bg_color;
   border: 1px solid alpha(@window_fg_color, 0.12);
   border-radius: 16px;
   padding: 12px 14px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
-  cursor: pointer;
   transition: border-color 140ms ease;
 }
 
@@ -1431,7 +1462,6 @@ window.osd-window,
   background: transparent;
   border: none;
   color: alpha(@window_fg_color, 0.45);
-  cursor: default;
   transition: background-color 120ms ease, color 120ms ease;
 }
 

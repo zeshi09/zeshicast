@@ -116,7 +116,7 @@ pub(crate) fn build_ui(
     ctrl_k_hint.set_valign(gtk::Align::Center);
 
     let back_btn = Button::new();
-    back_btn.add_css_class("action-bar-more");
+    back_btn.add_css_class("nav-back");
     back_btn.set_valign(gtk::Align::Center);
     back_btn.set_visible(false);
 
@@ -1305,10 +1305,10 @@ pub(crate) fn action_bar(
     bar.set_valign(gtk::Align::Center);
 
     // Left icon buttons
-    let folder = icon_bar_button("⊟", "Show in Files  Ctrl+Shift+F");
-    let pin = icon_bar_button("◈", "Pin / Unpin  Ctrl+P");
-    let copy = icon_bar_button("⎘", "Copy  Ctrl+Enter");
-    let run = icon_bar_button("↵", "Run  Enter");
+    let folder = icon_bar_button("folder-open-symbolic", "Show in Files  Ctrl+Shift+F");
+    let pin = icon_bar_button("view-pin-symbolic", "Pin / Unpin  Ctrl+P");
+    let copy = icon_bar_button("edit-copy-symbolic", "Copy  Ctrl+Enter");
+    let run = icon_bar_button("system-run-symbolic", "Run  Enter");
 
     // Center: result counter (hidden when no results)
     let counter = Label::new(None);
@@ -1483,8 +1483,10 @@ fn footer_button(label: &str) -> Button {
     button
 }
 
+/// A footer button with a theme icon: the Unicode glyphs it used to show
+/// (⊟ ◈ ⎘ ↵) did not say what they did.
 fn icon_bar_button(icon: &str, tooltip: &str) -> Button {
-    let button = Button::with_label(icon);
+    let button = Button::from_icon_name(icon);
     button.add_css_class("action-bar-btn");
     button.set_tooltip_text(Some(tooltip));
     button

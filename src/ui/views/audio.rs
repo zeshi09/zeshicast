@@ -305,6 +305,10 @@ pub fn set_audio_snapshot(view: &AudioView, snapshot: &AudioSnapshot) {
     populate_audio_device_list(view, &view.output_devices, &snapshot.output_devices);
     populate_audio_device_list(view, &view.input_devices, &snapshot.input_devices);
 
+    // A slider without a device does nothing: show it as such.
+    view.output_scale.set_sensitive(snapshot.output.is_some());
+    view.input_scale.set_sensitive(snapshot.input.is_some());
+
     // Reflect real volumes on the sliders without re-triggering set-volume.
     view.suppress_volume_cb.set(true);
     if let Some(output) = snapshot.output.as_ref() {
@@ -367,10 +371,11 @@ fn populate_audio_device_list(_view: &AudioView, list: &ListBox, devices: &[Audi
     }
 
     if devices.is_empty() {
-        list.append(&super::secondary_action_row(
-            "audio-card-symbolic",
-            "No devices found",
-        ));
+        // A message, not a device: it must not look selected or clickable.
+        let row = super::secondary_action_row("audio-card-symbolic", "No devices found");
+        row.set_selectable(false);
+        row.set_activatable(false);
+        list.append(&row);
         return;
     }
 

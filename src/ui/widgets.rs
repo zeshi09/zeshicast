@@ -208,11 +208,17 @@ pub fn letter_icon(title: &str, size: i32) -> DrawingArea {
             3.0 * std::f64::consts::FRAC_PI_2,
         );
         cr.close_path();
-        cr.set_source_rgb(color.0, color.1, color.2);
-        let _ = cr.fill();
+        // As in the handoff mockup: a dark tint of the colour with a hairline
+        // of it, and the letter in a light shade of it. A solid saturated
+        // fill with a white letter shouted from every row.
+        cr.set_source_rgba(color.0, color.1, color.2, 0.30);
+        let _ = cr.fill_preserve();
+        cr.set_source_rgba(color.0, color.1, color.2, 0.70);
+        cr.set_line_width(1.0);
+        let _ = cr.stroke();
 
-        // Letter (white, centered, bold)
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.92);
+        let light = |c: f64| c * 0.45 + 0.55;
+        cr.set_source_rgb(light(color.0), light(color.1), light(color.2));
         let font_size = wf * 0.48;
         cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
         cr.set_font_size(font_size);

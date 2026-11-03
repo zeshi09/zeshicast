@@ -114,9 +114,16 @@ pub(crate) fn search_audio_actions(query: &str) -> Vec<Action> {
             } else {
                 fuzzy_score(&haystack, needle)?
             };
+            // Brightness lives with the audio keys but is not audio: the
+            // row's badge must name what it changes.
+            let category = if entry.title.starts_with("Brightness") {
+                "Display"
+            } else {
+                "Audio"
+            };
             Some(
                 Action::new(
-                    "Audio",
+                    category,
                     entry.title,
                     ActionKind::Shell(ShellCommand::new(entry.command)),
                     score + if explicit { 260 } else { 30 },
