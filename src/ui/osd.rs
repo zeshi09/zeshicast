@@ -314,6 +314,48 @@ pub fn install_audio_watcher() {
         .ok();
 }
 
+/// `--brightness …` (B2): change the laptop backlight through logind and
+/// show the new level. Without a backlight (a desktop) say so once per
+/// press instead of doing nothing.
+pub fn change_brightness(
+    app: &Application,
+    request: crate::services::brightness::BrightnessRequest,
+) {
+    match crate::services::brightness::apply(request) {
+        Ok(backlight) => show_level_osd(
+            Some(app),
+            Level {
+                kind: LevelKind::Brightness,
+                percent: u16::from(backlight.percent()),
+                muted: false,
+            },
+        ),
+        Err(reason) => {
+            log::warn!("brightness: {reason}");
+            show_toast_osd(Some(app), &format!("Brightness: {reason}"));
+        }
+    }
+}
+
+/// Watch the backlight on a thread (B1): a change the firmware keys or
+/// another tool made shows the level OSD.
+pub fn install_brightness_watcher() {
+    std::thread::Builder::new()
+        .name("brightness-events".to_string())
+        .spawn(|| {
+            crate::services::brightness::watch(|backlight| {
+                let level = Level {
+                    kind: LevelKind::Brightness,
+                    percent: u16::from(backlight.percent()),
+                    muted: false,
+                };
+                glib::idle_add_once(move || show_external_level(level));
+                true
+            });
+        })
+        .ok();
+}
+
 /// `--volume …` / `--mic-mute` (O2): change the level with `wpctl` and show
 /// the result at once, without waiting for the poller.
 pub fn change_volume(app: &Application, request: crate::services::audio::VolumeRequest) {

@@ -25,6 +25,7 @@ pub fn reap_finished_children() -> usize {
 pub use action::{Action, ActionRisk, ExecutionDecision, SecondaryActionKind};
 pub use app::Zeshicast;
 pub use services::audio::VolumeRequest;
+pub use services::brightness::BrightnessRequest;
 
 /// Delete clipboard history, snippets and their key (Q6.3, key lost).
 pub fn reset_encrypted_data(config_dir: &std::path::Path) -> Result<(), String> {

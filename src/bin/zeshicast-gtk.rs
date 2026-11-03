@@ -135,6 +135,10 @@ fn main() -> glib::ExitCode {
         eprintln!("zeshicast-gtk: {error}");
         return glib::ExitCode::FAILURE;
     }
+    if let Some(Err(error)) = zeshicast::BrightnessRequest::from_args(&args) {
+        eprintln!("zeshicast-gtk: {error}");
+        return glib::ExitCode::FAILURE;
+    }
     if let Some(link) = deep_link_arg(&args) {
         let checked = zeshicast::deeplink::parse_deep_link(link).and_then(|link| match link {
             zeshicast::deeplink::DeepLink::Command { id } => zeshicast::ui::check_command_id(&id),
@@ -190,8 +194,15 @@ fn main() -> glib::ExitCode {
             }
 
             // O2: volume keys never open the palette, only the level OSD.
-            if let Some(Ok(request)) = zeshicast::VolumeRequest::from_args(&args) {
-                zeshicast::ui::change_volume(app, request);
+            let volume = zeshicast::VolumeRequest::from_args(&args).and_then(Result::ok);
+            let brightness = zeshicast::BrightnessRequest::from_args(&args).and_then(Result::ok);
+            if volume.is_some() || brightness.is_some() {
+                if let Some(request) = volume {
+                    zeshicast::ui::change_volume(app, request);
+                }
+                if let Some(request) = brightness {
+                    zeshicast::ui::change_brightness(app, request);
+                }
                 if state.borrow().is_none() {
                     // No daemon was running, so this process is the app:
                     // leave once the OSD is gone instead of staying resident.
@@ -352,6 +363,8 @@ Commands and links:
                                    Change the volume and show the level OSD
                                    (bind your volume keys to it); --mic-mute
                                    toggles the microphone
+  zeshicast-gtk --brightness +10|-10|60
+                                   Change the laptop backlight and show it
   zeshicast-gtk --cmd list         Print `id<TAB>name` for commands and scripts
   zeshicast-gtk --cmd run <id>     Run one as if picked and confirmed with Enter
                                    (risky ones still ask; forms still open)

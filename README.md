@@ -470,13 +470,14 @@ bindsym $mod+space exec ~/.local/bin/zeshicast-gtk
 For GNOME/KDE, add the command through the desktop environment keyboard shortcuts
 settings.
 
-### Volume keys with an on-screen level
+### Volume and brightness keys with an on-screen level
 
 Bind the volume keys to `zeshicast-gtk --volume …` instead of `wpctl`: the
 daemon changes the volume (raising it unmutes, as GNOME does) and shows a
 level at the bottom of the screen at once, also under Do Not Disturb. The
 palette does not open. `volume_max = "150"` allows PipeWire's boost above
-100 %.
+100 %. `--brightness +10|-10|60` does the same for a laptop's backlight
+(never below 1 %); external monitors (DDC/CI) are not supported.
 
 ```kdl
 // niri, config.kdl
@@ -484,6 +485,9 @@ XF86AudioRaiseVolume allow-when-locked=true { spawn "zeshicast-gtk" "--volume" "
 XF86AudioLowerVolume allow-when-locked=true { spawn "zeshicast-gtk" "--volume" "-5"; }
 XF86AudioMute        allow-when-locked=true { spawn "zeshicast-gtk" "--volume" "mute"; }
 XF86AudioMicMute     allow-when-locked=true { spawn "zeshicast-gtk" "--mic-mute"; }
+// laptops: the panel backlight, through logind (no root, no udev rules)
+XF86MonBrightnessUp   allow-when-locked=true { spawn "zeshicast-gtk" "--brightness" "+10"; }
+XF86MonBrightnessDown allow-when-locked=true { spawn "zeshicast-gtk" "--brightness" "-10"; }
 ```
 
 ```ini

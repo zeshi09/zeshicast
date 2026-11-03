@@ -15,6 +15,10 @@ the section under a version heading and tags it `vX.Y.Z`.
   change the level with `wpctl` and show it at the bottom of the screen with
   a gliding bar; a burst of key presses updates one OSD. Bind the volume
   keys to it (README, "Volume keys"). Shown under Do Not Disturb too.
+- Brightness OSD for laptops: `zeshicast-gtk --brightness +10|-10|60`
+  changes the backlight through logind (no root, never below 1 %) and shows
+  the level; changes from firmware keys or other tools show it too. External
+  monitors (DDC/CI) are not supported.
 - Volume changes made elsewhere (pavucontrol, a headset, a new default
   device) reach the palette at once through PipeWire events
   (`pw-dump --monitor`) instead of the one-second poll, and show the level
