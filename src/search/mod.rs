@@ -13,6 +13,7 @@ pub(crate) mod media;
 pub(crate) mod mozlz4;
 pub(crate) mod named_values;
 pub(crate) mod notifications;
+pub(crate) mod power;
 pub(crate) mod processes;
 pub(crate) mod scripts;
 pub(crate) mod snapshot;
@@ -109,6 +110,14 @@ pub(crate) struct BluetoothProvider;
 impl SearchProvider for BluetoothProvider {
     fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
         bluetooth::search_bluetooth(context.query, crate::services::bluetooth::bluetooth_state)
+    }
+}
+
+pub(crate) struct PowerProfilesProvider;
+
+impl SearchProvider for PowerProfilesProvider {
+    fn search(&self, context: &SearchContext<'_>) -> Vec<Action> {
+        power::search_power_profiles(context.query, crate::services::power::power_profiles)
     }
 }
 

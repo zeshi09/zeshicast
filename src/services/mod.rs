@@ -25,6 +25,8 @@ pub mod network;
 pub mod notifications;
 #[cfg(feature = "gui")]
 pub mod poll_cache;
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub mod power;
 pub mod storage;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod system_stats;

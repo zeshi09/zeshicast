@@ -20,7 +20,18 @@ impl BatterySnapshot {
     }
 }
 
+/// The battery as UPower reports it (with time left), or from sysfs when
+/// UPower is not running (Q7.2).
 pub fn battery_snapshot() -> BatterySnapshot {
+    if let Some(battery) = crate::services::power::upower_battery() {
+        return BatterySnapshot {
+            batteries: vec![BatteryDeviceSnapshot {
+                name: "battery".to_string(),
+                capacity_percent: Some(battery.percent),
+                status: Some(battery.status),
+            }],
+        };
+    }
     BatterySnapshot {
         batteries: read_batteries().unwrap_or_default(),
     }

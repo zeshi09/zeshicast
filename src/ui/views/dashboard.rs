@@ -505,10 +505,15 @@ pub fn set_dashboard_battery_snapshot(view: &DashboardView, snapshot: &BatterySn
         view.battery.set_visible(false);
         return;
     };
-    let capacity = battery
+    let mut capacity = battery
         .capacity_percent
         .map(|value| format!("{value}%"))
         .unwrap_or_else(|| "—".to_string());
+    // UPower's status carries the time left (Q7.2): "Discharging · 1 h left".
+    if let Some((_, time)) = battery.status.as_deref().and_then(|s| s.split_once(" · ")) {
+        capacity.push_str(" · ");
+        capacity.push_str(time);
+    }
     view.battery.set_markup(&format!(
         "<span alpha='40%'>Battery</span>  {}",
         glib::markup_escape_text(&capacity)

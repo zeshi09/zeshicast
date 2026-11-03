@@ -31,6 +31,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Power: `profile …` switches the power profile through
+  power-profiles-daemon (and says so when it is not running); the battery
+  comes from UPower when it runs, with the time left or to full on the
+  dashboard, from sysfs otherwise.
 - Bluetooth (`bt …`, or a device's name in the main search): turn the
   adapter on or off, connect and disconnect paired devices, with their
   battery level. Read from BlueZ over D-Bus; without BlueZ, `bt` says why.
