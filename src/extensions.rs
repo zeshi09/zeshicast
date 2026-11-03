@@ -334,6 +334,88 @@ binaries = ["bin/tool"]
         assert_eq!(manifest.binaries_blocked, None);
     }
 
+    fn repo_file(path: &str) -> String {
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path)).unwrap()
+    }
+
+    /// The template in `packaging/examples/extension-template` is what
+    /// `docs/extensions.md` tells authors to copy: it must load as is.
+    #[test]
+    fn the_extension_template_loads_with_its_binary() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("packaging/examples/extension-template");
+        let manifest = parse_extension_manifest(
+            &root,
+            &repo_file("packaging/examples/extension-template/extension.toml"),
+        )
+        .expect("the template manifest parses");
+        assert_eq!(manifest.binaries_blocked, None);
+        assert_eq!(manifest.binaries, vec![root.join("bin/template.sh")]);
+        for path in manifest.commands.iter().chain(&manifest.binaries) {
+            assert!(path.exists(), "{} is missing", path.display());
+        }
+    }
+
+    /// `resources/extension.schema.json` is the editor-side copy of the
+    /// rules above; it must name the same protocol and capabilities.
+    #[test]
+    fn the_manifest_schema_matches_the_code() {
+        let schema: serde_json::Value =
+            serde_json::from_str(&repo_file("resources/extension.schema.json")).unwrap();
+        assert_eq!(
+            schema["properties"]["protocol"]["const"],
+            crate::services::extension_protocol::PROTOCOL_VERSION
+        );
+        let listed: Vec<&str> = schema["properties"]["capabilities"]["items"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        let parsed = crate::search::commands::parse_capabilities(
+            &listed
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(parsed.len(), listed.len(), "every listed capability parses");
+        for capability in parsed {
+            assert!(
+                listed.contains(&capability.label()),
+                "{}",
+                capability.label()
+            );
+        }
+        // And the other way round: a new capability must reach the schema.
+        // The match stops compiling when a variant is added.
+        use crate::action::Capability;
+        let every = [
+            Capability::Shell,
+            Capability::Network,
+            Capability::Filesystem,
+            Capability::ClipboardRead,
+            Capability::ClipboardWrite,
+            Capability::OpenUrl,
+            Capability::OpenPath,
+        ];
+        for capability in every {
+            match capability {
+                Capability::Shell
+                | Capability::Network
+                | Capability::Filesystem
+                | Capability::ClipboardRead
+                | Capability::ClipboardWrite
+                | Capability::OpenUrl
+                | Capability::OpenPath => {}
+            }
+            assert!(
+                listed.contains(&capability.label()),
+                "{}",
+                capability.label()
+            );
+        }
+    }
+
     #[test]
     fn load_manifests_scans_one_level() {
         let config = test_dir("load");

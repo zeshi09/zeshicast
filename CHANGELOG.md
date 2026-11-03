@@ -18,6 +18,13 @@ the section under a version heading and tags it `vX.Y.Z`.
 - The first palette show after the daemon starts takes ~115 ms instead of
   ~190 ms: fonts and styles are prepared while the daemon is idle.
 
+### Added
+
+- `docs/extensions.md`: the guide for extension authors (manifest,
+  capabilities, JSON-RPC protocol and limits), a JSON Schema for
+  `extension.toml` (`resources/extension.schema.json`) and a template
+  extension in `packaging/examples/extension-template/` (sh + jq or Python).
+
 ### Fixed
 
 - `zeshicast-gtk --quit` (or a crash) no longer leaves the clipboard

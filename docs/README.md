@@ -16,6 +16,7 @@
 ### 🔒 Безопасность и Приватность
 
 - [📄 Security Policy & Threat Model (`security.md`)](security.md) — Модель угроз, безопасное ограничение прав расширений и защита атомарных файлов.
+- [📄 Writing Extensions (`extensions.md`)](extensions.md) — Руководство автора расширений: манифест, права, JSON-RPC-протокол, лимиты, шаблон; схема `resources/extension.schema.json`.
 - [📄 Privacy & Data Retention (`privacy.md`)](privacy.md) — Политики сохранения истории буфера обмена, фильтрация приватного режима и маскирование секрета.
 
 ### 🗺 План развития (Roadmaps & Features)

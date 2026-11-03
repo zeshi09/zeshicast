@@ -1598,6 +1598,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
         // A document that names nothing is a document nobody checks.
         for (document, minimum) in [
             ("docs/security.md", 30),
+            ("docs/extensions.md", 15),
             ("docs/remediation-acceptance.md", 45),
         ] {
             let text = std::fs::read_to_string(root.join(document))

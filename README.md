@@ -654,6 +654,9 @@ Copy any file to `~/.config/zeshicast/commands/` to enable it.
 
 ### Local extension manifests
 
+The full guide for extension authors — manifest, capabilities, the JSON-RPC
+protocol, limits and a template to copy — is [docs/extensions.md](docs/extensions.md).
+
 For multi-command local extensions, create a directory under
 `~/.config/zeshicast/extensions/` with an `extension.toml` manifest:
 

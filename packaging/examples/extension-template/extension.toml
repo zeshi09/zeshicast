@@ -1,0 +1,15 @@
+# Template extension — copy this directory to
+# ~/.config/zeshicast/extensions/<your-name>/ and edit. See docs/extensions.md.
+#:schema ../../../resources/extension.schema.json
+
+id = "example.template"
+name = "Template"
+version = "0.1.0"
+# JSON-RPC protocol the binaries speak (docs/extensions.md#protocol).
+protocol = 1
+# The ceiling for everything in this extension. Each command must also ask
+# for what it needs in its own `permissions`.
+capabilities = ["shell", "open_url", "clipboard_write"]
+commands = ["hello.toml"]
+# One binary is enough; the Python one is an alternative to the sh one.
+binaries = ["bin/template.sh"]

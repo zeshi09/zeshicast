@@ -1,0 +1,13 @@
+# A command without a shell: `hello <name>` shows a notification.
+name = "Say Hello"
+mode = "argv"
+keyword = "hello"
+argument_hint = "<name>"
+program = "notify-send"
+args = ["Hello", "{{arg:name}}"]
+description = "Template command: argv mode, one argument"
+# argv runs a program, so it needs `shell` here and in the manifest.
+permissions = ["shell"]
+arguments = [
+  { name = "name", type = "text", required = true }
+]

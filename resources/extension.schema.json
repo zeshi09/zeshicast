@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zeshi09/zeshicast/blob/main/resources/extension.schema.json",
+  "title": "zeshicast extension.toml",
+  "description": "Manifest of a zeshicast extension. See docs/extensions.md.",
+  "type": "object",
+  "required": ["id", "name", "version"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable identifier, reverse-domain style: \"you.git-tools\"."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Shown in search results and the extension browser."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The extension's own version (free form; semver recommended)."
+    },
+    "protocol": {
+      "const": 1,
+      "description": "JSON-RPC protocol version the binaries speak. Required when `binaries` is set; any other value keeps them from running."
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Ceiling for everything in the extension. A command still needs each capability in its own `permissions`.",
+      "items": {
+        "enum": [
+          "shell",
+          "network",
+          "filesystem",
+          "clipboard_read",
+          "clipboard_write",
+          "open_url",
+          "open_path"
+        ]
+      }
+    },
+    "commands": {
+      "type": "array",
+      "description": "Command definitions, `*.toml` paths relative to the extension directory.",
+      "items": { "$ref": "#/$defs/relativePath", "pattern": "\\.toml$" }
+    },
+    "scripts": {
+      "type": "array",
+      "description": "Script commands with `@raycast.*` / `@vicinae.*` metadata comments. Need the `shell` capability.",
+      "items": { "$ref": "#/$defs/relativePath" }
+    },
+    "binaries": {
+      "type": "array",
+      "description": "Executable JSON-RPC extensions. Need the `shell` capability and `protocol`.",
+      "items": { "$ref": "#/$defs/relativePath" }
+    }
+  },
+  "dependentRequired": {
+    "binaries": ["protocol"]
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "anyOf": [
+          { "pattern": "^/" },
+          { "pattern": "(^|/)\\.\\.(/|$)" }
+        ]
+      },
+      "description": "Relative to the extension directory; absolute paths and `..` are ignored."
+    }
+  }
+}
