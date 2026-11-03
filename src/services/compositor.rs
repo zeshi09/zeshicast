@@ -147,7 +147,7 @@ pub fn layout_change_receiver() -> Receiver<String> {
 
 fn watch_layout_niri(tx: Sender<String>) {
     loop {
-        let child = match Command::new("niri")
+        let child = match crate::process::die_with_parent(&mut Command::new("niri"))
             .args(["msg", "--json", "event-stream"])
             .stdout(std::process::Stdio::piped())
             .spawn()

@@ -9,6 +9,14 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Fixed
+
+- `zeshicast-gtk --quit` (or a crash) no longer leaves the clipboard
+  watchers (`wl-paste --watch`) and the niri event stream running: they now
+  die with the daemon even when it was started outside systemd.
+- A script command saved a moment before it runs no longer fails with
+  "Text file busy" when the command captures output.
+
 ## [0.2.0] — 2026-11-02
 
 ### Added

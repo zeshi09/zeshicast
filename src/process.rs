@@ -212,6 +212,32 @@ pub(crate) fn program_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     Command::new(program)
 }
 
+/// Make a long-lived watcher child (`wl-paste --watch`, `niri msg
+/// event-stream`) die with the thread that spawns it. On exit the daemon
+/// does not unwind its watcher threads, so no `Drop` kills these children;
+/// `wl-paste --watch` never writes to the closed pipe itself, so it would
+/// outlive every daemon that was started outside systemd's cgroup cleanup.
+///
+/// The signal fires when the *spawning thread* exits, which for the
+/// watchers is the process exit (their threads live as long as it does).
+pub(crate) fn die_with_parent(command: &mut Command) -> &mut Command {
+    use std::os::unix::process::CommandExt;
+
+    let parent = rustix::process::getpid();
+    // SAFETY: the closure runs between fork and exec and only makes two
+    // async-signal-safe syscalls (prctl, getppid) without allocating.
+    unsafe {
+        command.pre_exec(move || {
+            rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))?;
+            // The parent may have exited before prctl took effect.
+            if rustix::process::getppid() != Some(parent) {
+                return Err(io::Error::other("parent exited before exec"));
+            }
+            Ok(())
+        })
+    }
+}
+
 /// Result of [`run_capped`].
 #[cfg(any(feature = "gui", test))]
 pub(crate) struct CappedRun {
@@ -256,7 +282,8 @@ pub(crate) fn run_capped(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = command.spawn()?;
+    // A script saved a moment ago is the normal case for script commands.
+    let mut child = spawn_retrying_text_file_busy(command)?;
     let group = rustix::process::Pid::from_raw(child.id() as i32);
     let kill_group = || {
         if let Some(group) = group {
@@ -592,6 +619,39 @@ mod tests {
             stdout.ends_with("30000\n"),
             "got {} bytes",
             run.stdout.len()
+        );
+    }
+
+    /// A watcher child must not outlive the thread that spawned it: on exit
+    /// the daemon never runs the watchers' cleanup, and `wl-paste --watch`
+    /// used to stay behind after every `--quit`.
+    #[test]
+    fn die_with_parent_child_ends_with_its_spawning_thread() {
+        let mut child = std::thread::spawn(|| {
+            die_with_parent(Command::new("sleep").arg("30"))
+                .spawn()
+                .expect("spawn sleep")
+        })
+        .join()
+        .expect("spawning thread");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("try_wait") {
+                break Some(status);
+            }
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        use std::os::unix::process::ExitStatusExt;
+        let status = status.expect("sleep outlived its spawning thread");
+        assert_eq!(
+            status.signal(),
+            Some(rustix::process::Signal::TERM.as_raw())
         );
     }
 

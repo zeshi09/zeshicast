@@ -84,7 +84,7 @@ pub(crate) fn install_clipboard_background_watcher(launcher: &Rc<RefCell<Zeshica
 
 fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
     watch_clipboard_text_with(tx, || {
-        std::process::Command::new("wl-paste")
+        crate::process::die_with_parent(&mut std::process::Command::new("wl-paste"))
             .args(["--type", "text", "--watch", "sh", "-c", "cat; printf '\\0'"])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
@@ -94,7 +94,7 @@ fn watch_clipboard_text(tx: std::sync::mpsc::Sender<String>) {
 
 fn watch_clipboard_image(tx: std::sync::mpsc::Sender<String>) {
     watch_clipboard_image_with(tx, || {
-        std::process::Command::new("wl-paste")
+        crate::process::die_with_parent(&mut std::process::Command::new("wl-paste"))
             .args(["--type", "image/png", "--watch", "cat"])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
