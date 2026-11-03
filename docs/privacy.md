@@ -110,9 +110,12 @@ files out of the main search; `file …` still searches them.
 
 ## Notification History
 
-When enabled, zeshicast can own `org.freedesktop.Notifications` and record
-notifications into its in-memory notification store for the current daemon
-session.
+When enabled, zeshicast owns `org.freedesktop.Notifications` and records
+notifications. The newest 100 are kept in the `notifications` table of
+`zeshicast.db` and come back after a restart; their summary and body are
+encrypted like clipboard history. In private mode
+(`clipboard_private_mode = "true"`) a notification is saved without its
+body. Closing a notification or clearing them deletes the saved copies too.
 
 Controls:
 

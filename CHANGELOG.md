@@ -31,6 +31,9 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- Notification history survives a daemon restart: the newest 100 are saved
+  in `zeshicast.db`, encrypted; private mode saves them without a body. The
+  database moves to schema 7.
 - Clipboard history keeps the original format: rich text (HTML) and copied
   files paste back as they were copied, together with their plain text;
   "Paste as Plain Text" pastes only the text. Copies marked as passwords

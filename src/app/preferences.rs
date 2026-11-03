@@ -246,6 +246,8 @@ impl Zeshicast {
             self.preferences.insert(key, value);
         }
         write_preferences(&self.config_dir.join("preferences.toml"), &self.preferences)?;
+        // Private mode also keeps notification bodies off the disk (Q6.5).
+        crate::services::notifications::set_keep_bodies(!self.clipboard_private_mode());
         if should_prune_clipboard {
             self.enforce_clipboard_retention()?;
         }

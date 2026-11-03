@@ -62,6 +62,13 @@ pub(crate) fn build_ui(
     }
     install_clipboard_background_watcher(&launcher);
     if launcher.borrow().notifications_history_enabled() {
+        // Q6.5: restore the history an earlier run saved, and keep saving.
+        let launcher = launcher.borrow();
+        crate::services::notifications::enable_persistence(
+            &launcher.config_dir,
+            !launcher.clipboard_private_mode(),
+        );
+        drop(launcher);
         super::super::notify_server::install_notification_server();
     }
 

@@ -8,7 +8,7 @@ use rusqlite::{Connection, Result, params};
 
 use super::crypto::Cipher;
 
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 fn open(config_dir: &Path) -> Result<Connection> {
     if let Err(error) = std::fs::create_dir_all(config_dir) {
@@ -98,6 +98,10 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             5 => {
                 migrate_5_to_6(&transaction)?;
                 version = 6;
+            }
+            6 => {
+                migrate_6_to_7(&transaction)?;
+                version = 7;
             }
             _ => {
                 return Err(rusqlite::Error::InvalidParameterName(format!(
@@ -201,6 +205,21 @@ fn migrate_5_to_6(conn: &Connection) -> Result<()> {
     )
 }
 
+/// Q6.5: notification history survives a restart. Summary and body are
+/// sealed (they carry messages and one-time codes); `body` is NULL when it
+/// was received in private mode.
+fn migrate_6_to_7(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS notifications (
+            id          INTEGER PRIMARY KEY,
+            app_name    TEXT    NOT NULL,
+            summary     BLOB    NOT NULL,
+            body        BLOB,
+            received_at INTEGER NOT NULL
+        );",
+    )
+}
+
 fn meta_get(conn: &Connection, key: &str) -> Option<Vec<u8>> {
     conn.query_row(
         "SELECT value FROM meta WHERE key = ?1",
@@ -298,6 +317,7 @@ pub fn reset_encrypted_data(config_dir: &Path) -> Result<()> {
     conn.execute_batch(
         "DELETE FROM clipboard;
          DELETE FROM snippets;
+         DELETE FROM notifications;
          DELETE FROM meta WHERE key IN ('key_check', 'key_store');
          PRAGMA wal_checkpoint(TRUNCATE);",
     )?;
@@ -611,6 +631,88 @@ pub fn files_apply(
         }
     }
     transaction.commit()
+}
+
+// ── Notification history (Q6.5) ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationRow {
+    pub id: u32,
+    pub app_name: String,
+    pub summary: String,
+    /// `None` when it arrived in private mode.
+    pub body: Option<String>,
+    pub received_at: u64,
+}
+
+/// Store (or replace, by id) one notification and keep the newest `limit`.
+pub fn notification_save(config_dir: &Path, row: &NotificationRow, limit: usize) -> Result<()> {
+    let (conn, cipher) = open_keyed(config_dir)?;
+    let body = match &row.body {
+        Some(body) => Some(cipher.seal(body.as_bytes()).map_err(seal_error)?),
+        None => None,
+    };
+    conn.execute(
+        "INSERT OR REPLACE INTO notifications (id, app_name, summary, body, received_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            row.id,
+            row.app_name,
+            cipher.seal(row.summary.as_bytes()).map_err(seal_error)?,
+            body,
+            row.received_at as i64
+        ],
+    )?;
+    conn.execute(
+        "DELETE FROM notifications WHERE id NOT IN (
+            SELECT id FROM notifications ORDER BY received_at DESC, id DESC LIMIT ?1
+        )",
+        params![limit as i64],
+    )?;
+    Ok(())
+}
+
+/// Newest first. Fails when the key is missing or wrong.
+pub fn notifications_load(config_dir: &Path, limit: usize) -> Result<Vec<NotificationRow>> {
+    let (conn, cipher) = open_keyed(config_dir)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, app_name, summary, body, received_at FROM notifications
+         ORDER BY received_at DESC, id DESC LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![limit as i64], |row| {
+            Ok((
+                row.get::<_, u32>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Vec<u8>>(2)?,
+                row.get::<_, Option<Vec<u8>>>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(|(id, app_name, summary, body, received_at)| {
+            Ok(NotificationRow {
+                id,
+                app_name,
+                summary: cipher.open_text(&summary).map_err(open_error)?,
+                body: body
+                    .map(|body| cipher.open_text(&body).map_err(open_error))
+                    .transpose()?,
+                received_at: received_at.max(0) as u64,
+            })
+        })
+        .collect()
+}
+
+pub fn notification_delete(config_dir: &Path, id: u32) -> Result<()> {
+    open(config_dir)?.execute("DELETE FROM notifications WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+pub fn notifications_clear(config_dir: &Path) -> Result<()> {
+    open(config_dir)?.execute("DELETE FROM notifications", [])?;
+    Ok(())
 }
 
 // ── Snippets ─────────────────────────────────────────────────────────────────
@@ -956,6 +1058,38 @@ mod tests {
         // Copied again as plain text: the old format does not stick.
         clipboard_insert_with_limit(&dir, "QUARTERLY", 100).unwrap();
         assert_eq!(clipboard_extra(&dir, "QUARTERLY").unwrap(), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn notification_history_is_kept_sealed_and_bounded() {
+        let dir = test_dir("notifications");
+        let row = |id: u32, at: u64, body: Option<&str>| NotificationRow {
+            id,
+            app_name: "Telegram".to_string(),
+            summary: format!("SUMMARY{id}"),
+            body: body.map(str::to_string),
+            received_at: at,
+        };
+        for id in 1..=5 {
+            notification_save(&dir, &row(id, 100 + u64::from(id), Some("CODE 482913")), 3).unwrap();
+        }
+        notification_save(&dir, &row(9, 200, None), 3).unwrap();
+        let loaded = notifications_load(&dir, 10).unwrap();
+        assert_eq!(
+            loaded.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![9, 5, 4],
+            "newest first, three kept"
+        );
+        assert_eq!(loaded[0].body, None);
+        assert_eq!(loaded[1].body.as_deref(), Some("CODE 482913"));
+        let raw = raw_database(&dir);
+        assert!(!contains(&raw, "482913") && !contains(&raw, "SUMMARY5"));
+
+        notification_delete(&dir, 5).unwrap();
+        assert_eq!(notifications_load(&dir, 10).unwrap().len(), 2);
+        notifications_clear(&dir).unwrap();
+        assert!(notifications_load(&dir, 10).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 

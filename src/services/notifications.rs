@@ -80,6 +80,94 @@ fn lock_state() -> std::sync::MutexGuard<'static, NotificationState> {
 
 const MAX_HISTORY: usize = 100;
 
+/// Where history is saved once the daemon turns persistence on (Q6.5), and
+/// whether bodies are saved (not in private mode). Off for the CLI and tests.
+struct Persistence {
+    config_dir: std::path::PathBuf,
+    keep_bodies: bool,
+}
+
+static PERSISTENCE: Mutex<Option<Persistence>> = Mutex::new(None);
+
+fn persistence() -> std::sync::MutexGuard<'static, Option<Persistence>> {
+    PERSISTENCE
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// Save history under `config_dir` from now on, and load what an earlier
+/// run saved. Ids continue after the stored ones, so a replacement from a
+/// client that kept an old id cannot hit another app's restored entry.
+pub fn enable_persistence(config_dir: &std::path::Path, keep_bodies: bool) {
+    let rows = crate::services::storage::notifications_load(config_dir, MAX_HISTORY)
+        .unwrap_or_else(|error| {
+            log::warn!("notification history not restored: {error}");
+            Vec::new()
+        });
+    {
+        let mut state = lock_state();
+        let restored = rows.into_iter().map(|row| StoredNotification {
+            id: row.id,
+            app_name: row.app_name,
+            summary: row.summary,
+            body: row.body.unwrap_or_default(),
+            received_at: row.received_at,
+            sender: None,
+        });
+        for entry in restored {
+            if !state.entries.iter().any(|existing| existing.id == entry.id) {
+                state.entries.push(entry);
+            }
+        }
+        state
+            .entries
+            .sort_by_key(|entry| std::cmp::Reverse(entry.received_at));
+        state.entries.truncate(MAX_HISTORY);
+        let next = state
+            .entries
+            .iter()
+            .map(|entry| entry.id)
+            .max()
+            .unwrap_or(0);
+        state.next_id = state.next_id.max(next.saturating_add(1)).max(1);
+    }
+    *persistence() = Some(Persistence {
+        config_dir: config_dir.to_path_buf(),
+        keep_bodies,
+    });
+}
+
+/// Private mode on: new notifications are saved without their body.
+pub fn set_keep_bodies(keep_bodies: bool) {
+    if let Some(persistence) = persistence().as_mut() {
+        persistence.keep_bodies = keep_bodies;
+    }
+}
+
+fn save(entry: &StoredNotification) {
+    let Some((config_dir, keep_bodies)) = persistence()
+        .as_ref()
+        .map(|p| (p.config_dir.clone(), p.keep_bodies))
+    else {
+        return;
+    };
+    let row = crate::services::storage::NotificationRow {
+        id: entry.id,
+        app_name: entry.app_name.clone(),
+        summary: entry.summary.clone(),
+        body: keep_bodies.then(|| entry.body.clone()),
+        received_at: entry.received_at,
+    };
+    if let Err(error) = crate::services::storage::notification_save(&config_dir, &row, MAX_HISTORY)
+    {
+        log::warn!("could not save the notification: {error}");
+    }
+}
+
+fn persisted_dir() -> Option<std::path::PathBuf> {
+    persistence().as_ref().map(|p| p.config_dir.clone())
+}
+
 /// Caps for untrusted notification text (M-14): any client on the session bus
 /// could otherwise make the daemon hold (and render) megabytes per notification.
 const MAX_APP_NAME_BYTES: usize = 1024;
@@ -173,6 +261,9 @@ pub fn push_notification_from(
         },
     );
     state.entries.truncate(MAX_HISTORY);
+    let saved = state.entries[0].clone();
+    drop(state);
+    save(&saved);
     id
 }
 
@@ -192,13 +283,25 @@ pub fn close_notification(id: u32) {
 /// [`close_notification`] that refuses to close another sender's notification.
 pub fn close_notification_from(id: u32, sender: Option<&str>) {
     let mut state = lock_state();
-    if can_own(&state, id, sender) {
-        state.entries.retain(|entry| entry.id != id);
+    if !can_own(&state, id, sender) {
+        return;
+    }
+    state.entries.retain(|entry| entry.id != id);
+    drop(state);
+    if let Some(dir) = persisted_dir()
+        && let Err(error) = crate::services::storage::notification_delete(&dir, id)
+    {
+        log::warn!("could not delete the saved notification: {error}");
     }
 }
 
 pub fn clear_notifications() {
     lock_state().entries.clear();
+    if let Some(dir) = persisted_dir()
+        && let Err(error) = crate::services::storage::notifications_clear(&dir)
+    {
+        log::warn!("could not clear the saved notifications: {error}");
+    }
 }
 
 /// Flip Do-Not-Disturb; returns the new state.
@@ -313,6 +416,46 @@ mod tests {
     use super::*;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn history_survives_a_restart_without_private_bodies() {
+        let _guard = isolated();
+        let dir = tempfile::tempdir().unwrap();
+        enable_persistence(dir.path(), true);
+        push_notification("Telegram", "Alex", "see you at 6", 0);
+        set_keep_bodies(false);
+        let private = push_notification("Bank", "Code", "482913", 0);
+        set_keep_bodies(true);
+        let closed = push_notification("Noise", "gone", "", 0);
+        close_notification(closed);
+
+        // A restart: the in-memory store is empty, the database is not.
+        {
+            let mut state = lock_state();
+            state.entries.clear();
+            state.next_id = 1;
+            state.running = true;
+        }
+        *persistence() = None;
+        enable_persistence(dir.path(), true);
+        let history = notification_snapshot().history;
+        let summaries: Vec<_> = history.iter().map(|entry| entry.summary.as_str()).collect();
+        assert_eq!(summaries, vec!["Code", "Alex"]);
+        assert_eq!(history[0].body, None, "private mode did not save the body");
+        assert_eq!(history[1].body.as_deref(), Some("see you at 6"));
+        assert!(
+            push_notification("New", "x", "", 0) > private,
+            "ids continue after the restored ones"
+        );
+
+        clear_notifications();
+        assert!(
+            crate::services::storage::notifications_load(dir.path(), 10)
+                .unwrap()
+                .is_empty()
+        );
+        *persistence() = None;
+    }
 
     /// Notification state is process-global, so tests that observe counts or
     /// history must serialize and start from a clean store.

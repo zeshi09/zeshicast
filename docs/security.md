@@ -297,6 +297,10 @@ the key lives.
   <!-- test: passwords_and_ignored_apps_are_never_kept -->
   <!-- test: private_mode_keeps_rich_copies_out_too -->
   <!-- test: password_managers_are_ignored_by_default -->
+- Saved notifications are sealed like clipboard history; private mode saves
+  them without a body.
+  <!-- test: notification_history_is_kept_sealed_and_bounded -->
+  <!-- test: history_survives_a_restart_without_private_bodies -->
 - Snippets are no longer mirrored to a plaintext `snippets.txt`.
   <!-- test: snippets_are_not_mirrored_to_a_plaintext_file -->
 

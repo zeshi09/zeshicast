@@ -95,7 +95,7 @@ pub(crate) const PREFERENCE_SECTIONS: &[PrefSection] = &[
         name: "Privacy",
         keys: &[
             ("clipboard_history_enabled", "Clipboard history"),
-            ("clipboard_private_mode", "Pause clipboard capture"),
+            ("clipboard_private_mode", "Private mode (no clipboard, no notification text)"),
             ("clipboard_retention", "Clipboard retention"),
             ("clipboard_capture_images", "Clipboard images"),
             ("clipboard_ignore_apps", "Never record copies from"),
