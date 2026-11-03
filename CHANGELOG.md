@@ -9,6 +9,20 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-03
+
+### Upgrading
+
+- The database moves from schema 2 to 7 on first start. Clipboard history
+  and snippets are then encrypted; the key goes to your keyring (or
+  `~/.config/zeshicast/db.key`). An older zeshicast refuses the migrated
+  database, so downgrading means starting over with
+  `zeshicast --reset-encrypted-data`.
+- JSON-RPC extensions (`binaries`) need `protocol = 1` in `extension.toml`.
+- Plaintext files from before SQLite (`clipboard.txt`, `recent.txt`,
+  `frequencies.txt`) are only imported into an empty database and never
+  deleted; once your history is in SQLite, delete them by hand.
+
 ### Changed
 
 - Root search shows a file only when the query is part of its name (scattered

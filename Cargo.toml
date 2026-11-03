@@ -1,6 +1,6 @@
 [package]
 name = "zeshicast"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 # MSRV of the default (CLI) build: edition 2024 needs >= 1.85, let-chains
 # (used in a few `if let … && …` guards) need >= 1.88, and the dependency
