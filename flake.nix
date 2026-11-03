@@ -141,6 +141,25 @@
           zeshicast = zeshicastFor pkgs;
         });
 
+      # `mkZeshicastExtension { id; src; capabilities; }`: an extension
+      # directory in the store, checked by `--extension-lint --allow` (Q5.6).
+      lib = forAllSystems (system:
+        let pkgs = pkgsFor system;
+        in {
+          mkZeshicastExtension = pkgs.callPackage ./nix/mkZeshicastExtension.nix {
+            zeshicast = self.packages.${system}.default;
+          };
+        });
+
+      # Builds the extension template through mkZeshicastExtension.
+      checks = forAllSystems (system: {
+        extension-template = self.lib.${system}.mkZeshicastExtension {
+          id = "example.template";
+          src = ./packaging/examples/extension-template;
+          capabilities = [ "shell" "open_url" "clipboard_write" ];
+        };
+      });
+
       # `nix run github:zeshi09/zeshicast` launches the GTK launcher.
       apps = forAllSystems (system: {
         default = {

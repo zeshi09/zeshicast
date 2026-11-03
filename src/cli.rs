@@ -19,6 +19,16 @@ pub enum CliCommand {
     ExtensionLint {
         dir: PathBuf,
         json: bool,
+        /// `--allow a,b`: the capabilities the manifest may ask for (Q5.6).
+        allow: Option<Vec<String>>,
+    },
+    /// `--extension-install <id> [--registry <file|https-url>] [--root <dir>]
+    /// [--yes]` (Q5.6). `root` replaces `~/.config/zeshicast`.
+    ExtensionInstall {
+        id: String,
+        registry: Option<String>,
+        root: Option<PathBuf>,
+        yes: bool,
     },
     Query(String),
     Repl,
@@ -59,11 +69,53 @@ where
             None => CliCommand::Help,
         },
         Some("--extension-lint") => {
-            let dir = args[1..].iter().find(|arg| !arg.starts_with("--"));
+            let allow_at = args.iter().position(|arg| arg == "--allow");
+            let allow = allow_at.map(|index| {
+                args.get(index + 1)
+                    .map(|list| {
+                        list.split(',')
+                            .map(str::trim)
+                            .filter(|name| !name.is_empty())
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            });
+            let dir = args
+                .iter()
+                .enumerate()
+                .skip(1)
+                .find(|(index, arg)| !arg.starts_with("--") && Some(index - 1) != allow_at)
+                .map(|(_, arg)| arg);
             match dir {
                 Some(dir) => CliCommand::ExtensionLint {
                     dir: PathBuf::from(dir),
                     json: args[1..].iter().any(|arg| arg == "--json"),
+                    allow,
+                },
+                None => CliCommand::Help,
+            }
+        }
+        Some("--extension-install") => {
+            let value_of = |flag: &str| {
+                args.iter()
+                    .position(|arg| arg == flag)
+                    .and_then(|index| args.get(index + 1))
+                    .filter(|value| !value.starts_with("--"))
+                    .cloned()
+            };
+            let mut rest = args[1..].iter().enumerate();
+            let id = rest.find_map(|(index, arg)| {
+                let after_flag =
+                    index > 0 && matches!(args[index].as_str(), "--registry" | "--root");
+                (!arg.starts_with("--") && !after_flag).then(|| arg.clone())
+            });
+            match id {
+                Some(id) => CliCommand::ExtensionInstall {
+                    id,
+                    registry: value_of("--registry"),
+                    root: value_of("--root").map(PathBuf::from),
+                    yes: args.iter().any(|arg| arg == "--yes"),
                 },
                 None => CliCommand::Help,
             }
@@ -108,6 +160,7 @@ mod tests {
             CliCommand::ExtensionLint {
                 dir: PathBuf::from("ext"),
                 json: false,
+                allow: None,
             }
         );
         assert_eq!(
@@ -115,9 +168,56 @@ mod tests {
             CliCommand::ExtensionLint {
                 dir: PathBuf::from("ext"),
                 json: true,
+                allow: None,
+            }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--extension-lint", "--allow", "shell,open_url", "ext"]),
+            CliCommand::ExtensionLint {
+                dir: PathBuf::from("ext"),
+                json: false,
+                allow: Some(vec!["shell".to_string(), "open_url".to_string()]),
+            }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--extension-lint", "ext", "--allow", ""]),
+            CliCommand::ExtensionLint {
+                dir: PathBuf::from("ext"),
+                json: false,
+                allow: Some(Vec::new()),
             }
         );
         assert_eq!(parse_cli_args(vec!["--extension-lint"]), CliCommand::Help);
+        assert_eq!(
+            parse_cli_args(vec![
+                "--extension-install",
+                "--registry",
+                "reg.toml",
+                "you.hello",
+                "--root",
+                "/tmp/sandbox",
+                "--yes"
+            ]),
+            CliCommand::ExtensionInstall {
+                id: "you.hello".to_string(),
+                registry: Some("reg.toml".to_string()),
+                root: Some(PathBuf::from("/tmp/sandbox")),
+                yes: true,
+            }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--extension-install", "you.hello"]),
+            CliCommand::ExtensionInstall {
+                id: "you.hello".to_string(),
+                registry: None,
+                root: None,
+                yes: false,
+            }
+        );
+        assert_eq!(
+            parse_cli_args(vec!["--extension-install"]),
+            CliCommand::Help
+        );
         // Only as the first argument, like --export.
         assert_eq!(
             parse_cli_args(vec!["find", "--extension-lint"]),

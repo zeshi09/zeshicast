@@ -5,6 +5,7 @@ pub mod cli;
 mod config;
 pub mod deeplink;
 pub mod dmenu;
+pub mod extension_install;
 pub mod extension_lint;
 mod extensions;
 pub mod logging;
@@ -1643,6 +1644,7 @@ DEPLOY_TOKEN = "{{pref:token}}"
         for (document, minimum) in [
             ("docs/security.md", 30),
             ("docs/extensions.md", 15),
+            ("docs/extensions-registry.md", 9),
             ("docs/remediation-acceptance.md", 45),
         ] {
             let text = std::fs::read_to_string(root.join(document))

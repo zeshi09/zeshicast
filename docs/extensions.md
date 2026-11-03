@@ -247,6 +247,14 @@ new required method, a changed field meaning, a removed field. Adding an
 optional field to a request or a reply does not change it, so ignore fields
 you do not know.
 
+## Publishing an extension
+
+Put the extension in a git repository with `extension.toml` at the top and
+add an entry to the registry index; users install it with
+`zeshicast --extension-install <id>`, Nix users with
+`mkZeshicastExtension`. `docs/extensions-registry.md` has the entry format and
+every check an install runs.
+
 ## Testing an extension
 
 Lint it first. The loader skips what it cannot use without complaining (a

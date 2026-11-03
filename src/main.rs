@@ -53,9 +53,14 @@ fn run_cli(command: CliCommand) -> i32 {
             }
             0
         }
-        CliCommand::ExtensionLint { dir, json } => {
-            use zeshicast::extension_lint::{has_errors, lint_extension, render_json, render_text};
-            let findings = lint_extension(&dir);
+        CliCommand::ExtensionLint { dir, json, allow } => {
+            use zeshicast::extension_lint::{
+                has_errors, lint_extension, lint_extension_allowing, render_json, render_text,
+            };
+            let findings = match &allow {
+                Some(allowed) => lint_extension_allowing(&dir, allowed),
+                None => lint_extension(&dir),
+            };
             if json {
                 println!("{}", render_json(&findings));
             } else if findings.is_empty() {
@@ -65,6 +70,12 @@ fn run_cli(command: CliCommand) -> i32 {
             }
             i32::from(has_errors(&findings))
         }
+        CliCommand::ExtensionInstall {
+            id,
+            registry,
+            root,
+            yes,
+        } => install_extension(&id, registry.as_deref(), root, yes),
         CliCommand::Import { src } => {
             let home = env::var("HOME").map(PathBuf::from).unwrap_or_default();
             let config_dir = home.join(".config/zeshicast");
@@ -86,6 +97,59 @@ fn run_cli(command: CliCommand) -> i32 {
             let mut app = Zeshicast::load();
             run_repl(&mut app);
             0
+        }
+    }
+}
+
+/// `--extension-install` (Q5.6): nothing is downloaded without this command,
+/// and nothing is installed without a yes.
+fn install_extension(id: &str, registry: Option<&str>, root: Option<PathBuf>, yes: bool) -> i32 {
+    use std::io::{BufRead, IsTerminal};
+    use zeshicast::extension_install::{
+        DEFAULT_REGISTRY, download, find_entry, install, read_registry,
+    };
+
+    let config_dir = root.unwrap_or_else(|| {
+        env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+            .join(".config/zeshicast")
+    });
+    let entry = match read_registry(registry.unwrap_or(DEFAULT_REGISTRY))
+        .and_then(|text| find_entry(&text, id))
+    {
+        Ok(entry) => entry,
+        Err(error) => {
+            eprintln!("extension-install: {error}");
+            return 1;
+        }
+    };
+    let confirm = |plan: &zeshicast::extension_install::InstallPlan| {
+        print!("{}", plan.render());
+        if yes {
+            return true;
+        }
+        if !io::stdin().is_terminal() {
+            eprintln!("not a terminal: pass --yes to install without asking");
+            return false;
+        }
+        print!("Install? [y/N] ");
+        let _ = io::stdout().flush();
+        let mut answer = String::new();
+        let _ = io::stdin().lock().read_line(&mut answer);
+        matches!(answer.trim(), "y" | "Y" | "yes")
+    };
+    match install(&entry, &config_dir, download, confirm) {
+        Ok(destination) => {
+            println!(
+                "installed into {}; restart the daemon: systemctl --user restart zeshicast",
+                destination.display()
+            );
+            0
+        }
+        Err(error) => {
+            eprintln!("extension-install: {error}");
+            1
         }
     }
 }
@@ -266,8 +330,12 @@ Usage:
                             Also export clipboard/usage history (zeshicast.db,
                             calc_history.json); excluded by default
   zeshicast --import <file> Import config from tar.gz
-  zeshicast --extension-lint <dir> [--json]
+  zeshicast --extension-lint <dir> [--json] [--allow cap1,cap2]
                             Check an extension directory; exit 1 on errors
+  zeshicast --extension-install <id> [--registry <file|url>] [--root <dir>] [--yes]
+                            Download one extension from the registry, check its
+                            sha256 and permissions, ask, then install it under
+                            ~/.config/zeshicast/extensions/ (or <dir>/extensions/)
                             (docs/extensions.md)
 
 Queries:

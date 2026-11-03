@@ -71,6 +71,39 @@ pub fn lint_extension(dir: &Path) -> Vec<Finding> {
     findings
 }
 
+/// [`lint_extension`], plus an error for every manifest capability outside
+/// `allowed` (`--allow`, used by `nix/mkZeshicastExtension.nix`): a packaged
+/// extension cannot quietly ask for more than its packager declared.
+pub fn lint_extension_allowing(dir: &Path, allowed: &[String]) -> Vec<Finding> {
+    let mut findings = lint_extension(dir);
+    let allowed = crate::action::CapabilitySet::new(parse_capabilities(allowed));
+    let manifest_path = dir.join("extension.toml");
+    let asked = std::fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .and_then(|table| table.get("capabilities").cloned())
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    let asked: Vec<String> = asked
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect();
+    for capability in parse_capabilities(&asked) {
+        if !allowed.allows(capability) {
+            findings.push(Finding::error(
+                "capability-not-allowed",
+                &manifest_path,
+                format!(
+                    "the manifest asks for `{}`, which --allow does not include",
+                    capability.label()
+                ),
+            ));
+        }
+    }
+    findings.sort_by_key(|finding| finding.severity != Severity::Error);
+    findings
+}
+
 pub fn has_errors(findings: &[Finding]) -> bool {
     findings
         .iter()
@@ -535,6 +568,26 @@ mod tests {
         let ext = Extension::new("unknown", &format!("{HEAD}capabilites = [\"shell\"]\n"));
         assert_eq!(errors(&ext.rules()), ["unknown-key"]);
         assert!(ext.messages().contains("did you mean `capabilities`"));
+    }
+
+    #[test]
+    fn allow_lists_the_capabilities_a_packager_accepts() {
+        let ext = Extension::new(
+            "allow",
+            &format!("{HEAD}capabilities = [\"network\", \"clipboard_write\"]\n"),
+        );
+        let rules = |allowed: &[&str]| {
+            let allowed: Vec<String> = allowed.iter().map(|a| a.to_string()).collect();
+            lint_extension_allowing(&ext.0, &allowed)
+                .into_iter()
+                .filter(|finding| finding.rule == "capability-not-allowed")
+                .map(|finding| finding.message)
+                .collect::<Vec<_>>()
+        };
+        assert!(rules(&["network", "clipboard_write"]).is_empty());
+        let refused = rules(&["open_url", "clipboard_write"]);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].contains("`network`"));
     }
 
     #[test]

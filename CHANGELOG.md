@@ -20,6 +20,15 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- `zeshicast --extension-install <id>`: installs an extension from the git
+  registry (`docs/extensions-registry.md`) only on that command. It checks
+  the tarball's sha256, unpacks it only inside `extensions/`, refuses a
+  manifest that asks for more than the registry entry lists or fails the
+  linter, and asks before installing. `--root` installs into a sandbox.
+- `mkZeshicastExtension` (flake `lib`): package an extension for NixOS or
+  Home Manager; the build runs the linter with the declared capabilities.
+- `--extension-lint --allow cap1,cap2`: an error for every manifest
+  capability outside the list.
 - Extension screen: Enter on an extension's row in the Extension Browser
   shows what its manifest allows, what each command, script and binary asked
   for and was granted, why a blocked one is blocked, and its latest

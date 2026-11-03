@@ -330,8 +330,12 @@ zeshicast --export [file]       Export config to tar.gz, excluding API keys by d
 zeshicast --export [file] --include-secrets
                                 Export config including API keys and secret-like preferences
 zeshicast --import file.tar.gz  Import config from tar.gz
-zeshicast --extension-lint DIR [--json]
+zeshicast --extension-lint DIR [--json] [--allow cap1,cap2]
                                 Check an extension; exit 1 on errors
+zeshicast --extension-install ID [--registry FILE|URL] [--root DIR] [--yes]
+                                Install an extension from the registry after
+                                checking its sha256 and permissions
+                                (docs/extensions-registry.md)
 ```
 
 ## Daemon mode
