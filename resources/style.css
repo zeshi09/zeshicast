@@ -646,6 +646,24 @@ entry.search-entry:focus-visible {
   font-size: 12px;
 }
 
+/* A stat chip that does something on click (the power profile). */
+.stat-chip-button {
+  min-height: 0;
+  min-width: 0;
+  box-shadow: none;
+}
+.stat-chip-button:hover {
+  background-color: alpha(@window_fg_color, 0.11);
+}
+.stat-chip-button:disabled {
+  opacity: 1;
+}
+.stat-chip.stat-chip-button label {
+  font-size: 12px;
+  font-weight: 400;
+  color: inherit;
+}
+
 /* ── Signal bars (Wi-Fi strength indicator) ── */
 .signal-bar-filled {
   background: alpha(@window_fg_color, 0.72);

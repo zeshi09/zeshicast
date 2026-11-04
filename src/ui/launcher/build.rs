@@ -879,6 +879,18 @@ pub(crate) fn build_ui(
     }
 
     {
+        let next = Rc::clone(&dashboard_view.next_power_profile);
+        dashboard_view
+            .power_profile
+            .clone()
+            .connect_clicked(move |_| {
+                if let Some(profile) = next.borrow().clone() {
+                    run_command_request("powerprofilesctl", ["set", profile.as_str()]);
+                }
+            });
+    }
+
+    {
         dashboard_view
             .toggle_mute
             .clone()

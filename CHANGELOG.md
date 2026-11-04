@@ -52,6 +52,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Added
 
+- The dashboard shows the power profile next to the battery when
+  power-profiles-daemon runs; a click switches to the next one
+  (`powerprofilesctl`, through the execution gateway), and a change made
+  elsewhere shows at once.
 - Volume OSD: `zeshicast-gtk --volume +5|-5|40|mute` and `--mic-mute`
   change the level with `wpctl` and show it at the bottom of the screen with
   a gliding bar; a burst of key presses updates one OSD. Bind the volume

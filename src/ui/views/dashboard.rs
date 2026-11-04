@@ -20,6 +20,10 @@ pub struct DashboardView {
     pub date: Label,
     pub uptime: Label,
     pub battery: Label,
+    /// The power profile; a click switches to the next one.
+    pub power_profile: Button,
+    /// What [`power_profile`](Self::power_profile) switches to.
+    pub next_power_profile: Rc<RefCell<Option<String>>>,
     pub processes: Label,
     pub workspace: Label,
     pub load: Label,
@@ -120,11 +124,18 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     let uptime = dashboard_stat_chip();
     let battery = dashboard_stat_chip();
     battery.set_visible(false);
+    let power_profile = Button::new();
+    power_profile.add_css_class("stat-chip");
+    power_profile.add_css_class("stat-chip-button");
+    power_profile.set_valign(gtk::Align::Center);
+    power_profile.set_child(Some(&dashboard_stat_chip_label()));
+    power_profile.set_visible(false);
     let processes = dashboard_stat_chip();
     let workspace = dashboard_stat_chip();
     workspace.set_visible(false);
     stats_row.append(&uptime);
     stats_row.append(&battery);
+    stats_row.append(&power_profile);
     stats_row.append(&processes);
     stats_row.append(&workspace);
     root.append(&stats_row);
@@ -315,6 +326,8 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         date,
         uptime,
         battery,
+        power_profile,
+        next_power_profile: Rc::new(RefCell::new(None)),
         processes,
         workspace,
         load,
@@ -507,6 +520,7 @@ pub fn set_dashboard_network_snapshot(view: &DashboardView, snapshot: &NetworkSn
 }
 
 pub fn set_dashboard_battery_snapshot(view: &DashboardView, snapshot: &BatterySnapshot) {
+    set_dashboard_power_profile(view, snapshot.profiles.as_ref());
     let Some(battery) = snapshot.primary() else {
         view.battery.set_visible(false);
         return;
@@ -589,6 +603,42 @@ pub fn set_dashboard_notification_snapshot(view: &DashboardView, snapshot: &Noti
         .unwrap_or("DND unknown");
     view.notifications
         .set_text(&format!("{backend}  {count}  {dnd}"));
+}
+
+fn set_dashboard_power_profile(
+    view: &DashboardView,
+    profiles: Option<&crate::services::power::PowerProfiles>,
+) {
+    use crate::services::power::{next_profile, profile_label};
+    let next = profiles.and_then(next_profile).map(str::to_string);
+    let (Some(profiles), Some(label)) = (
+        profiles,
+        view.power_profile
+            .child()
+            .and_then(|child| child.downcast::<Label>().ok()),
+    ) else {
+        view.power_profile.set_visible(false);
+        return;
+    };
+    label.set_markup(&format!(
+        "<span alpha='40%'>Power</span>  {}",
+        glib::markup_escape_text(&profile_label(&profiles.active))
+    ));
+    view.power_profile.set_tooltip_text(
+        next.as_deref()
+            .map(|next| format!("Switch to {}", profile_label(next)))
+            .as_deref(),
+    );
+    view.power_profile.set_sensitive(next.is_some());
+    view.power_profile.set_visible(true);
+    *view.next_power_profile.borrow_mut() = next;
+}
+
+/// The label inside a clickable stat chip.
+fn dashboard_stat_chip_label() -> Label {
+    let label = Label::new(None);
+    label.set_xalign(0.5);
+    label
 }
 
 fn dashboard_stat_chip() -> Label {

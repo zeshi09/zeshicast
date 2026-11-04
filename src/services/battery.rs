@@ -5,6 +5,8 @@ use std::path::Path;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BatterySnapshot {
     pub batteries: Vec<BatteryDeviceSnapshot>,
+    /// The power profile, when power-profiles-daemon runs (desktops too).
+    pub profiles: Option<crate::services::power::PowerProfiles>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +25,7 @@ impl BatterySnapshot {
 /// The battery as UPower reports it (with time left), or from sysfs when
 /// UPower is not running (Q7.2).
 pub fn battery_snapshot() -> BatterySnapshot {
+    let profiles = crate::services::power::power_profiles().ok();
     if let Some(battery) = crate::services::power::upower_battery() {
         return BatterySnapshot {
             batteries: vec![BatteryDeviceSnapshot {
@@ -30,10 +33,12 @@ pub fn battery_snapshot() -> BatterySnapshot {
                 capacity_percent: Some(battery.percent),
                 status: Some(battery.status),
             }],
+            profiles,
         };
     }
     BatterySnapshot {
         batteries: read_batteries().unwrap_or_default(),
+        profiles,
     }
 }
 
@@ -96,6 +101,7 @@ mod tests {
                 capacity_percent: Some(80),
                 status: Some("Discharging".to_string()),
             }],
+            profiles: None,
         };
 
         assert_eq!(snapshot.primary().unwrap().name, "BAT0");

@@ -158,6 +158,21 @@ pub fn subscribe_dbus_changes() {
             DBusSignalFlags::NONE,
             |_| mark_dirty(Dirty::Battery),
         ));
+        // The power profile rides with the battery (both the dashboard's).
+        for name in [
+            "org.freedesktop.UPower.PowerProfiles",
+            "net.hadess.PowerProfiles",
+        ] {
+            subscriptions.push(system.subscribe_to_signal(
+                Some(name),
+                None,
+                None,
+                None,
+                None,
+                DBusSignalFlags::NONE,
+                |_| mark_dirty(Dirty::Battery),
+            ));
+        }
     }
     if let Ok(session) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) {
         // Media is read every tick; a player's change only needs the tick now.

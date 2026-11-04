@@ -25,6 +25,22 @@ pub(crate) fn profile_label(name: &str) -> String {
     }
 }
 
+/// The profile after the active one, in the daemon's order and wrapping
+/// around: what one click on the dashboard switches to.
+pub(crate) fn next_profile(profiles: &PowerProfiles) -> Option<&str> {
+    let valid: Vec<&str> = profiles
+        .available
+        .iter()
+        .map(String::as_str)
+        .filter(|name| is_valid_profile(name))
+        .collect();
+    let next = match valid.iter().position(|name| *name == profiles.active) {
+        Some(index) => valid[(index + 1) % valid.len()],
+        None => *valid.first()?,
+    };
+    (next != profiles.active).then_some(next)
+}
+
 /// UPower's `DisplayDevice`: the combined battery.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UpowerBattery {
@@ -229,6 +245,34 @@ pub(crate) fn upower_battery() -> Option<UpowerBattery> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_click_steps_to_the_next_profile_and_wraps() {
+        let profiles = |active: &str, available: &[&str]| PowerProfiles {
+            active: active.to_string(),
+            available: available.iter().map(|name| name.to_string()).collect(),
+        };
+        let all = ["power-saver", "balanced", "performance"];
+        assert_eq!(
+            next_profile(&profiles("balanced", &all)),
+            Some("performance")
+        );
+        assert_eq!(
+            next_profile(&profiles("performance", &all)),
+            Some("power-saver")
+        );
+        assert_eq!(
+            next_profile(&profiles("custom", &all)),
+            Some("power-saver"),
+            "an unknown active profile starts the cycle"
+        );
+        assert_eq!(next_profile(&profiles("balanced", &["balanced"])), None);
+        assert_eq!(
+            next_profile(&profiles("balanced", &["balanced", "--rm"])),
+            None,
+            "never an option-like name"
+        );
+    }
 
     #[test]
     fn upower_battery_reads_level_state_and_time() {
