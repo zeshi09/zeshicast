@@ -11,6 +11,16 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ### Changed
 
+- Result rows show real icons, as the design system specifies: an app's own
+  icon from its `.desktop` file (the colour in a list is now the app's),
+  a command's symbolic icon as a glyph on the neutral tile, and the letter
+  tile only when the theme has no icon. Icons are loaded once per name and
+  size: loading them per row grew the daemon by megabytes per query. With
+  icons, idle RSS is ~20 MiB higher (136–144 vs 110–127 MiB in the nested
+  benchmark) and keystroke p95 ~3 ms.
+- The focused dashboard card's bar takes the accent, like the selected row;
+  the others stay neutral unless they warn.
+
 - Unslop pass (heydamir/unslop): violet is gone. Letter tiles are neutral
   instead of a hue per name, and bars are neutral, turning amber above 65 %
   and red above 85 % (dashboard, monitor, cores, RAM). The monitor's history

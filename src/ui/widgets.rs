@@ -113,6 +113,100 @@ fn scroll_row_into_view(list: &ListBox, row: &ListBoxRow) {
     }
 }
 
+/// How a result row shows its icon (the design system's `[icon]`, 28 px).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowIconKind {
+    /// The neutral letter tile: no icon, the generic default, or one the
+    /// theme lacks.
+    Letter,
+    /// A symbolic icon (commands): a glyph in secondary text on the tile.
+    Glyph,
+    /// An app's own icon at full size: the only colour in the list, and it
+    /// is the app's.
+    Picture,
+}
+
+pub(crate) fn row_icon_kind(icon_name: &str, theme_has: impl FnOnce(&str) -> bool) -> RowIconKind {
+    // Every action starts with this one; it says nothing about the row.
+    const GENERIC: &str = "system-run-symbolic";
+    if icon_name.is_empty() || icon_name == GENERIC || !theme_has(icon_name) {
+        RowIconKind::Letter
+    } else if icon_name.ends_with("-symbolic") {
+        RowIconKind::Glyph
+    } else {
+        RowIconKind::Picture
+    }
+}
+
+/// An image of `icon_name` at `size` sharing one loaded icon per name and
+/// size. `Image::from_icon_name` loaded the icon again for every row on
+/// every keystroke, and the daemon grew by megabytes per query.
+fn cached_icon_image(icon_name: &str, size: i32) -> gtk::Image {
+    thread_local! {
+        static ICONS: std::cell::RefCell<std::collections::HashMap<(String, i32), gtk::IconPaintable>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    let Some(display) = gtk::gdk::Display::default() else {
+        return gtk::Image::from_icon_name(icon_name);
+    };
+    // Crisp on the sharpest monitor; GTK scales it down elsewhere.
+    let scale = display
+        .monitors()
+        .iter::<gtk::gdk::Monitor>()
+        .flatten()
+        .map(|monitor| monitor.scale_factor())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let paintable = ICONS.with(|icons| {
+        icons
+            .borrow_mut()
+            .entry((icon_name.to_string(), size))
+            .or_insert_with(|| {
+                gtk::IconTheme::for_display(&display).lookup_icon(
+                    icon_name,
+                    &[],
+                    size,
+                    scale,
+                    gtk::TextDirection::None,
+                    gtk::IconLookupFlags::empty(),
+                )
+            })
+            .clone()
+    });
+    gtk::Image::from_paintable(Some(&paintable))
+}
+
+pub fn row_icon(icon_name: &str, title: &str, size: i32) -> gtk::Widget {
+    let kind = row_icon_kind(icon_name, |name| {
+        gtk::gdk::Display::default()
+            .is_some_and(|display| gtk::IconTheme::for_display(&display).has_icon(name))
+    });
+    match kind {
+        RowIconKind::Letter => letter_icon(title, size).upcast(),
+        RowIconKind::Glyph => {
+            let image = cached_icon_image(icon_name, 16);
+            image.set_pixel_size(16);
+            image.set_size_request(size, size);
+            image.set_halign(gtk::Align::Center);
+            image.set_valign(gtk::Align::Center);
+            let tile = GtkBox::new(Orientation::Horizontal, 0);
+            tile.add_css_class("row-icon-tile");
+            tile.set_size_request(size, size);
+            tile.set_hexpand(false);
+            tile.set_valign(gtk::Align::Center);
+            tile.append(&image);
+            tile.upcast()
+        }
+        RowIconKind::Picture => {
+            let image = cached_icon_image(icon_name, size);
+            image.set_pixel_size(size);
+            image.set_valign(gtk::Align::Center);
+            image.upcast()
+        }
+    }
+}
+
 pub fn letter_icon(title: &str, size: i32) -> DrawingArea {
     use gtk::prelude::*;
     let first = title.chars().next().unwrap_or('?').to_ascii_uppercase();
@@ -189,7 +283,7 @@ pub fn result_row(action: &Action) -> ListBoxRow {
     layout.set_margin_start(14);
     layout.set_margin_end(14);
 
-    let icon = letter_icon(&action.title, 28);
+    let icon = row_icon(&action.icon_name, &action.title, 28);
 
     // Title above subtitle (stacked), matching the mockup.
     let text = GtkBox::new(Orientation::Vertical, 1);
@@ -365,4 +459,34 @@ pub fn secondary_action_row(icon_name: &str, title: &str) -> ListBoxRow {
     layout.append(&label);
     row.set_child(Some(&layout));
     row
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rows_show_the_theme_icon_and_fall_back_to_the_letter() {
+        let has = |_: &str| true;
+        let lacks = |_: &str| false;
+        assert_eq!(
+            row_icon_kind("org.telegram.desktop", has),
+            RowIconKind::Picture
+        );
+        assert_eq!(
+            row_icon_kind("audio-volume-muted-symbolic", has),
+            RowIconKind::Glyph
+        );
+        assert_eq!(
+            row_icon_kind("vlc", lacks),
+            RowIconKind::Letter,
+            "not in the theme"
+        );
+        assert_eq!(row_icon_kind("", has), RowIconKind::Letter);
+        assert_eq!(
+            row_icon_kind("system-run-symbolic", has),
+            RowIconKind::Letter,
+            "the generic default says nothing"
+        );
+    }
 }
