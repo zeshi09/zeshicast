@@ -23,7 +23,8 @@ pub fn action_panel_view() -> ActionPanelView {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
 
-    // Header: "ACTIONS" label + filter input
+    // Header: the selected row's name + filter input ("Actions" is on the
+    // back button above, like every other view's name)
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("action-panel-header");
     header.set_valign(gtk::Align::Center);
@@ -31,6 +32,7 @@ pub fn action_panel_view() -> ActionPanelView {
     let actions_label = Label::new(Some("Actions"));
     actions_label.add_css_class("action-panel-label");
     actions_label.set_valign(gtk::Align::Center);
+    actions_label.set_visible(false);
 
     // Item title (selected action name)
     let title = Label::new(None);
@@ -44,7 +46,7 @@ pub fn action_panel_view() -> ActionPanelView {
     subtitle.set_visible(false);
 
     let search = Entry::builder()
-        .placeholder_text("Filter…")
+        .placeholder_text("Filter actions")
         .hexpand(false)
         .build();
     search.add_css_class("action-panel-filter");

@@ -92,27 +92,24 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
     clock_block.append(&date);
     root.append(&clock_block);
 
-    // Per-second clock update with blinking colon
+    // The clock; the colon stays put (a blinking one was decoration).
     {
         let clock_c = clock.clone();
         let date_c = date.clone();
-        let show_colon = Rc::new(RefCell::new(true));
-        glib::timeout_add_seconds_local(1, move || {
-            if crate::ui::hidden() {
-                return glib::ControlFlow::Continue;
-            }
+        let tick = move || {
             let now = Local::now();
-            // Blink the colon via alpha only — the ':' glyph always stays so the
-            // digits never shift horizontally (constant width, matches mockup).
-            let colon_alpha = if *show_colon.borrow() { "65%" } else { "14%" };
             clock_c.set_markup(&format!(
-                "{}<span alpha='{}'>:</span>{}",
+                "{}<span alpha='65%'>:</span>{}",
                 now.format("%H"),
-                colon_alpha,
                 now.format("%M")
             ));
             date_c.set_text(&now.format("%A, %B %-d").to_string());
-            *show_colon.borrow_mut() ^= true;
+        };
+        tick();
+        glib::timeout_add_seconds_local(1, move || {
+            if !crate::ui::hidden() {
+                tick();
+            }
             glib::ControlFlow::Continue
         });
     }
@@ -154,10 +151,6 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
         super::metric_card("Memory", "media-flash-symbolic");
     let (disk_card, disk, disk_sub, disk_bar) =
         super::metric_card("Disk", "drive-harddisk-symbolic");
-    // Fixed per-metric bar colors (match dashboard mockup)
-    load_bar.add_css_class("metric-bar-cpu");
-    memory_bar.add_css_class("metric-bar-mem");
-    disk_bar.add_css_class("metric-bar-disk");
 
     let thermal_card = GtkBox::new(Orientation::Vertical, 6);
     thermal_card.add_css_class("metric-card");
@@ -184,7 +177,6 @@ pub fn dashboard_view(snapshot: &SystemSnapshot) -> DashboardView {
 
     let thermal_bar = ProgressBar::new();
     thermal_bar.add_css_class("dashboard-metric-bar");
-    thermal_bar.add_css_class("metric-bar-temp");
     thermal_card.append(&thermal_bar);
 
     // Sparklines are kept for data continuity but not shown on dashboard cards
@@ -421,10 +413,10 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
         .unwrap_or_else(|| "—".to_string());
     view.load.set_text(&load_val);
     view.load_sub.set_text("%");
-    view.load_bar.set_fraction(load_fraction);
+    set_bar_level(&view.load_bar, load_fraction);
     push_metric_graph(&view.load_graph, load_fraction);
 
-    // Memory: show GB value + "GB" unit
+    // Memory in GiB, like the monitor
     let memory_fraction = snapshot
         .memory_used_percent()
         .map(|p| (p / 100.0).clamp(0.0, 1.0) as f64)
@@ -438,10 +430,10 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     view.memory_sub.set_text(
         &snapshot
             .memory_total_kib
-            .map(|total| format!("GB of {:.1}", total as f64 / 1024.0 / 1024.0))
-            .unwrap_or_else(|| "GB".to_string()),
+            .map(|total| format!("GiB of {:.1}", total as f64 / 1024.0 / 1024.0))
+            .unwrap_or_else(|| "GiB".to_string()),
     );
-    view.memory_bar.set_fraction(memory_fraction);
+    set_bar_level(&view.memory_bar, memory_fraction);
     push_metric_graph(&view.memory_graph, memory_fraction);
 
     // Disk: show percentage + "%" unit
@@ -455,7 +447,7 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
         .unwrap_or_else(|| "—".to_string());
     view.disk.set_text(&disk_pct);
     view.disk_sub.set_text("%");
-    view.disk_bar.set_fraction(disk_fraction);
+    set_bar_level(&view.disk_bar, disk_fraction);
     push_metric_graph(&view.disk_graph, disk_fraction);
 
     let proc_val = snapshot
@@ -468,15 +460,26 @@ pub fn set_dashboard_snapshot(view: &DashboardView, snapshot: &SystemSnapshot) {
     ));
 }
 
+/// A bar's fill and colour: neutral, amber above 65 %, red above 85 %.
+fn set_bar_level(bar: &ProgressBar, fraction: f64) {
+    bar.set_fraction(fraction);
+    bar.remove_css_class("warning");
+    bar.remove_css_class("danger");
+    if fraction > 0.85 {
+        bar.add_css_class("danger");
+    } else if fraction > 0.65 {
+        bar.add_css_class("warning");
+    }
+}
+
 pub fn set_dashboard_thermal(view: &DashboardView, celsius: Option<f32>) {
     if let Some(t) = celsius {
         view.thermal.set_text(&format!("{t:.0}"));
         // Map 0–100 °C onto the bar; most CPUs idle 30–60, throttle ~90.
-        view.thermal_bar
-            .set_fraction((t as f64 / 100.0).clamp(0.0, 1.0));
+        set_bar_level(&view.thermal_bar, (t as f64 / 100.0).clamp(0.0, 1.0));
     } else {
         view.thermal.set_text("—");
-        view.thermal_bar.set_fraction(0.0);
+        set_bar_level(&view.thermal_bar, 0.0);
     }
 }
 

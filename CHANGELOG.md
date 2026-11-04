@@ -9,6 +9,21 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+### Changed
+
+- Unslop pass (heydamir/unslop): violet is gone. Letter tiles are neutral
+  instead of a hue per name, and bars are neutral, turning amber above 65 %
+  and red above 85 % (dashboard, monitor, cores, RAM). The monitor's history
+  lines use the theme accent, without the glow. Connect buttons and the
+  connection chip no longer use the accent, and an empty clipboard's copy
+  button is quiet. Labels are sentence case (no uppercase tracking),
+  figures use weight 500, small text has no negative tracking, and memory
+  is in GiB/MiB everywhere. Placeholders lost their "…" ("Search apps and
+  commands"), the AI chat starts with "Answers from the selected Ollama
+  model appear here" instead of a greeting, and emoji categories are plain
+  words. The action panel's back button says "Actions", and the dashboard
+  clock's colon no longer blinks.
+
 ## [0.4.0] — 2026-11-04
 
 ### Upgrading

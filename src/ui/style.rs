@@ -44,14 +44,13 @@ pub fn install_css() {
     };
 
     // Dark-mode vibrant tokens vs light-mode deep tokens (WCAG AA >= 4.5:1)
-    let (ac_purple, ac_amber, ac_green, ac_red) = if is_dark {
-        ("#8B7CF8", "#F5A623", "#4BD98A", "#FF6B5F")
+    let (ac_amber, ac_green, ac_red) = if is_dark {
+        ("#F5A623", "#4BD98A", "#FF6B5F")
     } else {
-        ("#6352E8", "#B45309", "#15803D", "#DC2626")
+        ("#B45309", "#15803D", "#DC2626")
     };
 
     let css = include_str!("../../resources/style.css")
-        .replace("__COLOR_PURPLE__", ac_purple)
         .replace("__COLOR_AMBER__", ac_amber)
         .replace("__COLOR_GREEN__", ac_green)
         .replace("__COLOR_RED__", ac_red)

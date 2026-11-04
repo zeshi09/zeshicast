@@ -50,7 +50,8 @@ impl LauncherView {
 
     pub fn back_label(self) -> &'static str {
         match self {
-            Self::Root | Self::Actions => "",
+            Self::Root => "",
+            Self::Actions => "Actions",
             Self::AiChat => "AI Chat",
             Self::Audio => "Audio",
             Self::Clipboard => "Clipboard",

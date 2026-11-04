@@ -12,11 +12,9 @@ pub struct MetricGraph {
     pub values: Rc<RefCell<Vec<f64>>>,
 }
 
+/// A history line in the theme's accent: the one coloured thing in the
+/// monitor, so it reads as the moment and nothing around it competes.
 pub fn metric_graph() -> MetricGraph {
-    metric_graph_with_color(0.545, 0.486, 0.973)
-}
-
-pub fn metric_graph_with_color(r: f64, g: f64, b: f64) -> MetricGraph {
     let area = DrawingArea::new();
     area.add_css_class("metric-graph");
     area.set_content_height(52);
@@ -24,8 +22,19 @@ pub fn metric_graph_with_color(r: f64, g: f64, b: f64) -> MetricGraph {
     area.set_hexpand(true);
     let values = Rc::new(RefCell::new(Vec::<f64>::new()));
     let draw_values = Rc::clone(&values);
-    area.set_draw_func(move |_, cr, width, height| {
+    area.set_draw_func(move |area, cr, width, height| {
         let values = draw_values.borrow();
+        #[allow(deprecated)] // `WidgetExt::color` needs GTK 4.10
+        let context = area.style_context();
+        #[allow(deprecated)]
+        let accent = context
+            .lookup_color("accent_color")
+            .unwrap_or_else(|| context.color());
+        let (r, g, b) = (
+            accent.red() as f64,
+            accent.green() as f64,
+            accent.blue() as f64,
+        );
         let w = width as f64;
         let h = height as f64;
         let pad_x = 5.0;
@@ -96,16 +105,10 @@ pub fn metric_graph_with_color(r: f64, g: f64, b: f64) -> MetricGraph {
         cr.set_line_join(cairo::LineJoin::Round);
         let _ = cr.stroke();
 
-        // ── 3. End-point accent dot on current live value ─────────────────────
+        // ── 3. A dot on the current value ────────────────────────────────────
         let last = pts[pts.len() - 1];
-        // Outer glowing halo
-        cr.arc(last.0, last.1, 3.5, 0.0, 2.0 * std::f64::consts::PI);
-        cr.set_source_rgba(r, g, b, 0.35);
-        let _ = cr.fill();
-
-        // Inner bright focal dot
-        cr.arc(last.0, last.1, 1.8, 0.0, 2.0 * std::f64::consts::PI);
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.95);
+        cr.arc(last.0, last.1, 2.0, 0.0, 2.0 * std::f64::consts::PI);
+        cr.set_source_rgba(r, g, b, 1.0);
         let _ = cr.fill();
     });
 

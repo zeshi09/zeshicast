@@ -84,7 +84,7 @@ pub fn font_browser_view() -> FontBrowserView {
     top_bar.add_css_class("search-bar");
 
     let search = Entry::builder()
-        .placeholder_text("Search fonts…")
+        .placeholder_text("Search fonts")
         .hexpand(true)
         .build();
     search.add_css_class("search-entry");

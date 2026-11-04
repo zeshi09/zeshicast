@@ -2,7 +2,6 @@
    dark surface; anything dimmer was unreadable (impeccable craft floor). */
 @define-color fg_secondary alpha(@window_fg_color, 0.62);
 @define-color fg_tertiary alpha(@window_fg_color, 0.50);
-@define-color ac_purple __COLOR_PURPLE__;
 @define-color ac_amber  __COLOR_AMBER__;
 @define-color ac_green  __COLOR_GREEN__;
 @define-color ac_red    __COLOR_RED__;
@@ -166,8 +165,8 @@ entry, entry:focus, entry:focus-visible {
   padding: 2px 8px 2px 7px;
   color: @accent_color;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 /* Ctrl+K hint badge */
@@ -204,9 +203,8 @@ entry, entry:focus, entry:focus-visible {
 .section-header {
   padding: 10px 14px 3px;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.075em;
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: @fg_tertiary;
 }
 
@@ -270,7 +268,7 @@ entry, entry:focus, entry:focus-visible {
 .result-title {
   font-size: __FONT_SIZE__px;
   font-weight: 500;
-  letter-spacing: -0.012em;
+  letter-spacing: 0;
   color: alpha(@window_fg_color, 0.930);
   min-height: 22px;
 }
@@ -356,9 +354,8 @@ entry, entry:focus, entry:focus-visible {
 /* ── Font Browser ── */
 .font-name-label {
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: @fg_tertiary;
 }
 
@@ -371,7 +368,7 @@ entry, entry:focus, entry:focus-visible {
   border: 1px solid alpha(@accent_color, 0.30);
   border-radius: 12px;
   font-family: __FONT_FAMILY__;
-  animation: panel-slide-in 120ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  animation: panel-slide-in 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .action-panel-header {
@@ -382,18 +379,17 @@ entry, entry:focus, entry:focus-visible {
 
 .action-panel-label {
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.060em;
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: @fg_tertiary;
   min-height: 24px;
 }
 
 .action-panel-title {
   font-size: __PANEL_TITLE_SIZE__px;
-  font-weight: 600;
+  font-weight: 500;
   color: alpha(@window_fg_color, 0.850);
-  letter-spacing: -0.010em;
+  letter-spacing: 0;
 }
 
 .action-panel-filter {
@@ -402,7 +398,7 @@ entry, entry:focus, entry:focus-visible {
   background: transparent;
   border: none;
   box-shadow: none;
-  letter-spacing: -0.010em;
+  letter-spacing: 0;
 }
 
 .action-section-row {
@@ -412,7 +408,7 @@ entry, entry:focus, entry:focus-visible {
 .action-section-label {
   color: alpha(@window_fg_color, 0.50);
   font-size: __SUBTITLE_SIZE__px;
-  font-weight: 600;
+  font-weight: 500;
   min-height: 14px;
   padding-top: 6px;
   padding-bottom: 2px;
@@ -439,7 +435,7 @@ entry, entry:focus, entry:focus-visible {
 .action-row-label {
   font-size: __PANEL_TITLE_SIZE__px;
   font-weight: 500;
-  letter-spacing: -0.010em;
+  letter-spacing: 0;
   color: alpha(@window_fg_color, 0.850);
 }
 
@@ -564,7 +560,7 @@ entry.search-entry:focus-visible {
   font-size: 11px;
   font-weight: 500;
   color: @fg_tertiary;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -578,9 +574,9 @@ entry.search-entry:focus-visible {
 
 .status-time {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: @fg_secondary;
-  letter-spacing: -0.010em;
+  letter-spacing: 0;
 }
 
 .status-date {
@@ -604,10 +600,12 @@ entry.search-entry:focus-visible {
   background-color: alpha(@window_fg_color, 0.12);
 }
 
+/* Connected: a step brighter than idle, not the accent (it shows on every
+   screen; the accent stays for the selection). */
 .status-chip.active {
-  background-color: alpha(@accent_color, 0.15);
-  border-color: alpha(@accent_color, 0.30);
-  color: @accent_color;
+  background-color: alpha(@window_fg_color, 0.08);
+  border-color: alpha(@window_fg_color, 0.14);
+  color: alpha(@window_fg_color, 0.80);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -621,7 +619,7 @@ entry.search-entry:focus-visible {
 
 .dashboard-clock {
   font-size: __DASHBOARD_CLOCK_SIZE__px;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.04em;
   color: alpha(@window_fg_color, 0.950);
 }
@@ -711,23 +709,22 @@ entry.search-entry:focus-visible {
 
 .metric-card .metric-value {
   font-size: 52px;
-  font-weight: 700;
-  letter-spacing: -0.03em;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .metric-label {
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.065em;
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: @fg_tertiary;
   margin-bottom: 6px;
 }
 
 .metric-value {
   font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.025em;
+  font-weight: 500;
+  letter-spacing: 0;
   color: alpha(@window_fg_color, 0.930);
 }
 
@@ -747,7 +744,7 @@ entry.search-entry:focus-visible {
 .dashboard-metric-bar progress {
   min-height: 3px;
   border-radius: 2px;
-  background: @accent_color;
+  background: alpha(@window_fg_color, 0.55);
   transition: background 300ms ease;
 }
 
@@ -759,11 +756,6 @@ entry.search-entry:focus-visible {
   background: @ac_red;
 }
 
-/* Fixed per-metric bar colors (match dashboard mockup) */
-.metric-bar-cpu progress  { background: @ac_purple; }
-.metric-bar-mem progress  { background: @ac_amber; }
-.metric-bar-disk progress { background: @ac_amber; }
-.metric-bar-temp progress { background: @ac_purple; }
 
 /* ── Media player buttons ── */
 /* Circular icon buttons. The element+class selector and zeroed min/padding
@@ -884,15 +876,15 @@ button.media-btn-seek:hover {
 
 .control-card-heading {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: alpha(@window_fg_color, 0.550);
   letter-spacing: 0.010em;
 }
 
 .control-card-value {
   font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.010em;
+  font-weight: 500;
+  letter-spacing: 0;
   color: alpha(@window_fg_color, 0.880);
 }
 
@@ -937,13 +929,13 @@ button.media-btn-seek:hover {
 
 .dashboard-card-title {
   font-size: __SUBTITLE_SIZE__px;
-  font-weight: 600;
+  font-weight: 500;
   color: alpha(@window_fg_color, 0.550);
 }
 
 .dashboard-card-value {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   color: alpha(@window_fg_color, 0.880);
   min-height: 16px;
 }
@@ -1015,9 +1007,9 @@ button.media-btn-seek:hover {
 
 .emoji-confirm {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: @ac_green;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .ai-message-user {
@@ -1063,6 +1055,12 @@ button.media-btn-seek:hover {
   color: white;
 }
 
+/* Nothing to send or copy: a quiet surface, not a block of accent. */
+.ai-send-btn.ready:disabled {
+  background: alpha(@window_fg_color, 0.06);
+  color: alpha(@window_fg_color, 0.35);
+}
+
 /* ════════════════════════════════════════════════════════════
    CLIPBOARD VIEW
    ════════════════════════════════════════════════════════════ */
@@ -1092,7 +1090,7 @@ button.media-btn-seek:hover {
 .clipboard-text.code {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 12px;
-  letter-spacing: -0.010em;
+  letter-spacing: 0;
 }
 
 .clipboard-time {
@@ -1123,7 +1121,7 @@ button.media-btn-seek:hover {
 }
 
 .audio-volume-value {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
   min-width: 42px;
 }
@@ -1154,9 +1152,7 @@ button.media-btn-seek:hover {
   min-height: 3px;
 }
 
-.process-memory-bar.usage-low progress  { background: alpha(@window_fg_color, 0.15); }
-.process-memory-bar.usage-mid progress  { background: @ac_purple; }
-.process-memory-bar.usage-high progress { background: @ac_amber; }
+.process-memory-bar progress { background: alpha(@window_fg_color, 0.40); }
 
 /* ════════════════════════════════════════════════════════════
    MEDIA VIEW
@@ -1164,8 +1160,8 @@ button.media-btn-seek:hover {
 
 .media-title {
   font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-weight: 500;
+  letter-spacing: 0;
   color: alpha(@window_fg_color, 0.940);
 }
 
@@ -1309,7 +1305,7 @@ scrollbar slider:hover {
 
 /* ── Network connected row ── */
 .result-row.selected .result-title {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* ── Stat chip in NET row ── */
@@ -1340,21 +1336,22 @@ scrollbar slider:hover {
   color: @accent_color;
 }
 
-/* Connect: purple outline pill. Disconnect: subtle grey filled pill. */
+/* Connect: a hairline secondary button (one per row, so never the accent).
+   Disconnect: subtle grey filled pill. */
 .network-connect-btn {
   padding: 4px 12px;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
-  border: 1px solid alpha(@accent_color, 0.400);
-  color: @accent_color;
+  border: 1px solid alpha(@window_fg_color, 0.14);
+  color: alpha(@window_fg_color, 0.80);
   font-size: 11px;
   font-weight: 500;
   transition: background 120ms ease, border-color 120ms ease;
 }
 
 .network-connect-btn:hover {
-  background: alpha(@accent_color, 0.120);
-  border-color: alpha(@accent_color, 0.600);
+  background: alpha(@window_fg_color, 0.08);
+  border-color: alpha(@window_fg_color, 0.22);
 }
 
 .network-disconnect-btn {
@@ -1420,7 +1417,7 @@ window.osd-window,
 
 .osd-pill-label {
   font-size: 52px;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 2px;
   color: alpha(@window_fg_color, 0.95);
 }
@@ -1436,7 +1433,7 @@ window.osd-window,
 
 .osd-toast-label {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.01em;
   color: @ac_green;
 }
@@ -1462,7 +1459,7 @@ window.osd-window,
 .osd-level-icon { color: @window_fg_color; }
 .osd-level-value {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   font-feature-settings: "tnum";
   color: alpha(@window_fg_color, 0.90);
 }
@@ -1485,9 +1482,8 @@ window.osd-window,
 
 .osd-notification-app {
   font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   color: alpha(@window_fg_color, 0.50);
 }
 
@@ -1510,9 +1506,9 @@ window.osd-window,
 
 .osd-notification-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: alpha(@window_fg_color, 0.95);
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .osd-notification-body {
@@ -1534,7 +1530,7 @@ window.osd-window,
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
   color: alpha(@window_fg_color, 0.50);
   background: alpha(@window_fg_color, 0.05);
   border: 1px solid alpha(@window_fg_color, 0.08);
@@ -1544,7 +1540,7 @@ window.osd-window,
 
 .window-grid-status {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: @accent_color;
 }
 

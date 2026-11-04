@@ -19,7 +19,7 @@ pub fn emoji_picker_view() -> EmojiPickerView {
     let search_row = GtkBox::new(Orientation::Horizontal, 0);
     search_row.add_css_class("search-bar");
     let search = Entry::builder()
-        .placeholder_text("Search emoji…")
+        .placeholder_text("Search emoji")
         .hexpand(true)
         .build();
     search.add_css_class("search-entry");
@@ -71,22 +71,22 @@ pub fn emoji_picker_view() -> EmojiPickerView {
     // Build category buttons and initial grid
     const CATEGORIES: &[(&str, &str)] = &[
         ("all", "All"),
-        ("smileys", "😀 Smileys"),
-        ("gestures", "👍 Gestures"),
-        ("body", "👁 Body"),
-        ("symbols", "❤️ Symbols"),
-        ("celebration", "🎉 Celebration"),
-        ("travel", "✈️ Travel"),
-        ("food", "🍎 Food"),
-        ("animals", "🐾 Animals"),
-        ("nature", "🌿 Nature"),
-        ("music", "🎵 Music"),
-        ("sports", "⚽ Sports"),
-        ("technology", "💻 Technology"),
-        ("tools", "🔧 Tools"),
-        ("office", "📁 Office"),
-        ("communication", "💬 Communication"),
-        ("weather", "☀️ Weather"),
+        ("smileys", "Smileys"),
+        ("gestures", "Gestures"),
+        ("body", "Body"),
+        ("symbols", "Symbols"),
+        ("celebration", "Celebration"),
+        ("travel", "Travel"),
+        ("food", "Food"),
+        ("animals", "Animals"),
+        ("nature", "Nature"),
+        ("music", "Music"),
+        ("sports", "Sports"),
+        ("technology", "Technology"),
+        ("tools", "Tools"),
+        ("office", "Office"),
+        ("communication", "Communication"),
+        ("weather", "Weather"),
     ];
 
     let active_cat = Rc::new(RefCell::new("all".to_string()));

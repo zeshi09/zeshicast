@@ -31,6 +31,9 @@ pub struct AiChatView {
     pub cancel: Rc<RefCell<Option<Arc<AtomicBool>>>>,
 }
 
+/// What an empty chat says: where answers come from, no greeting.
+pub(crate) const EMPTY_CHAT: &str = "Answers from the selected Ollama model appear here";
+
 pub fn ai_chat_view() -> AiChatView {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_vexpand(true);
@@ -77,7 +80,7 @@ pub fn ai_chat_view() -> AiChatView {
     messages_box.set_margin_top(10);
     messages_box.set_margin_bottom(10);
 
-    let output = Label::new(Some("Hi! Running on Ollama. Ask me anything."));
+    let output = Label::new(Some(EMPTY_CHAT));
     output.add_css_class("ai-message-assistant");
     output.set_wrap(true);
     output.set_xalign(0.0);
@@ -100,7 +103,7 @@ pub fn ai_chat_view() -> AiChatView {
     input_row.set_valign(gtk::Align::Center);
 
     let input = Entry::builder()
-        .placeholder_text("Ask anything…")
+        .placeholder_text("Ask the selected model")
         .hexpand(true)
         .build();
     input.add_css_class("search-entry");

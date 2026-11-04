@@ -72,7 +72,7 @@ fn build_window(app: &Application, picker: &Rc<Picker>, exit: &Rc<Cell<i32>>) {
     root.add_css_class("launcher-frame");
 
     let entry = Entry::builder()
-        .placeholder_text(picker.options.prompt.as_deref().unwrap_or("Filter…"))
+        .placeholder_text(picker.options.prompt.as_deref().unwrap_or("Filter"))
         .hexpand(true)
         .build();
     entry.add_css_class("search-input");

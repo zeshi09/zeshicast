@@ -238,7 +238,7 @@ fn append_grouped_root_actions(
     let sections = [
         "Favourites",
         "Recent",
-        "Command Center",
+        "Command center",
         "Applications",
         "Library",
     ];
@@ -284,7 +284,7 @@ fn root_action_section(
 
     match action.category.as_str() {
         "Zeshicast" | "System" | "Audio" | "Network" | "Media" | "Notifications" => {
-            "Command Center"
+            "Command center"
         }
         "App" => "Applications",
         _ => "Library",

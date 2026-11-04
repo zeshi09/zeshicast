@@ -133,17 +133,11 @@ pub fn system_monitor_view(
                 let bar_h = (v * h as f64).max(2.0);
                 let y = h as f64 - bar_h;
                 // bg
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.10);
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.08);
                 cr.rectangle(x, 0.0, bar_w - 2.0, h as f64);
                 let _ = cr.fill();
-                // fill (accent color ≈ #8B7CF8)
-                let col = if v > 0.8 {
-                    (1.0, 0.42, 0.37, 1.0)
-                } else if v > 0.6 {
-                    (0.96, 0.65, 0.14, 1.0)
-                } else {
-                    (0.545, 0.486, 0.973, 1.0)
-                };
+                // Neutral; amber and red only when a core is busy.
+                let col = usage_rgba(v, 0.6, 0.8);
                 cr.set_source_rgba(col.0, col.1, col.2, col.3);
                 cr.rectangle(x, y, bar_w - 2.0, bar_h);
                 let _ = cr.fill();
@@ -167,7 +161,7 @@ pub fn system_monitor_view(
     cpu_row.append(&load_graph.area);
     overview.append(&cpu_row);
 
-    // RAM row — segmented bar (red=used, accent=cached)
+    // RAM row — segmented bar (used, then cached)
     let ram_row = GtkBox::new(Orientation::Horizontal, 10);
     let ram_label = Label::new(Some("RAM"));
     ram_label.add_css_class("metric-label");
@@ -194,22 +188,16 @@ pub fn system_monitor_view(
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.08);
             cr.rectangle(0.0, 0.0, wf, hf);
             let _ = cr.fill();
-            // Used segment (red >85%, orange >65%, accent otherwise)
-            let col = if used > 0.85 {
-                (1.0_f64, 0.42, 0.37, 1.0)
-            } else if used > 0.65 {
-                (0.96, 0.65, 0.14, 1.0)
-            } else {
-                (0.545, 0.486, 0.973, 1.0)
-            };
+            // Used: neutral, amber above 65 %, red above 85 %.
+            let col = usage_rgba(used, 0.65, 0.85);
             cr.set_source_rgba(col.0, col.1, col.2, col.3);
             let used_w = wf * used.clamp(0.0, 1.0);
             cr.rectangle(0.0, 0.0, used_w, hf);
             let _ = cr.fill();
-            // Cached segment (accent 50% alpha, after used)
+            // Cached: a fainter step of the same neutral, after used.
             let cached_end = wf * (used + cached).clamp(0.0, 1.0);
             if cached_end > used_w {
-                cr.set_source_rgba(0.545, 0.486, 0.973, 0.45);
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.22);
                 cr.rectangle(used_w, 0.0, cached_end - used_w, hf);
                 let _ = cr.fill();
             }
@@ -229,7 +217,7 @@ pub fn system_monitor_view(
 
     // Disk row
     let disk_row = GtkBox::new(Orientation::Horizontal, 10);
-    let disk_label = Label::new(Some("DISK"));
+    let disk_label = Label::new(Some("Disk"));
     disk_label.add_css_class("metric-label");
     disk_label.set_width_chars(4);
     disk_label.set_xalign(0.0);
@@ -256,7 +244,7 @@ pub fn system_monitor_view(
 
     // NET row
     let net_row = GtkBox::new(Orientation::Horizontal, 10);
-    let net_label = Label::new(Some("NET"));
+    let net_label = Label::new(Some("Net"));
     net_label.add_css_class("metric-label");
     net_label.set_width_chars(4);
     net_label.set_xalign(0.0);
@@ -535,6 +523,15 @@ fn metric_markup(figure: &str, detail: &str) -> String {
     )
 }
 
+/// A process's memory in the units the rest of the monitor uses.
+fn process_memory(kib: Option<u64>) -> String {
+    match kib {
+        Some(kib) if kib >= 1024 * 1024 => gib(kib),
+        Some(kib) => format!("{} MiB", kib / 1024),
+        None => "—".to_string(),
+    }
+}
+
 /// KiB as GiB with one decimal (or TiB past 1024 GiB).
 fn gib(kib: u64) -> String {
     let gib = kib as f64 / (1024.0 * 1024.0);
@@ -560,6 +557,18 @@ pub fn set_system_monitor_thermal_snapshot(view: &SystemMonitorView, snapshot: &
         "{:.1} C  {}{}",
         zone.temperature_c, zone.name, suffix
     ));
+}
+
+/// Bar colour for a usage fraction: neutral, amber from `warn`, red from
+/// `danger` (the palette's semantic tones, never decoration).
+fn usage_rgba(fraction: f64, warn: f64, danger: f64) -> (f64, f64, f64, f64) {
+    if fraction > danger {
+        (1.0, 0.42, 0.37, 1.0)
+    } else if fraction > warn {
+        (0.96, 0.65, 0.14, 1.0)
+    } else {
+        (1.0, 1.0, 1.0, 0.55)
+    }
 }
 
 pub(crate) fn load_fraction(load: f32) -> f64 {
@@ -717,28 +726,9 @@ fn update_process_row(
         .map(|v| v as f64 / max_memory_kib.max(1) as f64)
         .unwrap_or(0.0);
 
-    mem_bar.remove_css_class("usage-high");
-    mem_bar.remove_css_class("usage-mid");
-    mem_bar.remove_css_class("usage-low");
-    mem_bar.add_css_class(if mem_frac > 0.5 {
-        "usage-high"
-    } else if mem_frac > 0.15 {
-        "usage-mid"
-    } else {
-        "usage-low"
-    });
     mem_bar.set_fraction(mem_frac.clamp(0.0, 1.0));
 
-    let mem_text = process
-        .memory_kib
-        .map(|v| {
-            if v >= 1024 * 1024 {
-                format!("{:.1}G", v as f64 / 1024.0 / 1024.0)
-            } else {
-                format!("{}M", v / 1024)
-            }
-        })
-        .unwrap_or_else(|| "—".to_string());
+    let mem_text = process_memory(process.memory_kib);
     if mem_lbl.text().as_str() != mem_text {
         mem_lbl.set_text(&mem_text);
     }
@@ -780,20 +770,13 @@ fn process_row(
     layout.append(&title);
 
     // Mini memory usage bar (36×3px, width relative to max in process list).
-    // Colour follows usage: subtle → purple → amber.
+    // Neutral: the bar compares processes, it does not warn.
     let mem_frac = process
         .memory_kib
         .map(|v| v as f64 / max_memory_kib.max(1) as f64)
         .unwrap_or(0.0);
     let mem_bar = ProgressBar::new();
     mem_bar.add_css_class("process-memory-bar");
-    mem_bar.add_css_class(if mem_frac > 0.5 {
-        "usage-high"
-    } else if mem_frac > 0.15 {
-        "usage-mid"
-    } else {
-        "usage-low"
-    });
     mem_bar.set_fraction(mem_frac.clamp(0.0, 1.0));
     mem_bar.set_show_text(false);
     mem_bar.set_width_request(36);
@@ -802,16 +785,7 @@ fn process_row(
     layout.append(&mem_bar);
 
     // MEM
-    let mem_text = process
-        .memory_kib
-        .map(|v| {
-            if v >= 1024 * 1024 {
-                format!("{:.1}G", v as f64 / 1024.0 / 1024.0)
-            } else {
-                format!("{}M", v / 1024)
-            }
-        })
-        .unwrap_or_else(|| "—".to_string());
+    let mem_text = process_memory(process.memory_kib);
     let mem_lbl = Label::new(Some(&mem_text));
     mem_lbl.add_css_class("clipboard-time");
     mem_lbl.add_css_class("mono");
@@ -859,6 +833,8 @@ mod tests {
     fn metric_details_are_small_and_readable() {
         assert_eq!(gib(32_657 * 1024), "31.9 GiB");
         assert_eq!(gib(3 * 1024 * 1024 * 1024), "3.0 TiB");
+        assert_eq!(process_memory(Some(2_300_000)), "2.2 GiB");
+        assert_eq!(process_memory(Some(524_288)), "512 MiB");
         let markup = metric_markup("51%", "31.9 / 62.7 GiB");
         assert!(markup.starts_with("51%  <span font_family=\"Outfit\" size=\"12288\""));
         assert!(metric_markup("<b>", "&").contains("&lt;b&gt;"), "escaped");

@@ -102,7 +102,7 @@ pub(crate) fn build_ui(
     root.add_css_class("launcher-frame");
 
     let entry = Entry::builder()
-        .placeholder_text("Search for apps and commands…")
+        .placeholder_text("Search apps and commands")
         .hexpand(true)
         .build();
     entry.add_css_class("search-input");
@@ -611,7 +611,7 @@ pub(crate) fn build_ui(
             }
             ai_chat_view
                 .output
-                .set_text("Hi! Running on Ollama. Ask me anything.");
+                .set_text(crate::ui::views::ai_chat::EMPTY_CHAT);
             ai_chat_view.messages_box.append(&ai_chat_view.output);
             ai_chat_view.input.set_text("");
             ai_chat_view.status.set_visible(false);

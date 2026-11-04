@@ -61,7 +61,7 @@ pub fn clipboard_history_view(items: &[ClipboardSummary]) -> ClipboardHistoryVie
     let meta_bar = GtkBox::new(Orientation::Horizontal, 6);
     meta_bar.add_css_class("ai-model-bar");
 
-    let detail_kind = Label::new(Some("TEXT"));
+    let detail_kind = Label::new(Some("Text"));
     detail_kind.add_css_class("ai-model-btn");
     detail_kind.add_css_class("active");
     detail_kind.set_valign(gtk::Align::Center);

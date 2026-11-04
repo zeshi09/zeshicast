@@ -208,21 +208,21 @@ pub fn show_snippet_editor_panel<F>(
     root.append(&title_label);
 
     let title_entry = Entry::builder()
-        .placeholder_text("Snippet Name / Title")
+        .placeholder_text("Name")
         .text(initial_title)
         .hexpand(true)
         .build();
     title_entry.add_css_class("search-entry");
 
     let prefix_entry = Entry::builder()
-        .placeholder_text("Keyword / Prefix (e.g. :shrug:)")
+        .placeholder_text("Keyword, like :shrug:")
         .text(initial_prefix)
         .hexpand(true)
         .build();
     prefix_entry.add_css_class("search-entry");
 
     let content_entry = Entry::builder()
-        .placeholder_text("Snippet Content (supports {{clipboard}}, {{date}})")
+        .placeholder_text("Text; {{clipboard}} and {{date}} are filled in")
         .text(initial_content)
         .hexpand(true)
         .build();
