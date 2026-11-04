@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::action::{Action, ActionKind};
 use crate::search::MAX_RESULTS;
 use crate::search::fuzzy_score_lower;
+use crate::search::gitignore::GitIgnores;
 
 pub(crate) const MAX_FILE_DEPTH: usize = 5;
 pub(crate) const MAX_INDEXED_FILES: usize = 10_000;
@@ -156,6 +157,7 @@ pub(crate) fn load_file_index_excluding(
         return Vec::new();
     };
     let mut walk = IndexWalk {
+        gitignores: GitIgnores::new(catch_all),
         files: Vec::new(),
         seen: HashSet::new(),
         roots: roots.iter().cloned().collect(),
@@ -181,6 +183,7 @@ pub(crate) fn load_file_index_excluding(
 
 struct IndexWalk<'a> {
     excludes: &'a Excludes,
+    gitignores: GitIgnores,
     files: Vec<FileEntry>,
     /// Every path already considered, so a resumed walk and nested roots never
     /// index an entry twice.
@@ -232,6 +235,9 @@ impl IndexWalk<'_> {
                 }
 
                 let is_dir = file_type.is_dir();
+                if self.gitignores.ignores(&path, is_dir) {
+                    continue;
+                }
                 if is_dir && !self.roots.contains(&path) {
                     queue.push_back((path.clone(), depth + 1));
                 }

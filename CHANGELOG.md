@@ -21,6 +21,10 @@ the section under a version heading and tags it `vX.Y.Z`.
 - Empty states: the clipboard explains that nothing was copied yet and
   disables "Copy", notifications centre "No notifications" and disable
   "Clear All", audio greys out sliders without a device.
+- The file index leaves out what git ignores inside a repository below
+  `$HOME` (`dist/`, `*.log`, generated code), like `fd`: the repository's
+  `.gitignore` files only, no global excludes, and a dotfiles repository at
+  `$HOME` itself does not count.
 - Rows of chips that scroll sideways (emoji categories, AI models) fade at
   the edge with more behind it instead of cutting a chip in half; the
   dashboard shows its clock once, not again in the strip; the memory card
@@ -35,6 +39,9 @@ the section under a version heading and tags it `vX.Y.Z`.
   compositors (niri), so a command such as "GitHub: Refresh" seemed to do
   nothing. They now open on the overlay layer above it and take the
   keyboard; closing one gives the keyboard back to the palette.
+- Starting with a stored file index of 10 000 files took ~32 ms, more than
+  the full scan it replaces; each folder is now judged once instead of once
+  per file (~19 ms).
 - Four CSS properties GTK rejects (`overflow`, `max-width`, `cursor` ×2) are
   gone; the theme loads without parser warnings.
 - Wi-Fi rows no longer touch, process memory bars sit on their row's centre,

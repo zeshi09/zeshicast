@@ -24,6 +24,7 @@ use super::files::{
     Excludes, FileEntry, MAX_FILE_DEPTH, MAX_INDEXED_FILES, load_file_index_excluding,
     should_skip_file,
 };
+use super::gitignore::GitIgnores;
 use crate::services::storage::{self, FileRow};
 
 /// Live additions may grow the index this far past the first scan's budget,
@@ -74,8 +75,14 @@ pub(crate) struct FileIndex {
     /// [`super::files::default_roots`].
     roots: Vec<PathBuf>,
     excludes: Excludes,
+    gitignores: GitIgnores,
     limit: usize,
     entries: HashMap<PathBuf, Indexed>,
+}
+
+/// `.gitignore` rules for repositories below the catch-all root.
+fn gitignores_for(roots: &[PathBuf]) -> GitIgnores {
+    GitIgnores::new(roots.last().map(PathBuf::as_path).unwrap_or(Path::new("/")))
 }
 
 fn mtime_of(meta: &fs::Metadata) -> i64 {
@@ -112,6 +119,7 @@ impl FileIndex {
             })
             .collect();
         Self {
+            gitignores: gitignores_for(&roots),
             roots,
             excludes,
             limit: LIVE_LIMIT,
@@ -123,13 +131,16 @@ impl FileIndex {
     /// under a root or are excluded now.
     pub(crate) fn from_rows(roots: Vec<PathBuf>, excludes: Excludes, rows: Vec<FileRow>) -> Self {
         let mut index = Self {
+            gitignores: gitignores_for(&roots),
             roots,
             excludes,
             limit: LIVE_LIMIT,
             entries: HashMap::new(),
         };
+        // Files share folders: judge each folder once, not once per file.
+        let mut folders = HashMap::new();
         for row in rows {
-            if index.keeps(&row.path) {
+            if index.keeps_in(&row.path, row.is_dir, &mut folders) {
                 index.entries.insert(
                     row.path,
                     Indexed {
@@ -162,8 +173,9 @@ impl FileIndex {
             .min()
     }
 
-    /// Under a root, within the depth, and no component skipped or excluded.
-    fn keeps(&self, path: &Path) -> bool {
+    /// Under a root, within the depth, and no component skipped, excluded or
+    /// ignored by git.
+    fn keeps(&self, path: &Path, is_dir: bool) -> bool {
         let Some(depth) = self.depth_of(path) else {
             return false;
         };
@@ -171,20 +183,62 @@ impl FileIndex {
             return false;
         }
         let mut current = path;
+        let mut current_is_dir = is_dir;
         for _ in 0..depth {
             let name = current
                 .file_name()
                 .map(|name| name.to_string_lossy())
                 .unwrap_or_default();
-            if should_skip_file(&name) || self.excludes.matches(current, &name) {
+            if should_skip_file(&name)
+                || self.excludes.matches(current, &name)
+                || self.gitignores.ignores(current, current_is_dir)
+            {
                 return false;
             }
+            current_is_dir = true;
             match current.parent() {
                 Some(parent) => current = parent,
                 None => break,
             }
         }
         true
+    }
+
+    /// [`keeps`](Self::keeps), with the verdict on `path`'s folder taken from
+    /// (or recorded in) `folders`: its depth below the root when it is kept
+    /// or is a root, `None` when it is not.
+    fn keeps_in(
+        &self,
+        path: &Path,
+        is_dir: bool,
+        folders: &mut HashMap<PathBuf, Option<usize>>,
+    ) -> bool {
+        let Some(parent) = path.parent() else {
+            return false;
+        };
+        let parent_depth = match folders.get(parent) {
+            Some(depth) => *depth,
+            None => {
+                let depth = self
+                    .depth_of(parent)
+                    .filter(|depth| *depth == 0 || self.keeps(parent, true));
+                folders.insert(parent.to_path_buf(), depth);
+                depth
+            }
+        };
+        let Some(parent_depth) = parent_depth else {
+            return false;
+        };
+        if parent_depth + 1 > MAX_FILE_DEPTH + 1 || self.roots.iter().any(|root| root == path) {
+            return false;
+        }
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default();
+        !should_skip_file(&name)
+            && !self.excludes.matches(path, &name)
+            && !self.gitignores.ignores(path, is_dir)
     }
 
     /// Paths indexed in the search's shape.
@@ -359,7 +413,7 @@ impl FileIndex {
                     return None;
                 }
                 let file_type = entry.file_type().ok()?;
-                if file_type.is_symlink() {
+                if file_type.is_symlink() || self.gitignores.ignores(&path, file_type.is_dir()) {
                     return None;
                 }
                 Some((path, file_type.is_dir()))
@@ -412,6 +466,8 @@ impl FileIndex {
 
     /// Rescan each folder, parents before children.
     pub(crate) fn rescan_all(&mut self, dirs: impl IntoIterator<Item = PathBuf>) -> Changes {
+        // A `.gitignore` may be among the changes: read the rules afresh.
+        self.gitignores.forget();
         let mut dirs: Vec<_> = dirs
             .into_iter()
             .collect::<BTreeSet<_>>()
@@ -726,6 +782,75 @@ mod tests {
             vec![home.join("Downloads"), home.to_path_buf()],
             Excludes::default(),
         )
+    }
+
+    #[test]
+    fn stored_rows_are_judged_like_live_paths() {
+        let home = Path::new("/home/u");
+        let index = FileIndex {
+            gitignores: GitIgnores::new(home),
+            roots: vec![home.join("Downloads"), home.to_path_buf()],
+            excludes: Excludes::parse("~/Documents/secret, build", home),
+            limit: LIVE_LIMIT,
+            entries: HashMap::new(),
+        };
+        let paths = [
+            "/home/u",
+            "/home/u/Downloads",
+            "/home/u/Downloads/a.pdf",
+            "/home/u/a.txt",
+            "/home/u/.config/x",
+            "/home/u/Code/.git/HEAD",
+            "/home/u/Code/node_modules/x/y.js",
+            "/home/u/Documents/secret/k.txt",
+            "/home/u/Documents/secretary.txt",
+            "/home/u/Code/build/out.o",
+            "/home/u/1/2/3/4/5",
+            "/home/u/1/2/3/4/5/6",
+            "/home/u/1/2/3/4/5/6/7",
+            "/home/u/Downloads/1/2/3/4/5/6",
+            "/home/u/Downloads/1/2/3/4/5/6/7",
+            "/etc/passwd",
+            "/",
+        ];
+        let mut folders = HashMap::new();
+        for path in paths {
+            let path = Path::new(path);
+            assert_eq!(
+                index.keeps_in(path, false, &mut folders),
+                index.keeps(path, false),
+                "{}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn what_git_ignores_stays_out_of_the_index() {
+        let home = temp("gitignore");
+        let home = home.path();
+        let repo = home.join("Code/app");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::write(repo.join(".gitignore"), "dist/\n").unwrap();
+        touch(&repo.join("dist/bundle.js"));
+        touch(&repo.join("src/main.rs"));
+        let mut index = index_of(home);
+        let found = names(&index);
+        assert!(found.contains(&"main.rs".to_string()), "{found:?}");
+        assert!(!found.contains(&"dist".to_string()), "{found:?}");
+        assert!(!found.contains(&"bundle.js".to_string()), "{found:?}");
+
+        // Live: a new ignored file never comes in; a new rule applies.
+        fs::write(repo.join(".gitignore"), "dist/\n*.log\n").unwrap();
+        touch(&repo.join("src/debug.log"));
+        index.rescan_all([repo.join("src")]);
+        assert!(!names(&index).contains(&"debug.log".to_string()));
+
+        // Stored rows from before a rule are dropped on the next start.
+        let rows = index.all_rows();
+        fs::write(repo.join(".gitignore"), "dist/\n*.log\nsrc/\n").unwrap();
+        let reloaded = FileIndex::from_rows(index.roots.clone(), Excludes::default(), rows);
+        assert!(!names(&reloaded).contains(&"main.rs".to_string()));
     }
 
     #[test]

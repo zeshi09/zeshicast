@@ -8,6 +8,7 @@ pub(crate) mod emoji;
 pub(crate) mod extensions;
 pub(crate) mod file_index;
 pub(crate) mod files;
+pub(crate) mod gitignore;
 pub(crate) mod layout;
 pub(crate) mod media;
 pub(crate) mod mozlz4;
