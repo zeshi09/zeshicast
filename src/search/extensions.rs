@@ -13,6 +13,10 @@ const SEARCH_CACHE_TTL: Duration = Duration::from_secs(30);
 const SEARCH_CACHE_CAP: usize = 64;
 /// An extension gets this long to answer `search` before we give up on it.
 const SEARCH_TIMEOUT_MS: u64 = 400;
+/// The best rank an extension can claim for its own row: an exact match's.
+/// Above it sit exact matches of apps (600) and windows, so an extension
+/// cannot put itself first for every query.
+const MAX_EXTENSION_SCORE: i32 = 500;
 
 type SearchKey = (PathBuf, String);
 
@@ -115,7 +119,10 @@ pub fn search_extension(
             .icon
             .unwrap_or_else(|| "system-run-symbolic".to_string());
         let cmd_id = item.id;
-        let score = item.score.unwrap_or(80 - (i as i32 * 2));
+        let score = item
+            .score
+            .unwrap_or(80 - (i as i32 * 2))
+            .min(MAX_EXTENSION_SCORE);
 
         let intent = if let Some(url) = item.open_url {
             ActionIntent::OpenUrl(url)
@@ -204,6 +211,20 @@ mod tests {
             open_url: None,
             copy_text: None,
         }
+    }
+
+    #[test]
+    fn an_extension_cannot_outrank_exact_built_in_matches() {
+        let path = Path::new("/nonexistent/score-cap");
+        let mut greedy = item("a", "Always first");
+        greedy.score = Some(1_000_000);
+        let mut modest = item("b", "Modest");
+        modest.score = Some(120);
+        store_search(path, "x", &[greedy, modest], Instant::now());
+
+        let actions = search_extension(path, "greedy", "x", &[]);
+        let scores: Vec<i32> = actions.iter().map(|action| action.score).collect();
+        assert_eq!(scores, vec![MAX_EXTENSION_SCORE, 120]);
     }
 
     #[test]

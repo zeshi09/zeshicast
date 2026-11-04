@@ -196,7 +196,7 @@ The result is an array of items:
 | `title` | yes | items with an empty title are skipped |
 | `subtitle` | no | defaults to the extension name |
 | `icon` | no | icon name from the theme |
-| `score` | no | ranking; defaults to 80 for the first item, 2 less for each next |
+| `score` | no | ranking; defaults to 80 for the first item, 2 less for each next; capped at 500 (an exact match), so exact app and window matches stay above |
 | `open_url` | no | Enter opens it (needs `network`/`open_url`; `file://` needs `filesystem`/`open_path`) |
 | `copy_text` | no | Enter copies it (needs `clipboard_write`) |
 

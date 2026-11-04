@@ -25,6 +25,9 @@ the section under a version heading and tags it `vX.Y.Z`.
   `$HOME` (`dist/`, `*.log`, generated code), like `fd`: the repository's
   `.gitignore` files only, no global excludes, and a dotfiles repository at
   `$HOME` itself does not count.
+- An extension's search rows rank at most like an exact match (score 500):
+  exact app and window matches stay above them, so an extension cannot
+  claim the top row for every query.
 - Rows of chips that scroll sideways (emoji categories, AI models) fade at
   the edge with more behind it instead of cutting a chip in half; the
   dashboard shows its clock once, not again in the strip; the memory card
