@@ -96,6 +96,30 @@ harfbuzz in a flat profile); drawing every label once into an offscreen
 texture with the window's renderer did not move it, so that was not kept.
 `show: results` and `show: present` split the show mark further.
 
+**v0.4.0 against v0.2.0** (2026-11-04, same machine): both release builds
+in one nested headless sway (`WLR_RENDERER=pixman`, `GSK_RENDERER=cairo`)
+with a fresh temp `$HOME` holding 10 001 files, `measure.sh --gui`, 10
+rounds of 5 queries per run, 5 runs each; medians across the runs. A
+nested compositor adds its own latency, so compare the columns with each
+other, not with the niri numbers above.
+
+| metric | v0.2.0 | v0.4.0 |
+| --- | --- | --- |
+| keystroke → results, p50 | 22.0 ms | 20.6 ms |
+| keystroke → results, p95 | 33.5 ms | 32.1 ms |
+| show, median | 21.4 ms | 16.4 ms |
+| show, first after daemon start | 193–942 ms | 114–143 ms |
+| RSS while hidden | 114.7 MiB (112–119) | 129.8 MiB (116–133) |
+| file index at start (CLI) | 13 ms (full scan) | 19 ms (stored rows) |
+
+RSS rose 13 % (the plan allows 20 %): the PipeWire and backlight watcher
+threads, the D-Bus subscriptions and the stored file index; it is bimodal
+run to run (~116 or ~130 MiB), which looks like allocator arenas rather than
+data. Loading the stored index first took 32 ms, slower than the scan it
+replaced: every row re-checked each ancestor folder. Judging each folder
+once brought it to 19 ms; on this small fixture the scan is still a little
+faster, the stored index pays off where a scan runs into the file budget.
+
 ## Feature Flags
 
 - Default build: headless CLI, no GTK and no D-Bus services.

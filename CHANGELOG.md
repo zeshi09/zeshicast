@@ -9,6 +9,36 @@ the section under a version heading and tags it `vX.Y.Z`.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-04
+
+### Upgrading
+
+- No database migration: 0.3.0's schema 7 stays.
+- To get the volume and brightness OSD, bind the keys to
+  `zeshicast-gtk --volume …` / `--brightness …` (README, "Volume and
+  brightness keys with an on-screen level").
+- Extensions: a search row's `score` is capped at 500.
+
+### Added
+
+- The dashboard shows the power profile next to the battery when
+  power-profiles-daemon runs; a click switches to the next one
+  (`powerprofilesctl`, through the execution gateway), and a change made
+  elsewhere shows at once.
+- Volume OSD: `zeshicast-gtk --volume +5|-5|40|mute` and `--mic-mute`
+  change the level with `wpctl` and show it at the bottom of the screen with
+  a gliding bar; a burst of key presses updates one OSD. Bind the volume
+  keys to it (README, "Volume keys"). Shown under Do Not Disturb too.
+- Brightness OSD for laptops: `zeshicast-gtk --brightness +10|-10|60`
+  changes the backlight through logind (no root, never below 1 %) and shows
+  the level; changes from firmware keys or other tools show it too. External
+  monitors (DDC/CI) are not supported.
+- Volume changes made elsewhere (pavucontrol, a headset, a new default
+  device) reach the palette at once through PipeWire events
+  (`pw-dump --monitor`) instead of the one-second poll, and show the level
+  OSD while the palette is closed. The microphone shows only when its mute
+  flips, since calls move its volume on their own.
+
 ### Changed
 
 - Visual pass (kill-ai-slop, impeccable, ui-ux-pro-max): secondary text uses
@@ -49,29 +79,6 @@ the section under a version heading and tags it `vX.Y.Z`.
   gone; the theme loads without parser warnings.
 - Wi-Fi rows no longer touch, process memory bars sit on their row's centre,
   and the monitor's graphs grow from the right edge.
-
-### Added
-
-- The dashboard shows the power profile next to the battery when
-  power-profiles-daemon runs; a click switches to the next one
-  (`powerprofilesctl`, through the execution gateway), and a change made
-  elsewhere shows at once.
-- Volume OSD: `zeshicast-gtk --volume +5|-5|40|mute` and `--mic-mute`
-  change the level with `wpctl` and show it at the bottom of the screen with
-  a gliding bar; a burst of key presses updates one OSD. Bind the volume
-  keys to it (README, "Volume keys"). Shown under Do Not Disturb too.
-- Brightness OSD for laptops: `zeshicast-gtk --brightness +10|-10|60`
-  changes the backlight through logind (no root, never below 1 %) and shows
-  the level; changes from firmware keys or other tools show it too. External
-  monitors (DDC/CI) are not supported.
-- Volume changes made elsewhere (pavucontrol, a headset, a new default
-  device) reach the palette at once through PipeWire events
-  (`pw-dump --monitor`) instead of the one-second poll, and show the level
-  OSD while the palette is closed. The microphone shows only when its mute
-  flips, since calls move its volume on their own.
-
-### Fixed
-
 - The palette shows current data as soon as it opens: the clock redraws on
   show and ticks on the minute, the background poller wakes on show instead
   of finishing a one-second sleep, its first tick refreshes everything and
