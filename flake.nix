@@ -52,6 +52,7 @@
             pango
             cairo
             wayland
+            sqlite
           ];
           # Runtime tools the launcher shells out to. wl-clipboard (clipboard
           # copy / image paste-back) and wtype (Enter pastes a clipboard or
@@ -130,6 +131,7 @@
               cairo
               wayland
               wayland-protocols
+              sqlite
             ] ++ commonRuntimePackages pkgs;
           };
         });
